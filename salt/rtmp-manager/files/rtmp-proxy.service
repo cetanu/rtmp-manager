@@ -1,0 +1,18 @@
+[Unit]
+Description=RTMP stream multiplexer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/apps/rtmp-proxy/shared
+ExecStart=/opt/apps/rtmp-proxy/current/rtmp-proxy --config /opt/apps/rtmp-proxy/shared/config.toml
+Restart=always
+RestartSec=5s
+LimitNOFILE=65536
+Environment=RUST_LOG=rtmp_proxy=info,rtmp_rs=info
+EnvironmentFile=-/etc/rtmp-proxy.env
+
+[Install]
+WantedBy=multi-user.target

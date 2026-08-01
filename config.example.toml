@@ -1,0 +1,59 @@
+# RTMP Stream Multiplexer Configuration
+
+[server]
+listen = "0.0.0.0:1935"
+health_listen = "127.0.0.1:8080"
+api_listen = "0.0.0.0:3000"
+
+[web_auth]
+# Leave empty for local development without authentication. Production
+# deployments seed these values through the application Salt pillar.
+username = ""
+password = ""
+
+[chat]
+# Bearer token accepted by POST /api/chat/ingest.
+ingest_token = ""
+queue_capacity = 500
+
+# Twitch channel to read anonymously over IRC (with or without a leading #).
+twitch_channel = ""
+
+# Configure a YouTube API key and at most one selector.
+youtube_api_key = ""
+youtube_live_chat_id = ""
+youtube_video_id = ""
+youtube_channel_id = ""
+youtube_min_poll_interval_secs = 5
+youtube_adaptive_polling = true
+
+[notifications]
+# Optional Discord Webhook URL (posts a rich Embed with stream status)
+discord_webhook = "https://discord.com/api/webhooks/YOUR_DISCORD_WEBHOOK_URL"
+
+# Custom going live message
+live_message = "We are LIVE"
+
+# Optional custom generic HTTP POST webhook endpoint
+webhook_url = ""
+
+# Target Destinations
+# You can add as many target destinations as you need. Set enabled = false to temporarily disable a target.
+
+[[targets]]
+name = "YouTube Live"
+url = "rtmp://a.rtmp.youtube.com/live2"
+stream_key = "YOUR_YOUTUBE_STREAM_KEY"
+enabled = true
+
+[[targets]]
+name = "Twitch"
+url = "rtmp://live.twitch.tv/app"
+stream_key = "YOUR_TWITCH_STREAM_KEY"
+enabled = true
+
+[[targets]]
+name = "X (Twitter) Live"
+url = "rtmp://va.pscp.tv/x"
+stream_key = "YOUR_X_STREAM_KEY"
+enabled = false
