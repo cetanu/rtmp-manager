@@ -57,8 +57,7 @@ fn install_systemd(work_dir: &Path, config_path: &Path) -> Result<()> {
     let current_exe =
         std::env::current_exe().context("Failed to determine path of current executable")?;
 
-    embedded_assets::install(&current_exe, web::TAILWIND_STYLESHEET)
-        .context("Failed to install embedded web assets")?;
+    install_embedded_assets(&current_exe)?;
 
     let state_dir = config_path
         .parent()
@@ -99,6 +98,11 @@ fn install_systemd(work_dir: &Path, config_path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn install_embedded_assets(executable: &Path) -> Result<()> {
+    embedded_assets::install(executable, web::TAILWIND_STYLESHEET)
+        .context("Failed to install embedded web assets")
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -117,6 +121,10 @@ async fn main() -> Result<()> {
     {
         return install_systemd(&work_dir, &config_path);
     }
+
+    let current_exe =
+        std::env::current_exe().context("Failed to determine path of current executable")?;
+    install_embedded_assets(&current_exe)?;
 
     info!(path = ?cli.config, "Loading configuration");
     let (config_store, mut config) = ConfigStore::open(&cli.config)?;
