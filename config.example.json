@@ -3,7 +3,8 @@
     "listen": "0.0.0.0:1935",
     "health_listen": "127.0.0.1:8080",
     "api_listen": "0.0.0.0:3000",
-    "test_stream_duration_secs": 15
+    "test_stream_duration_secs": 15,
+    "ingest_stream_key": "CHANGE_ME_TO_A_PRIVATE_STREAM_KEY"
   },
   "web_auth": {
     "username": "",

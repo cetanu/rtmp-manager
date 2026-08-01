@@ -204,6 +204,7 @@ struct ServerForm {
     health_listen: Option<String>,
     api_listen: Option<String>,
     test_stream_duration_secs: Option<u64>,
+    ingest_stream_key: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -293,6 +294,8 @@ fn merge_form(current: &AppConfig, form: ConfigForm) -> anyhow::Result<AppConfig
             test_stream_duration_secs: server
                 .test_stream_duration_secs
                 .unwrap_or(config.server.test_stream_duration_secs),
+            ingest_stream_key: non_empty(server.ingest_stream_key)
+                .unwrap_or(config.server.ingest_stream_key),
         };
     }
     if let Some(notification_fields) = form.notifications {
@@ -557,12 +560,17 @@ async fn import_config_file(
 #[route(POST "/api/test-stream")]
 async fn test_stream(cx: &Cx) -> Result<topcoat::router::Response> {
     let state: &Arc<ProxyState> = app_context(cx);
-    let duration_secs = state.config.read().await.server.test_stream_duration_secs;
-    let url = format!(
-        "rtmp://127.0.0.1:{}/live/{}",
-        state.listen_port,
-        crate::server::TEST_STREAM_KEY
-    );
+    let config = state.config.read().await;
+    let duration_secs = config.server.test_stream_duration_secs;
+    let stream_key = config.server.ingest_stream_key.clone();
+    drop(config);
+    if stream_key.is_empty() {
+        return Err(topcoat::router::bad_request(
+            "Configure an ingest stream key before starting a test stream",
+        )
+        .into());
+    }
+    let url = format!("rtmp://127.0.0.1:{}/live/{}", state.listen_port, stream_key);
     tokio::spawn(async move {
         tracing::info!(
             duration_secs,
@@ -764,6 +772,7 @@ mod tests {
                 health_listen: "127.0.0.1:8080".parse().unwrap(),
                 api_listen: "10.0.0.1:3000".parse().unwrap(),
                 test_stream_duration_secs: 15,
+                ingest_stream_key: "existing-ingest-key".into(),
             },
             notifications: NotificationSettings {
                 discord_webhook: Some("https://discord.test/hook".into()),
@@ -801,6 +810,7 @@ mod tests {
         assert_eq!(updated.server.listen, "127.0.0.1:1936".parse().unwrap());
         assert_eq!(updated.server.api_listen, "10.0.0.1:3000".parse().unwrap());
         assert_eq!(updated.server.test_stream_duration_secs, 15);
+        assert_eq!(updated.server.ingest_stream_key, "existing-ingest-key");
         assert_eq!(updated.notifications.live_message, "Still live");
         assert_eq!(updated.targets.len(), 1);
         assert_eq!(updated.targets[0].stream_key, "secret");
@@ -821,6 +831,28 @@ mod tests {
 
         assert_eq!(updated.server.test_stream_duration_secs, 30);
         updated.validate().unwrap();
+    }
+
+    #[test]
+    fn blank_ingest_stream_key_preserves_existing_key() {
+        let form: ConfigForm = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str("server%5Bingest_stream_key%5D=")
+            .unwrap();
+        let updated = merge_form(&populated_config(), form).unwrap();
+
+        assert_eq!(updated.server.ingest_stream_key, "existing-ingest-key");
+    }
+
+    #[test]
+    fn ingest_stream_key_is_configurable() {
+        let form: ConfigForm = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str("server%5Bingest_stream_key%5D=new-private-key")
+            .unwrap();
+        let updated = merge_form(&populated_config(), form).unwrap();
+
+        assert_eq!(updated.server.ingest_stream_key, "new-private-key");
     }
 
     #[test]

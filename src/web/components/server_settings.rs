@@ -67,6 +67,17 @@ pub async fn server_settings(cx: &Cx) -> Result {
                             step="1"
                         })
                     )
+                    form_field(
+                        control_id: "ingest_stream_key",
+                        label_text: "Ingest Stream Key",
+                        input(attrs: attributes! {
+                            type="password"
+                            id="ingest_stream_key"
+                            name="server[ingest_stream_key]"
+                            placeholder=(if config.server.ingest_stream_key.is_empty() { "Required before streaming" } else { "Configured — leave blank to keep it" })
+                            autocomplete="new-password"
+                        })
+                    )
                 </div>
             )
         )

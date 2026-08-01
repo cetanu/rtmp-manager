@@ -19,6 +19,9 @@ pub struct ServerSettings {
 
     #[serde(default = "default_test_stream_duration_secs")]
     pub test_stream_duration_secs: u64,
+
+    #[serde(default)]
+    pub ingest_stream_key: String,
 }
 
 fn default_listen() -> SocketAddr {
@@ -44,6 +47,7 @@ impl Default for ServerSettings {
             health_listen: default_health_listen(),
             api_listen: default_api_listen(),
             test_stream_duration_secs: default_test_stream_duration_secs(),
+            ingest_stream_key: String::new(),
         }
     }
 }
@@ -220,6 +224,18 @@ impl AppConfig {
         if self.server.test_stream_duration_secs > 86_400 {
             bail!("Test stream duration must not exceed 86400 seconds");
         }
+        if !self.server.ingest_stream_key.is_empty()
+            && (self.server.ingest_stream_key.len() > 256
+                || !self
+                    .server
+                    .ingest_stream_key
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')))
+        {
+            bail!(
+                "Ingest stream key must contain only ASCII letters, numbers, hyphens, or underscores"
+            );
+        }
         let youtube_selectors = [
             &self.chat.youtube_live_chat_id,
             &self.chat.youtube_video_id,
@@ -358,6 +374,7 @@ impl ConfigStore {
                 health_listen TEXT NOT NULL,
                 api_listen TEXT NOT NULL,
                 test_stream_duration_secs INTEGER NOT NULL DEFAULT 15,
+                ingest_stream_key TEXT NOT NULL DEFAULT '',
                 discord_webhook TEXT,
                 live_message TEXT NOT NULL,
                 webhook_url TEXT
@@ -422,6 +439,20 @@ impl ConfigStore {
                 [],
             )?;
         }
+        let has_ingest_stream_key: bool = connection.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM pragma_table_info('settings')
+                WHERE name = 'ingest_stream_key'
+             )",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_ingest_stream_key {
+            connection.execute(
+                "ALTER TABLE settings ADD COLUMN ingest_stream_key TEXT NOT NULL DEFAULT ''",
+                [],
+            )?;
+        }
         let has_eventsub_secret: bool = connection.query_row(
             "SELECT EXISTS(
                 SELECT 1 FROM pragma_table_info('chat_settings')
@@ -463,7 +494,8 @@ impl ConfigStore {
         let settings = connection
             .query_row(
                 "SELECT server_listen, health_listen, api_listen,
-                        test_stream_duration_secs, discord_webhook, live_message, webhook_url
+                        test_stream_duration_secs, ingest_stream_key, discord_webhook,
+                        live_message, webhook_url
                  FROM settings WHERE id = 1",
                 [],
                 |row| {
@@ -472,9 +504,10 @@ impl ConfigStore {
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, i64>(3)? as u64,
-                        row.get::<_, Option<String>>(4)?,
-                        row.get::<_, String>(5)?,
-                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, Option<String>>(7)?,
                     ))
                 },
             )
@@ -485,6 +518,7 @@ impl ConfigStore {
             health_listen,
             api_listen,
             test_stream_duration_secs,
+            ingest_stream_key,
             discord_webhook,
             live_message,
             webhook_url,
@@ -557,6 +591,7 @@ impl ConfigStore {
                     .context("Invalid health listen address")?,
                 api_listen: api_listen.parse().context("Invalid API listen address")?,
                 test_stream_duration_secs,
+                ingest_stream_key,
             },
             notifications: NotificationSettings {
                 discord_webhook,
@@ -577,8 +612,8 @@ impl ConfigStore {
         transaction.execute(
             "INSERT INTO settings (
                 id, server_listen, health_listen, api_listen, discord_webhook,
-                live_message, webhook_url, test_stream_duration_secs
-             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                live_message, webhook_url, test_stream_duration_secs, ingest_stream_key
+             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(id) DO UPDATE SET
                 server_listen = excluded.server_listen,
                 health_listen = excluded.health_listen,
@@ -586,7 +621,8 @@ impl ConfigStore {
                 discord_webhook = excluded.discord_webhook,
                 live_message = excluded.live_message,
                 webhook_url = excluded.webhook_url,
-                test_stream_duration_secs = excluded.test_stream_duration_secs",
+                test_stream_duration_secs = excluded.test_stream_duration_secs,
+                ingest_stream_key = excluded.ingest_stream_key",
             params![
                 config.server.listen.to_string(),
                 config.server.health_listen.to_string(),
@@ -595,6 +631,7 @@ impl ConfigStore {
                 config.notifications.live_message,
                 config.notifications.webhook_url,
                 config.server.test_stream_duration_secs as i64,
+                config.server.ingest_stream_key,
             ],
         )?;
         transaction.execute("DELETE FROM targets", [])?;
@@ -681,6 +718,14 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("letters, numbers, or underscores"));
+
+        config.chat.twitch_channel = None;
+        config.server.ingest_stream_key = "unsafe/key".into();
+        assert!(config
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("letters, numbers, hyphens, or underscores"));
     }
 
     #[test]
@@ -713,8 +758,10 @@ mod tests {
         let (store, mut config) = ConfigStore::open(&json_path).unwrap();
         assert_eq!(config.server.api_listen.port(), 3001);
         assert_eq!(config.server.test_stream_duration_secs, 15);
+        assert_eq!(config.server.ingest_stream_key, "");
         assert_eq!(config.targets[0].stream_key, "");
         config.server.test_stream_duration_secs = 30;
+        config.server.ingest_stream_key = "new-ingest-key".into();
         config.notifications.live_message = "saved in sqlite".into();
         config.web_auth = WebAuthSettings {
             username: "operator".into(),
@@ -732,6 +779,7 @@ mod tests {
         .unwrap();
         let (_, reloaded) = ConfigStore::open(&json_path).unwrap();
         assert_eq!(reloaded.server.test_stream_duration_secs, 30);
+        assert_eq!(reloaded.server.ingest_stream_key, "new-ingest-key");
         assert_eq!(reloaded.notifications.live_message, "saved in sqlite");
         assert_eq!(reloaded.web_auth.username, "operator");
         assert_eq!(reloaded.web_auth.password, "correct horse battery staple");
@@ -742,5 +790,50 @@ mod tests {
         assert_eq!(reloaded.chat.youtube_video_id.as_deref(), Some("video-id"));
 
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn existing_database_migrates_to_an_empty_ingest_stream_key() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let database_path =
+            std::env::temp_dir().join(format!("rtmp-proxy-ingest-key-migration-{unique}.sqlite3"));
+        let connection = Connection::open(&database_path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE settings (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    server_listen TEXT NOT NULL,
+                    health_listen TEXT NOT NULL,
+                    api_listen TEXT NOT NULL,
+                    test_stream_duration_secs INTEGER NOT NULL DEFAULT 15,
+                    discord_webhook TEXT,
+                    live_message TEXT NOT NULL,
+                    webhook_url TEXT
+                );
+                INSERT INTO settings (
+                    id, server_listen, health_listen, api_listen,
+                    test_stream_duration_secs, live_message
+                ) VALUES (
+                    1, '0.0.0.0:1935', '127.0.0.1:8080', '0.0.0.0:3000', 15, 'Live'
+                );",
+            )
+            .unwrap();
+        drop(connection);
+
+        let (store, mut config) = ConfigStore::open(&database_path).unwrap();
+        assert_eq!(config.server.ingest_stream_key, "");
+
+        config.server.ingest_stream_key = "configured-after-upgrade".into();
+        store.save(&config).unwrap();
+        let (_, reloaded) = ConfigStore::open(&database_path).unwrap();
+        assert_eq!(
+            reloaded.server.ingest_stream_key,
+            "configured-after-upgrade"
+        );
+
+        fs::remove_file(database_path).unwrap();
     }
 }

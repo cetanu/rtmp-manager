@@ -32,6 +32,18 @@ impl RtmpHandler for ProxyHandler {
 
     async fn on_publish(&self, ctx: &SessionContext, params: &PublishParams) -> AuthResult {
         let stream_key = params.stream_key.clone();
+        let expected_stream_key = self
+            .state
+            .config
+            .read()
+            .await
+            .server
+            .ingest_stream_key
+            .clone();
+        if !stream_key_matches(&expected_stream_key, &stream_key) {
+            error!(session_id = %ctx.session_id, "Rejected RTMP publish with invalid stream key");
+            return AuthResult::Reject("Invalid stream key".into());
+        }
         info!(
             session_id = %ctx.session_id,
             "Stream published from client"
@@ -58,5 +70,31 @@ impl RtmpHandler for ProxyHandler {
             .metrics
             .active_connections
             .fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+fn stream_key_matches(expected: &str, submitted: &str) -> bool {
+    if expected.is_empty() || expected.len() != submitted.len() {
+        return false;
+    }
+    expected
+        .bytes()
+        .zip(submitted.bytes())
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        })
+        == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::stream_key_matches;
+
+    #[test]
+    fn ingest_requires_an_exact_nonempty_stream_key() {
+        assert!(stream_key_matches("private-key", "private-key"));
+        assert!(!stream_key_matches("private-key", "wrong-key"));
+        assert!(!stream_key_matches("private-key", "private-key-extra"));
+        assert!(!stream_key_matches("", ""));
     }
 }
