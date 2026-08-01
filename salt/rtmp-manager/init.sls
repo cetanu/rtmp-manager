@@ -30,6 +30,7 @@
     - user: root
     - group: root
     - mode: '0600'
+    - show_changes: false
     - replace: false
     - require:
       - file: /opt/apps/rtmp-proxy/shared
@@ -40,6 +41,7 @@
     - user: root
     - group: root
     - mode: '0600'
+    - show_changes: false
 
 /etc/systemd/system/rtmp-proxy.service:
   file.managed:

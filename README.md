@@ -22,4 +22,6 @@ The `salt` directory is a reusable Salt formula. The infrastructure host mounts
 this repository at `salt://rtmp-manager` through GitFS and applies the
 `rtmp-manager` state after a signed GitHub release webhook.
 
-Production secrets are supplied through pillar; see `pillar.example.sls`.
+Production secrets are stored as GPG-encrypted Git pillar data under `pillar`.
+See [`pillar/README.md`](pillar/README.md) for setup. Only the deployment public
+key belongs in this repository; the private key remains on the host.
