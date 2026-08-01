@@ -45,7 +45,7 @@
 
 /etc/systemd/system/rtmp-proxy.service:
   file.managed:
-    - source: salt://rtmp-proxy/files/rtmp-proxy.service
+    - source: salt://rtmp-manager/files/rtmp-proxy.service
     - user: root
     - group: root
     - mode: '0644'
@@ -58,7 +58,7 @@ reload-systemd-for-rtmp-proxy:
 
 /etc/caddy/apps/rtmp-proxy.caddy:
   file.managed:
-    - source: salt://rtmp-proxy/files/rtmp-proxy.caddy
+    - source: salt://rtmp-manager/files/rtmp-proxy.caddy
     - user: root
     - group: root
     - mode: '0644'
