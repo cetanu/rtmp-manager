@@ -158,9 +158,9 @@ impl AppConfig {
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let content = fs::read_to_string(path.as_ref())
             .with_context(|| format!("Failed to read configuration file: {:?}", path.as_ref()))?;
-        let config: AppConfig = toml::from_str(&content).with_context(|| {
+        let config: AppConfig = serde_json::from_str(&content).with_context(|| {
             format!(
-                "Failed to parse TOML configuration from {:?}",
+                "Failed to parse JSON configuration from {:?}",
                 path.as_ref()
             )
         })?;
@@ -246,7 +246,7 @@ impl AppConfig {
 
 /// SQLite-backed configuration storage.
 ///
-/// A `.toml` path is treated as a legacy bootstrap file. It is imported only
+/// A `.json` path is treated as a legacy bootstrap file. It is imported only
 /// when the sibling `.sqlite3` database has no configuration yet.
 #[derive(Debug, Clone)]
 pub struct ConfigStore {
@@ -258,14 +258,14 @@ impl ConfigStore {
 
     pub fn open<P: AsRef<Path>>(config_path: P) -> Result<(Self, AppConfig)> {
         let config_path = config_path.as_ref();
-        let is_toml = config_path.extension().is_some_and(|ext| ext == "toml");
-        let database_path = if is_toml {
+        let is_json = config_path.extension().is_some_and(|ext| ext == "json");
+        let database_path = if is_json {
             config_path.with_extension("sqlite3")
         } else {
             config_path.to_path_buf()
         };
 
-        if is_toml && !config_path.exists() && !database_path.exists() {
+        if is_json && !config_path.exists() && !database_path.exists() {
             bail!(
                 "Neither legacy configuration '{}' nor database '{}' exists",
                 config_path.display(),
@@ -279,10 +279,10 @@ impl ConfigStore {
         store.initialize()?;
 
         // Databases created by the broken form decoder have no storage-version
-        // marker. Re-import the legacy TOML once when upgrading those databases,
-        // then leave TOML untouched and use SQLite exclusively.
+        // marker. Re-import the legacy JSON once when upgrading those databases,
+        // then leave JSON untouched and use SQLite exclusively.
         let storage_version = store.metadata("storage_version")?;
-        let needs_legacy_import = is_toml
+        let needs_legacy_import = is_json
             && config_path.exists()
             && storage_version.as_deref() != Some(Self::STORAGE_VERSION);
 
@@ -294,7 +294,7 @@ impl ConfigStore {
         } else {
             match store.load()? {
                 Some(config) => config,
-                None if is_toml && config_path.exists() => {
+                None if is_json && config_path.exists() => {
                     let config = AppConfig::load_from_file(config_path)?;
                     config.validate()?;
                     store.save(&config)?;
@@ -650,30 +650,33 @@ mod tests {
     }
 
     #[test]
-    fn imports_legacy_toml_once_and_round_trips_sqlite() {
+    fn imports_legacy_json_once_and_round_trips_sqlite() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         let directory = std::env::temp_dir().join(format!("rtmp-proxy-config-{unique}"));
         fs::create_dir(&directory).unwrap();
-        let toml_path = directory.join("config.toml");
+        let json_path = directory.join("config.json");
         fs::write(
-            &toml_path,
-            r#"
-                [server]
-                api_listen = "127.0.0.1:3001"
-                [notifications]
-                live_message = "first"
-                [[targets]]
-                name = "Twitch"
-                url = "rtmps://example.test/app"
-                enabled = true
-            "#,
+            &json_path,
+            r#"{
+                "server": {
+                    "api_listen": "127.0.0.1:3001"
+                },
+                "notifications": {
+                    "live_message": "first"
+                },
+                "targets": [{
+                    "name": "Twitch",
+                    "url": "rtmps://example.test/app",
+                    "enabled": true
+                }]
+            }"#,
         )
         .unwrap();
 
-        let (store, mut config) = ConfigStore::open(&toml_path).unwrap();
+        let (store, mut config) = ConfigStore::open(&json_path).unwrap();
         assert_eq!(config.server.api_listen.port(), 3001);
         assert_eq!(config.targets[0].stream_key, "");
         config.notifications.live_message = "saved in sqlite".into();
@@ -687,11 +690,11 @@ mod tests {
         store.save(&config).unwrap();
 
         fs::write(
-            &toml_path,
-            "[notifications]\nlive_message = \"changed toml\"",
+            &json_path,
+            r#"{"notifications": {"live_message": "changed json"}}"#,
         )
         .unwrap();
-        let (_, reloaded) = ConfigStore::open(&toml_path).unwrap();
+        let (_, reloaded) = ConfigStore::open(&json_path).unwrap();
         assert_eq!(reloaded.notifications.live_message, "saved in sqlite");
         assert_eq!(reloaded.web_auth.username, "operator");
         assert_eq!(reloaded.web_auth.password, "correct horse battery staple");

@@ -24,7 +24,7 @@
     - require:
       - file: /opt/apps/rtmp-proxy/current
 
-/opt/apps/rtmp-proxy/shared/config.toml:
+/opt/apps/rtmp-proxy/shared/config.json:
   file.managed:
     - contents_pillar: rtmp_proxy:config
     - user: root
@@ -78,7 +78,7 @@ rtmp-proxy.service:
       - file: /etc/rtmp-proxy.env
       - file: /etc/systemd/system/rtmp-proxy.service
     - require:
-      - file: /opt/apps/rtmp-proxy/shared/config.toml
+      - file: /opt/apps/rtmp-proxy/shared/config.json
       - cmd: reload-systemd-for-rtmp-proxy
 
 verify-rtmp-proxy-health:

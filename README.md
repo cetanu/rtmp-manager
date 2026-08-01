@@ -14,7 +14,7 @@ configuration and chat state are stored in SQLite.
 cargo run
 ```
 
-Copy `config.example.toml` to `config.toml` before running locally.
+Copy `config.example.json` to `config.json` before running locally.
 
 ## Deployment
 

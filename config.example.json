@@ -1,0 +1,47 @@
+{
+  "server": {
+    "listen": "0.0.0.0:1935",
+    "health_listen": "127.0.0.1:8080",
+    "api_listen": "0.0.0.0:3000"
+  },
+  "web_auth": {
+    "username": "",
+    "password": ""
+  },
+  "chat": {
+    "ingest_token": "",
+    "queue_capacity": 500,
+    "twitch_channel": "",
+    "youtube_api_key": "",
+    "youtube_live_chat_id": "",
+    "youtube_video_id": "",
+    "youtube_channel_id": "",
+    "youtube_min_poll_interval_secs": 5,
+    "youtube_adaptive_polling": true
+  },
+  "notifications": {
+    "discord_webhook": "https://discord.com/api/webhooks/YOUR_DISCORD_WEBHOOK_URL",
+    "live_message": "We are LIVE",
+    "webhook_url": ""
+  },
+  "targets": [
+    {
+      "name": "YouTube Live",
+      "url": "rtmp://a.rtmp.youtube.com/live2",
+      "stream_key": "YOUR_YOUTUBE_STREAM_KEY",
+      "enabled": true
+    },
+    {
+      "name": "Twitch",
+      "url": "rtmp://live.twitch.tv/app",
+      "stream_key": "YOUR_TWITCH_STREAM_KEY",
+      "enabled": true
+    },
+    {
+      "name": "X (Twitter) Live",
+      "url": "rtmp://va.pscp.tv/x",
+      "stream_key": "YOUR_X_STREAM_KEY",
+      "enabled": false
+    }
+  ]
+}

@@ -23,8 +23,8 @@ const SYSTEMD_UNIT_TEMPLATE: &str = include_str!("../systemd/rtmp-proxy.service"
 #[derive(Parser, Debug)]
 #[command(author, version, about = "RTMP Stream Multiplexer powered by rtmp-rs", long_about = None)]
 struct CliArgs {
-    /// Path to the SQLite database, or a legacy TOML file to import once
-    #[arg(short, long, env = "CONFIG_PATH", default_value = "config.toml")]
+    /// Path to the SQLite database, or a legacy JSON file to import once
+    #[arg(short, long, env = "CONFIG_PATH", default_value = "config.json")]
     config: PathBuf,
 
     /// Initial web username, persisted only when SQLite has no web credentials
@@ -48,7 +48,7 @@ enum Commands {
         work_dir: PathBuf,
 
         /// Path to config file for systemd service
-        #[arg(long, default_value = "/opt/rtmp-proxy/config.toml")]
+        #[arg(long, default_value = "/opt/rtmp-proxy/config.json")]
         config_path: PathBuf,
     },
 }
