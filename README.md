@@ -25,3 +25,14 @@ this repository at `salt://rtmp-manager` through GitFS and applies the
 Production secrets are stored as GPG-encrypted Git pillar data under `pillar`.
 See [`pillar/README.md`](pillar/README.md) for setup. Only the deployment public
 key belongs in this repository; the private key remains on the host.
+
+## Release deployment webhook
+
+The release workflow triggers deployment only after the `rtmp-proxy` binary and
+its checksum have been attached to the GitHub release. Configure these Actions
+repository secrets:
+
+- `DEPLOYMENT_WEBHOOK_URL`: the complete HTTPS endpoint, including the webhook
+  path (for example, `https://deploy.example.com/hooks/github`)
+- `DEPLOYMENT_WEBHOOK_SECRET`: exactly the value configured as
+  `webhookSecret` in the infrastructure Pulumi stack

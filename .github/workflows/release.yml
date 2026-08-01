@@ -42,3 +42,49 @@ jobs:
             rtmp-proxy.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Trigger Deployment Reconciliation
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        env:
+          DEPLOYMENT_WEBHOOK_URL: ${{ secrets.DEPLOYMENT_WEBHOOK_URL }}
+          DEPLOYMENT_WEBHOOK_SECRET: ${{ secrets.DEPLOYMENT_WEBHOOK_SECRET }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import hmac
+          import json
+          import os
+          import urllib.request
+
+          payload = json.dumps(
+              {
+                  "action": "published",
+                  "release": {"tag_name": os.environ["RELEASE_TAG"]},
+                  "repository": {"id": int(os.environ["REPOSITORY_ID"])},
+              },
+              separators=(",", ":"),
+          ).encode()
+          signature = hmac.new(
+              os.environ["DEPLOYMENT_WEBHOOK_SECRET"].encode(),
+              payload,
+              hashlib.sha256,
+          ).hexdigest()
+          request = urllib.request.Request(
+              os.environ["DEPLOYMENT_WEBHOOK_URL"],
+              data=payload,
+              headers={
+                  "Content-Type": "application/json",
+                  "User-Agent": "rtmp-manager-release-workflow",
+                  "X-GitHub-Event": "release",
+                  "X-Hub-Signature-256": f"sha256={signature}",
+              },
+              method="POST",
+          )
+          with urllib.request.urlopen(request, timeout=15) as response:
+              if response.status != 202:
+                  raise RuntimeError(
+                      f"deployment webhook returned HTTP {response.status}, expected 202"
+                  )
+          PY
