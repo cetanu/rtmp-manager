@@ -1,6 +1,8 @@
 #!yaml|gpg
 
 rtmp_proxy:
+  environment:
+    foo=bar
   config: |
     -----BEGIN PGP MESSAGE-----
 
