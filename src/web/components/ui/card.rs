@@ -67,7 +67,6 @@ pub async fn card_title(#[default] mut attrs: Attributes, #[default] child: View
 
 /// The supporting text under a [`card_title`].
 #[component]
-#[allow(dead_code)]
 pub async fn card_description(#[default] mut attrs: Attributes, #[default] child: View) -> Result {
     view! {
         <p
@@ -87,7 +86,6 @@ pub async fn card_content(#[default] mut attrs: Attributes, #[default] child: Vi
 
 /// The closing section of a [`card`], a horizontal row for actions.
 #[component]
-#[allow(dead_code)]
 pub async fn card_footer(#[default] mut attrs: Attributes, #[default] child: View) -> Result {
     view! {
         <div

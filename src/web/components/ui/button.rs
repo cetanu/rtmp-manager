@@ -159,3 +159,26 @@ pub async fn button(
         </button>
     }
 }
+
+/// A link rendered with the same variants and sizing as [`button`].
+#[component]
+pub async fn button_link(
+    #[default] variant: ButtonVariant,
+    #[default] size: ButtonSize,
+    #[default] mut attrs: Attributes,
+    #[default] child: View,
+) -> Result {
+    view! {
+        <a
+            class=(class!(
+                BASE,
+                variant.classes(),
+                size.classes(),
+                attrs.remove("class"),
+            ))
+            (attrs)
+        >
+            (child)
+        </a>
+    }
+}

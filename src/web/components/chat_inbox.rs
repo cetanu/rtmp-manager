@@ -1,10 +1,13 @@
 use crate::server::state::ProxyState;
+use crate::web::components::chat_inbox_content::chat_inbox_content;
 use crate::web::components::ui::button::{button_variants, ButtonSize, ButtonVariant};
-use crate::web::components::ui::card::{card, card_content, card_footer, card_header, card_title};
+use crate::web::components::ui::card::{
+    card, card_description, card_footer, card_header, card_title,
+};
 use std::sync::Arc;
 use topcoat::{
     context::{app_context, Cx},
-    runtime::{procedure, shard},
+    runtime::procedure,
     view::{attributes, component, view},
     Result,
 };
@@ -37,57 +40,6 @@ fn current_message_id(snapshot: &crate::chat::ChatInboxSnapshot) -> String {
         .unwrap_or_default()
 }
 
-#[shard]
-async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result {
-    let _ = revision;
-    let state: &Arc<ProxyState> = app_context(cx);
-    let snapshot = state.chat_inbox.lock().await.snapshot()?;
-    let youtube_status = state.youtube_status.read().await.clone();
-
-    view! {
-        card_content(
-            <div class="mb-4 flex justify-end gap-4 text-right">
-                <div class="text-sm font-medium">(format!("{} waiting", snapshot.waiting))</div>
-                <div class="text-sm text-muted-foreground">(format!("{} dropped", snapshot.dropped))</div>
-            </div>
-            if let Some(status) = youtube_status {
-                <div class="mb-4 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                        <span class="font-semibold">"YouTube ingest"</span>
-                        <span class="uppercase tracking-wide text-muted-foreground">(status.state)</span>
-                    </div>
-                    <p class="mt-1 text-muted-foreground">(status.detail)</p>
-                    <p class="mt-1 text-xs text-muted-foreground">
-                        (format!("{} messages received", status.messages_received))
-                    </p>
-                </div>
-            }
-            if let Some(current) = snapshot.current {
-                <div class="flex flex-col gap-4 rounded-xl border bg-surface p-5">
-                    <div class="flex items-center justify-between gap-4">
-                        <div class="min-w-0">
-                            <div class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                (current.source)
-                            </div>
-                            <div class="truncate font-semibold">(current.author)</div>
-                        </div>
-                        <div class="shrink-0 text-xs text-muted-foreground">
-                            (current.sent_at.unwrap_or_default())
-                        </div>
-                    </div>
-                    <p class="whitespace-pre-wrap break-words text-lg leading-relaxed">
-                        (current.text)
-                    </p>
-                </div>
-            } else {
-                <div class="rounded-xl border border-dashed p-8 text-center text-muted-foreground">
-                    "No chat messages waiting."
-                </div>
-            }
-        )
-    }
-}
-
 #[component]
 pub async fn chat_inbox(cx: &Cx) -> Result {
     let state: &Arc<ProxyState> = app_context(cx);
@@ -102,10 +54,8 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
         card(
             attrs: attributes! { class="mb-8" },
             card_header(
-                <div class="flex flex-col gap-1">
-                    card_title("Chat Inbox")
-                    <p class="text-sm text-muted-foreground">"One message at a time from every connected chat source."</p>
-                </div>
+                card_title("Chat Inbox")
+                card_description("One message at a time from every connected chat source.")
             )
             chat_inbox_content(revision: $(revision.get()))
             card_footer(

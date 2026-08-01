@@ -8,6 +8,10 @@ const TAILWIND_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/tailwind.c
 // same release artifact as the server executable.
 const TOPCOAT_RUNTIME: &[u8] = include_bytes!("../static/topcoat-runtime.js");
 const CHAT_EVENTS: &[u8] = include_bytes!("../static/chat-events.js");
+// HLS.js 1.6.16 is distributed under Apache-2.0; see static/hls.LICENSE.txt.
+const HLS_PLAYER: &[u8] = include_bytes!("../static/hls.min.js");
+const HLS_LICENSE: &[u8] = include_bytes!("../static/hls.LICENSE.txt");
+const STREAM_PREVIEW: &[u8] = include_bytes!("../static/stream-preview.js");
 
 struct EmbeddedAsset {
     id: Asset,
@@ -46,6 +50,27 @@ pub fn install(executable: &Path, tailwind_stylesheet: Asset) -> Result<()> {
             extension: "js",
             content_type: "text/javascript",
             contents: CHAT_EVENTS,
+        },
+        EmbeddedAsset {
+            id: crate::web::HLS_PLAYER_SCRIPT,
+            stem: "hls-player",
+            extension: "js",
+            content_type: "text/javascript",
+            contents: HLS_PLAYER,
+        },
+        EmbeddedAsset {
+            id: crate::web::HLS_PLAYER_LICENSE,
+            stem: "hls-player-license",
+            extension: "txt",
+            content_type: "text/plain",
+            contents: HLS_LICENSE,
+        },
+        EmbeddedAsset {
+            id: crate::web::STREAM_PREVIEW_SCRIPT,
+            stem: "stream-preview",
+            extension: "js",
+            content_type: "text/javascript",
+            contents: STREAM_PREVIEW,
         },
     ];
 
@@ -97,6 +122,9 @@ mod tests {
         assert!(bundle.get(crate::web::TAILWIND_STYLESHEET).is_some());
         assert!(bundle.get(topcoat::runtime::SCRIPT).is_some());
         assert!(bundle.get(crate::web::CHAT_EVENTS_SCRIPT).is_some());
+        assert!(bundle.get(crate::web::HLS_PLAYER_SCRIPT).is_some());
+        assert!(bundle.get(crate::web::HLS_PLAYER_LICENSE).is_some());
+        assert!(bundle.get(crate::web::STREAM_PREVIEW_SCRIPT).is_some());
 
         fs::remove_dir_all(test_dir).unwrap();
     }

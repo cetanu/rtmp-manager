@@ -1,4 +1,4 @@
-use crate::web::components::ui::button::{button, button_variants, ButtonSize, ButtonVariant};
+use crate::web::components::ui::button::{button, button_link, ButtonVariant};
 use topcoat::{
     view::{attributes, component, view},
     Result,
@@ -17,7 +17,7 @@ pub async fn actions_panel() -> Result {
                         formmethod="post"
                         formnovalidate="formnovalidate"
                     },
-                    "Test 15s Stream"
+                    "Test Stream"
                 )
                 button(
                     variant: ButtonVariant::Outline,
@@ -31,10 +31,11 @@ pub async fn actions_panel() -> Result {
                 )
             </div>
             <div class="flex gap-4 w-full sm:w-auto">
-                <a
-                    href="/"
-                    class=(format!("{} w-full sm:w-auto", button_variants(ButtonVariant::Secondary, ButtonSize::Md)))
-                >"Revert"</a>
+                button_link(
+                    variant: ButtonVariant::Secondary,
+                    attrs: attributes! { href="/" class="w-full sm:w-auto" },
+                    "Revert"
+                )
                 button(
                     variant: ButtonVariant::Primary,
                     attrs: attributes! {

@@ -16,6 +16,9 @@ pub struct ServerSettings {
 
     #[serde(default = "default_api_listen")]
     pub api_listen: SocketAddr,
+
+    #[serde(default = "default_test_stream_duration_secs")]
+    pub test_stream_duration_secs: u64,
 }
 
 fn default_listen() -> SocketAddr {
@@ -30,12 +33,17 @@ fn default_api_listen() -> SocketAddr {
     "0.0.0.0:3000".parse().unwrap()
 }
 
+fn default_test_stream_duration_secs() -> u64 {
+    15
+}
+
 impl Default for ServerSettings {
     fn default() -> Self {
         Self {
             listen: default_listen(),
             health_listen: default_health_listen(),
             api_listen: default_api_listen(),
+            test_stream_duration_secs: default_test_stream_duration_secs(),
         }
     }
 }
@@ -206,6 +214,12 @@ impl AppConfig {
         if self.chat.youtube_min_poll_interval_secs == 0 {
             bail!("YouTube minimum poll interval must be positive");
         }
+        if self.server.test_stream_duration_secs == 0 {
+            bail!("Test stream duration must be positive");
+        }
+        if self.server.test_stream_duration_secs > 86_400 {
+            bail!("Test stream duration must not exceed 86400 seconds");
+        }
         let youtube_selectors = [
             &self.chat.youtube_live_chat_id,
             &self.chat.youtube_video_id,
@@ -343,6 +357,7 @@ impl ConfigStore {
                 server_listen TEXT NOT NULL,
                 health_listen TEXT NOT NULL,
                 api_listen TEXT NOT NULL,
+                test_stream_duration_secs INTEGER NOT NULL DEFAULT 15,
                 discord_webhook TEXT,
                 live_message TEXT NOT NULL,
                 webhook_url TEXT
@@ -393,6 +408,20 @@ impl ConfigStore {
                 [],
             )?;
         }
+        let has_test_stream_duration: bool = connection.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM pragma_table_info('settings')
+                WHERE name = 'test_stream_duration_secs'
+             )",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_test_stream_duration {
+            connection.execute(
+                "ALTER TABLE settings ADD COLUMN test_stream_duration_secs INTEGER NOT NULL DEFAULT 15",
+                [],
+            )?;
+        }
         let has_eventsub_secret: bool = connection.query_row(
             "SELECT EXISTS(
                 SELECT 1 FROM pragma_table_info('chat_settings')
@@ -433,8 +462,8 @@ impl ConfigStore {
         let connection = self.connect()?;
         let settings = connection
             .query_row(
-                "SELECT server_listen, health_listen, api_listen, discord_webhook,
-                        live_message, webhook_url
+                "SELECT server_listen, health_listen, api_listen,
+                        test_stream_duration_secs, discord_webhook, live_message, webhook_url
                  FROM settings WHERE id = 1",
                 [],
                 |row| {
@@ -442,9 +471,10 @@ impl ConfigStore {
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, i64>(3)? as u64,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, Option<String>>(6)?,
                     ))
                 },
             )
@@ -454,6 +484,7 @@ impl ConfigStore {
             server_listen,
             health_listen,
             api_listen,
+            test_stream_duration_secs,
             discord_webhook,
             live_message,
             webhook_url,
@@ -525,6 +556,7 @@ impl ConfigStore {
                     .parse()
                     .context("Invalid health listen address")?,
                 api_listen: api_listen.parse().context("Invalid API listen address")?,
+                test_stream_duration_secs,
             },
             notifications: NotificationSettings {
                 discord_webhook,
@@ -545,15 +577,16 @@ impl ConfigStore {
         transaction.execute(
             "INSERT INTO settings (
                 id, server_listen, health_listen, api_listen, discord_webhook,
-                live_message, webhook_url
-             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)
+                live_message, webhook_url, test_stream_duration_secs
+             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(id) DO UPDATE SET
                 server_listen = excluded.server_listen,
                 health_listen = excluded.health_listen,
                 api_listen = excluded.api_listen,
                 discord_webhook = excluded.discord_webhook,
                 live_message = excluded.live_message,
-                webhook_url = excluded.webhook_url",
+                webhook_url = excluded.webhook_url,
+                test_stream_duration_secs = excluded.test_stream_duration_secs",
             params![
                 config.server.listen.to_string(),
                 config.server.health_listen.to_string(),
@@ -561,6 +594,7 @@ impl ConfigStore {
                 config.notifications.discord_webhook,
                 config.notifications.live_message,
                 config.notifications.webhook_url,
+                config.server.test_stream_duration_secs as i64,
             ],
         )?;
         transaction.execute("DELETE FROM targets", [])?;
@@ -678,7 +712,9 @@ mod tests {
 
         let (store, mut config) = ConfigStore::open(&json_path).unwrap();
         assert_eq!(config.server.api_listen.port(), 3001);
+        assert_eq!(config.server.test_stream_duration_secs, 15);
         assert_eq!(config.targets[0].stream_key, "");
+        config.server.test_stream_duration_secs = 30;
         config.notifications.live_message = "saved in sqlite".into();
         config.web_auth = WebAuthSettings {
             username: "operator".into(),
@@ -695,6 +731,7 @@ mod tests {
         )
         .unwrap();
         let (_, reloaded) = ConfigStore::open(&json_path).unwrap();
+        assert_eq!(reloaded.server.test_stream_duration_secs, 30);
         assert_eq!(reloaded.notifications.live_message, "saved in sqlite");
         assert_eq!(reloaded.web_auth.username, "operator");
         assert_eq!(reloaded.web_auth.password, "correct horse battery staple");

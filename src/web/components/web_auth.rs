@@ -1,7 +1,7 @@
 use crate::server::state::ProxyState;
 use crate::web::components::ui::card::{card, card_content, card_header, card_title};
+use crate::web::components::ui::form::{field_description, form_field};
 use crate::web::components::ui::input::input;
-use crate::web::components::ui::label::label;
 use std::sync::Arc;
 use topcoat::{
     context::{app_context, Cx},
@@ -15,14 +15,15 @@ pub async fn web_auth(cx: &Cx) -> Result {
     let auth = state.config.read().await.web_auth.clone();
     view! {
         card(
-            attrs: attributes! { class="mb-8" },
+            attrs: attributes! { class="h-full" },
             card_header(
                 card_title("Web Authentication")
             )
             card_content(
                 <div class="grid gap-6 md:grid-cols-2">
-                    <div class="flex flex-col gap-2">
-                        label(attrs: attributes! { for="web_auth_username" }, "Username")
+                    form_field(
+                        control_id: "web_auth_username",
+                        label_text: "Username",
                         input(attrs: attributes! {
                             id="web_auth_username"
                             name="web_auth[username]"
@@ -30,9 +31,10 @@ pub async fn web_auth(cx: &Cx) -> Result {
                             value=(auth.username)
                             required="true"
                         })
-                    </div>
-                    <div class="flex flex-col gap-2">
-                        label(attrs: attributes! { for="web_auth_password" }, "New password")
+                    )
+                    form_field(
+                        control_id: "web_auth_password",
+                        label_text: "New password",
                         input(attrs: attributes! {
                             type="password"
                             id="web_auth_password"
@@ -42,10 +44,10 @@ pub async fn web_auth(cx: &Cx) -> Result {
                             minlength="12"
                             placeholder=(if auth.password.is_empty() { "At least 12 characters" } else { "Configured — leave blank to keep it" })
                         })
-                        <p class="text-xs text-muted-foreground">
+                        field_description(
                             "Changing this takes effect immediately and prompts the browser to sign in again."
-                        </p>
-                    </div>
+                        )
+                    )
                 </div>
             )
         )

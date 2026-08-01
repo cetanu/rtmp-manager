@@ -3,7 +3,6 @@ use rtmp_rs::protocol::message::{ConnectParams, PublishParams};
 use rtmp_rs::session::context::StreamContext;
 use rtmp_rs::session::SessionContext;
 use rtmp_rs::{AuthResult, RtmpHandler};
-use std::process::Stdio;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tracing::{error, info};
@@ -38,95 +37,19 @@ impl RtmpHandler for ProxyHandler {
             "Stream published from client"
         );
 
-        let config = self.state.config.read().await;
-        let active_targets: Vec<_> = config
-            .targets
-            .iter()
-            .filter(|t| t.enabled)
-            .cloned()
-            .collect();
-
-        let dispatcher = crate::notifications::NotificationDispatcher::new(
-            &config.notifications,
-            self.state.http_client.clone(),
-        );
-        drop(config);
-
-        // Dispatch notifications asynchronously
-        let notification_targets = active_targets
-            .iter()
-            .map(crate::notifications::NotificationTarget::from)
-            .collect::<Vec<_>>();
-        tokio::spawn(async move {
-            dispatcher.dispatch(&notification_targets).await;
-        });
-
-        if active_targets.is_empty() {
-            info!("No active targets enabled. Ingesting stream locally without forwarding.");
-            return AuthResult::Accept;
-        }
-
-        let mut relays = self.state.active_relays.lock().await;
-        let mut children = Vec::new();
-        let source_url = format!(
-            "rtmp://127.0.0.1:{}/live/{}",
-            self.state.listen_port, stream_key
-        );
-
-        for target in active_targets {
-            let target_full_url = if target.stream_key.is_empty() {
-                target.url.clone()
-            } else if target.url.ends_with('/') {
-                format!("{}{}", target.url, target.stream_key)
-            } else {
-                format!("{}/{}", target.url, target.stream_key)
-            };
-
-            info!(name = %target.name, "Launching stream relay forwarder");
-
-            let child = tokio::process::Command::new("ffmpeg")
-                .args([
-                    "-loglevel",
-                    "warning",
-                    "-i",
-                    &source_url,
-                    "-c",
-                    "copy",
-                    "-f",
-                    "flv",
-                    &target_full_url,
-                ])
-                // ffmpeg includes complete input/output URLs in some diagnostics.
-                // Both URLs contain credentials, so never inherit its output.
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn();
-
-            match child {
-                Ok(c) => {
-                    info!(name = %target.name, "Relay process spawned successfully");
-                    children.push(c);
-                }
-                Err(e) => {
-                    error!(name = %target.name, error = %e, "Failed to spawn ffmpeg relay process. Ensure ffmpeg is installed.");
-                }
+        match self.state.stage_stream(stream_key).await {
+            Ok(()) => AuthResult::Accept,
+            Err(error) => {
+                error!(%error, "Failed to stage stream preview");
+                AuthResult::Reject("Failed to start staged preview".into())
             }
         }
-
-        relays.insert(stream_key, children);
-        AuthResult::Accept
     }
 
     async fn on_unpublish(&self, ctx: &StreamContext) {
         info!("Stream stopped publishing");
 
-        let mut relays = self.state.active_relays.lock().await;
-        if let Some(mut children) = relays.remove(&ctx.stream_key) {
-            for mut child in children.drain(..) {
-                let _ = child.kill().await;
-            }
-            info!("Stopped all active relay forwarders");
-        }
+        self.state.end_stream(&ctx.stream_key).await;
     }
 
     async fn on_disconnect(&self, ctx: &SessionContext) {

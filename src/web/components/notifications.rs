@@ -1,8 +1,7 @@
 use crate::server::state::ProxyState;
 use crate::web::components::ui::card::{card, card_content, card_header, card_title};
-use crate::web::components::ui::input::input;
-use crate::web::components::ui::label::label;
-use crate::web::components::ui::switch::switch;
+use crate::web::components::ui::form::{clearable_secret_field, form_field};
+use crate::web::components::ui::textarea::textarea;
 use std::sync::Arc;
 use topcoat::{
     context::{app_context, Cx},
@@ -16,59 +15,39 @@ pub async fn notifications(cx: &Cx) -> Result {
     let config = state.config.read().await;
     view! {
         card(
-            attrs: attributes! { class="mb-8" },
+            attrs: attributes! { class="h-full" },
             card_header(
                 card_title("Notifications")
             )
             card_content(
                 <div class="flex flex-col gap-6">
-                    <div class="flex flex-col gap-2">
-                        label(attrs: attributes! { for="live_message" }, "Live Message (Sent when stream starts)")
-                        <textarea
+                    form_field(
+                        control_id: "live_message",
+                        label_text: "Live Message (Sent when stream starts)",
+                        textarea(attrs: attributes! {
                             id="live_message"
                             name="notifications[live_message]"
                             placeholder="Stream is LIVE!"
-                            class="min-h-[80px] w-full rounded-lg border border-border bg-background px-3 py-2 text-sm shadow-xs transition-colors outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-y"
-                        >(config.notifications.live_message.clone())</textarea>
-                    </div>
+                        }, (config.notifications.live_message.clone()))
+                    )
 
-                    <div class="flex flex-col md:flex-row gap-6">
-                        <div class="flex-1 flex flex-col gap-2">
-                            label(attrs: attributes! { for="discord_webhook" }, "Discord Webhook URL (Optional)")
-                            input(attrs: attributes! {
-                                type="password"
-                                id="discord_webhook"
-                                name="notifications[discord_webhook]"
-                                value=""
-                                placeholder=(if config.notifications.discord_webhook.is_some() { "Configured — leave blank to keep it" } else { "https://discord.com/api/webhooks/..." })
-                            })
-                            <div class="flex items-center gap-2 mt-1">
-                                switch(attrs: attributes! {
-                                    id="clear_discord_webhook"
-                                    name="notifications[clear_discord_webhook]"
-                                    value="true"
-                                })
-                                label(attrs: attributes! { for="clear_discord_webhook" class="text-muted-foreground" }, "Clear configured Discord webhook")
-                            </div>
-                        </div>
-                        <div class="flex-1 flex flex-col gap-2">
-                            label(attrs: attributes! { for="generic_webhook" }, "Generic Webhook URL (Optional)")
-                            input(attrs: attributes! {
-                                type="password"
-                                id="generic_webhook"
-                                name="notifications[webhook_url]"
-                                value=""
-                                placeholder=(if config.notifications.webhook_url.is_some() { "Configured — leave blank to keep it" } else { "https://api.example.com/webhook" })
-                            })
-                            <div class="flex items-center gap-2 mt-1">
-                                switch(attrs: attributes! {
-                                    id="clear_generic_webhook"
-                                    name="notifications[clear_webhook_url]"
-                                    value="true"
-                                })
-                                label(attrs: attributes! { for="clear_generic_webhook" class="text-muted-foreground" }, "Clear configured generic webhook")
-                            </div>
-                        </div>
+                    <div class="flex flex-col gap-6">
+                        clearable_secret_field(
+                            control_id: "discord_webhook",
+                            name: "notifications[discord_webhook]",
+                            clear_name: "notifications[clear_discord_webhook]",
+                            label_text: "Discord Webhook URL (Optional)",
+                            empty_placeholder: "https://discord.com/api/webhooks/...",
+                            configured: config.notifications.discord_webhook.is_some()
+                        )
+                        clearable_secret_field(
+                            control_id: "generic_webhook",
+                            name: "notifications[webhook_url]",
+                            clear_name: "notifications[clear_webhook_url]",
+                            label_text: "Generic Webhook URL (Optional)",
+                            empty_placeholder: "https://api.example.com/webhook",
+                            configured: config.notifications.webhook_url.is_some()
+                        )
                     </div>
                 </div>
             )

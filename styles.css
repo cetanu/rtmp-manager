@@ -86,3 +86,22 @@
     @apply bg-background font-sans text-foreground;
   }
 }
+
+@layer components {
+  .stream-status-badge {
+    @apply mt-2 w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide sm:mt-0;
+  }
+
+  .stream-status-badge[data-state="offline"] {
+    @apply bg-foreground/5 text-muted-foreground;
+  }
+
+  .stream-status-badge[data-state="staged"] {
+    @apply bg-primary text-primary-foreground;
+  }
+
+  .stream-status-badge[data-state="live"],
+  .stream-status-badge[data-state="error"] {
+    @apply bg-destructive text-destructive-foreground;
+  }
+}

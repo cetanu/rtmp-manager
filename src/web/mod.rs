@@ -24,14 +24,19 @@ use topcoat::{
 pub mod auth;
 pub mod components;
 use components::{
-    actions_panel::actions_panel, chat_inbox::chat_inbox, chat_settings::chat_settings,
-    config_transfer::config_transfer, metrics::metrics_grid, notifications::notifications,
-    server_settings::server_settings, targets::targets, web_auth::web_auth,
+    chat_inbox::chat_inbox, config_transfer::config_transfer,
+    configuration_form::configuration_form, metrics::metrics_grid, stream_preview::stream_preview,
 };
 
 pub(crate) const TAILWIND_STYLESHEET: topcoat::asset::Asset = topcoat::tailwind::stylesheet!();
 pub(crate) const CHAT_EVENTS_SCRIPT: topcoat::asset::Asset =
     topcoat::asset::asset!("static/chat-events.js");
+pub(crate) const HLS_PLAYER_SCRIPT: topcoat::asset::Asset =
+    topcoat::asset::asset!("static/hls.min.js");
+pub(crate) const HLS_PLAYER_LICENSE: topcoat::asset::Asset =
+    topcoat::asset::asset!("static/hls.LICENSE.txt");
+pub(crate) const STREAM_PREVIEW_SCRIPT: topcoat::asset::Asset =
+    topcoat::asset::asset!("static/stream-preview.js");
 
 pub async fn run_web_server(
     state: Arc<ProxyState>,
@@ -60,36 +65,85 @@ async fn home() -> Result {
         <head>
             <meta charset="UTF-8" />
             <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-            <title>"Stream Infrastructure Proxy"</title>
+            <title>"RTMP Manager"</title>
             <meta name="description" content="Configuration dashboard for the RTMP Stream Multiplexer." />
             <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
             <link rel="stylesheet" href=(TAILWIND_STYLESHEET) />
             topcoat::runtime::script()
+            <script src=(HLS_PLAYER_SCRIPT) defer="defer"></script>
+            <script src=(STREAM_PREVIEW_SCRIPT) defer="defer"></script>
             <script src=(CHAT_EVENTS_SCRIPT) defer="defer"></script>
         </head>
         <body class="min-h-screen bg-background text-foreground font-sans antialiased relative">
-            <header class="sticky top-0 z-50 w-full border-b bg-background/80 backdrop-blur py-8 text-center">
-                <h1 class="text-3xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500 mb-2">"Stream Infra"</h1>
-                <p class="text-muted-foreground text-sm">"RTMP Multiplexer Configuration"</p>
-            </header>
-
-            <div class="container mx-auto max-w-4xl px-4 py-8">
+            <div class="container mx-auto max-w-7xl px-4 py-8">
                 metrics_grid()
+                stream_preview()
                 chat_inbox()
 
-                <form id="configForm" method="post" action="/api/config" class="flex flex-col gap-6 relative">
-                    server_settings()
-                    web_auth()
-                    chat_settings()
-                    notifications()
-                    targets()
-                    actions_panel()
-                </form>
+                configuration_form()
                 config_transfer()
             </div>
         </body>
         </html>
     }
+}
+
+#[topcoat::router::path_param]
+struct PreviewFile(str);
+
+#[route(GET "/api/preview/{preview_file}")]
+async fn get_preview_file(cx: &Cx) -> Result<topcoat::router::Response> {
+    let state: &Arc<ProxyState> = app_context(cx);
+    let name = topcoat::router::path_param::<PreviewFile>(cx);
+    let Some(path) = state.preview_file(name) else {
+        return Err(topcoat::router::not_found().into());
+    };
+    let bytes = match tokio::fs::read(path).await {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(topcoat::router::not_found().into());
+        }
+        Err(error) => return Err(topcoat::router::internal_server_error(error).into()),
+    };
+    let content_type = if name.ends_with(".m3u8") {
+        "application/vnd.apple.mpegurl"
+    } else {
+        "video/mp2t"
+    };
+    let mut response = topcoat::router::Response::new(topcoat::router::Body::from(bytes));
+    response.headers_mut().insert(
+        topcoat::router::header::CONTENT_TYPE,
+        topcoat::router::HeaderValue::from_static(content_type),
+    );
+    response.headers_mut().insert(
+        topcoat::router::header::CACHE_CONTROL,
+        topcoat::router::HeaderValue::from_static("no-store"),
+    );
+    Ok(response)
+}
+
+#[route(GET "/api/stream/status")]
+async fn get_stream_status(cx: &Cx) -> Result<Json<crate::server::state::StreamStatus>> {
+    let state: &Arc<ProxyState> = app_context(cx);
+    Ok(Json(state.stream_status().await))
+}
+
+#[route(POST "/api/stream/publish")]
+async fn publish_stream(cx: &Cx) -> Result<topcoat::router::Response> {
+    let state: &Arc<ProxyState> = app_context(cx);
+    if let Err(error) = state.publish_staged_stream().await {
+        return Err(topcoat::router::bad_request(error.to_string()).into());
+    }
+    topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
+}
+
+#[route(POST "/api/stream/stop-publishing")]
+async fn stop_publishing_stream(cx: &Cx) -> Result<topcoat::router::Response> {
+    let state: &Arc<ProxyState> = app_context(cx);
+    if let Err(error) = state.stop_publishing().await {
+        return Err(topcoat::router::bad_request(error.to_string()).into());
+    }
+    topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
 }
 
 #[derive(Debug, Deserialize)]
@@ -149,6 +203,7 @@ struct ServerForm {
     listen: Option<String>,
     health_listen: Option<String>,
     api_listen: Option<String>,
+    test_stream_duration_secs: Option<u64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -235,6 +290,9 @@ fn merge_form(current: &AppConfig, form: ConfigForm) -> anyhow::Result<AppConfig
                 "health listen",
             )?,
             api_listen: parse_address(server.api_listen, config.server.api_listen, "API listen")?,
+            test_stream_duration_secs: server
+                .test_stream_duration_secs
+                .unwrap_or(config.server.test_stream_duration_secs),
         };
     }
     if let Some(notification_fields) = form.notifications {
@@ -499,20 +557,30 @@ async fn import_config_file(
 #[route(POST "/api/test-stream")]
 async fn test_stream(cx: &Cx) -> Result<topcoat::router::Response> {
     let state: &Arc<ProxyState> = app_context(cx);
-    let url = format!("rtmp://127.0.0.1:{}/live/test_stream", state.listen_port);
+    let duration_secs = state.config.read().await.server.test_stream_duration_secs;
+    let url = format!(
+        "rtmp://127.0.0.1:{}/live/{}",
+        state.listen_port,
+        crate::server::TEST_STREAM_KEY
+    );
     tokio::spawn(async move {
-        tracing::info!("Starting 15s test stream via ffmpeg to local ingest...");
+        tracing::info!(
+            duration_secs,
+            "Starting test stream via ffmpeg to local ingest..."
+        );
+        let video_source = format!("testsrc=duration={duration_secs}:size=1280x720:rate=30");
+        let audio_source = format!("sine=frequency=1000:duration={duration_secs}");
         let _ = tokio::process::Command::new("ffmpeg")
             .args([
                 "-re",
                 "-f",
                 "lavfi",
                 "-i",
-                "testsrc=duration=15:size=1280x720:rate=30",
+                &video_source,
                 "-f",
                 "lavfi",
                 "-i",
-                "sine=frequency=1000:duration=15",
+                &audio_source,
                 "-c:v",
                 "libx264",
                 "-preset",
@@ -695,6 +763,7 @@ mod tests {
                 listen: "0.0.0.0:1935".parse().unwrap(),
                 health_listen: "127.0.0.1:8080".parse().unwrap(),
                 api_listen: "10.0.0.1:3000".parse().unwrap(),
+                test_stream_duration_secs: 15,
             },
             notifications: NotificationSettings {
                 discord_webhook: Some("https://discord.test/hook".into()),
@@ -731,6 +800,7 @@ mod tests {
 
         assert_eq!(updated.server.listen, "127.0.0.1:1936".parse().unwrap());
         assert_eq!(updated.server.api_listen, "10.0.0.1:3000".parse().unwrap());
+        assert_eq!(updated.server.test_stream_duration_secs, 15);
         assert_eq!(updated.notifications.live_message, "Still live");
         assert_eq!(updated.targets.len(), 1);
         assert_eq!(updated.targets[0].stream_key, "secret");
@@ -739,6 +809,18 @@ mod tests {
             updated.chat.ingest_token.as_deref(),
             Some("generic-ingest-token")
         );
+    }
+
+    #[test]
+    fn test_stream_duration_is_configurable() {
+        let form: ConfigForm = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str("server%5Btest_stream_duration_secs%5D=30&action=save")
+            .unwrap();
+        let updated = merge_form(&populated_config(), form).unwrap();
+
+        assert_eq!(updated.server.test_stream_duration_secs, 30);
+        updated.validate().unwrap();
     }
 
     #[test]
@@ -917,8 +999,8 @@ async fn get_metrics(cx: &Cx) -> Result<Json<WebMetrics>> {
         .total_connections
         .load(std::sync::atomic::Ordering::Relaxed);
 
+    let active_streams = usize::from(state.stream_status().await.active);
     let relays_guard = state.active_relays.lock().await;
-    let active_streams = relays_guard.len();
     let active_relays = relays_guard.values().map(|v| v.len()).sum();
     drop(relays_guard);
 
