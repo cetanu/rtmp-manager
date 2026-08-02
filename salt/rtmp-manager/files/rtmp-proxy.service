@@ -12,6 +12,7 @@ Restart=always
 RestartSec=5s
 LimitNOFILE=65536
 Environment=RUST_LOG=rtmp_proxy=info,rtmp_rs=info
+Environment=PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin
 EnvironmentFile=-/etc/rtmp-proxy.env
 
 [Install]
