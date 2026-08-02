@@ -4,7 +4,7 @@ use std::{fs, path::Path};
 use topcoat::asset::{Asset, MANIFEST_NAME, MANIFEST_VERSION, Manifest, ManifestEntry};
 
 const TAILWIND_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/tailwind.css"));
-// Vendored from topcoat-runtime 0.4.0 so the browser runtime is part of the
+// Vendored from topcoat-runtime 0.5.0 so the browser runtime is part of the
 // same release artifact as the server executable.
 const TOPCOAT_RUNTIME: &[u8] = include_bytes!("../static/topcoat-runtime.js");
 const CHAT_EVENTS: &[u8] = include_bytes!("../static/chat-events.js");
@@ -95,7 +95,7 @@ fn write_asset(asset_dir: &Path, asset: &EmbeddedAsset) -> Result<ManifestEntry>
         .with_context(|| format!("failed to write embedded asset {file}"))?;
 
     Ok(ManifestEntry {
-        id: asset.id,
+        id: asset.id.id(),
         file,
         hash,
         content_type: asset.content_type.to_owned(),
@@ -119,12 +119,12 @@ mod tests {
         install(&executable, crate::web::TAILWIND_STYLESHEET).unwrap();
         let bundle = AssetBundle::load_dir(test_dir.join("assets")).unwrap();
 
-        assert!(bundle.get(crate::web::TAILWIND_STYLESHEET).is_some());
-        assert!(bundle.get(topcoat::runtime::SCRIPT).is_some());
-        assert!(bundle.get(crate::web::CHAT_EVENTS_SCRIPT).is_some());
-        assert!(bundle.get(crate::web::HLS_PLAYER_SCRIPT).is_some());
-        assert!(bundle.get(crate::web::HLS_PLAYER_LICENSE).is_some());
-        assert!(bundle.get(crate::web::STREAM_PREVIEW_SCRIPT).is_some());
+        assert!(bundle.get(crate::web::TAILWIND_STYLESHEET.id()).is_some());
+        assert!(bundle.get(topcoat::runtime::SCRIPT.id()).is_some());
+        assert!(bundle.get(crate::web::CHAT_EVENTS_SCRIPT.id()).is_some());
+        assert!(bundle.get(crate::web::HLS_PLAYER_SCRIPT.id()).is_some());
+        assert!(bundle.get(crate::web::HLS_PLAYER_LICENSE.id()).is_some());
+        assert!(bundle.get(crate::web::STREAM_PREVIEW_SCRIPT.id()).is_some());
 
         fs::remove_dir_all(test_dir).unwrap();
     }

@@ -124,6 +124,7 @@
     await refresh();
   }
 
+  window.addEventListener("rtmp:stream-status", (event) => render(event.detail));
   publishButton.addEventListener("click", () => performAction("/api/stream/publish"));
   stopButton.addEventListener("click", () => performAction("/api/stream/stop-publishing"));
   if (testButton) {
@@ -133,5 +134,5 @@
     });
   }
   refresh();
-  window.setInterval(refresh, 1000);
+  if (!window.WebSocket) window.setInterval(refresh, 1000);
 })();

@@ -4,12 +4,8 @@ use crate::config::{
 };
 use crate::server::state::ProxyState;
 use anyhow::Context;
-use bytes::Bytes;
-use futures_util::stream;
-use http_body::Frame;
-use http_body_util::StreamBody;
-use serde::Deserialize;
-use std::convert::Infallible;
+use futures_util::{SinkExt, StreamExt};
+use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -17,7 +13,16 @@ use topcoat::asset::{AssetBundle, RouterBuilderAssetExt};
 use topcoat::{
     Result,
     context::{Cx, app_context},
-    router::{Json, Router, RouterBuilderDiscoverExt, page, route},
+    router::{
+        Router, RouterBuilderDiscoverExt,
+        content::{
+            Json,
+            multipart::Multipart,
+            websocket::{Message, WebSocketUpgrade},
+        },
+        error::{bad_request, internal_server_error, not_found, unauthorized},
+        page, route,
+    },
     view::view,
 };
 
@@ -96,14 +101,14 @@ async fn get_preview_file(cx: &Cx) -> Result<topcoat::router::Response> {
     let state: &Arc<ProxyState> = app_context(cx);
     let name = topcoat::router::path_param::<PreviewFile>(cx);
     let Some(path) = state.preview_file(name) else {
-        return Err(topcoat::router::not_found().into());
+        return Err(not_found().into());
     };
     let bytes = match tokio::fs::read(path).await {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Err(topcoat::router::not_found().into());
+            return Err(not_found().into());
         }
-        Err(error) => return Err(topcoat::router::internal_server_error(error).into()),
+        Err(error) => return Err(internal_server_error(error).into()),
     };
     let content_type = if name.ends_with(".m3u8") {
         "application/vnd.apple.mpegurl"
@@ -132,7 +137,7 @@ async fn get_stream_status(cx: &Cx) -> Result<Json<crate::server::state::StreamS
 async fn publish_stream(cx: &Cx) -> Result<topcoat::router::Response> {
     let state: &Arc<ProxyState> = app_context(cx);
     if let Err(error) = state.publish_staged_stream().await {
-        return Err(topcoat::router::bad_request(error.to_string()).into());
+        return Err(bad_request(error.to_string()).into());
     }
     topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
 }
@@ -141,7 +146,7 @@ async fn publish_stream(cx: &Cx) -> Result<topcoat::router::Response> {
 async fn stop_publishing_stream(cx: &Cx) -> Result<topcoat::router::Response> {
     let state: &Arc<ProxyState> = app_context(cx);
     if let Err(error) = state.stop_publishing().await {
-        return Err(topcoat::router::bad_request(error.to_string()).into());
+        return Err(bad_request(error.to_string()).into());
     }
     topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
 }
@@ -398,7 +403,7 @@ async fn update_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
         Ok(f) => f,
         Err(e) => {
             tracing::error!("Failed to parse form: {}", e);
-            return Err(topcoat::router::bad_request("Invalid form data").into());
+            return Err(bad_request("Invalid form data").into());
         }
     };
 
@@ -409,10 +414,9 @@ async fn update_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
         && form.targets.is_none()
     {
         tracing::error!("Config form contained no recognized configuration fields");
-        return Err(topcoat::router::bad_request(
-            "No configuration fields were recognized; nothing was saved",
-        )
-        .into());
+        return Err(
+            bad_request("No configuration fields were recognized; nothing was saved").into(),
+        );
     }
 
     let action = form.action.clone().unwrap_or_default();
@@ -427,7 +431,7 @@ async fn update_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
     let mut config_write = state.config.write().await;
     let mut updated = match merge_form(&config_write, form) {
         Ok(config) => config,
-        Err(error) => return Err(topcoat::router::bad_request(error.to_string()).into()),
+        Err(error) => return Err(bad_request(error.to_string()).into()),
     };
 
     if action == "add_target" {
@@ -447,7 +451,7 @@ async fn update_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
     }
 
     if let Err(error) = updated.validate() {
-        return Err(topcoat::router::bad_request(error.to_string()).into());
+        return Err(bad_request(error.to_string()).into());
     }
 
     let changed = updated != *config_write;
@@ -455,14 +459,14 @@ async fn update_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
     if changed {
         if let Err(e) = state.config_store.save(&updated) {
             tracing::error!("Failed to save configuration to SQLite: {}", e);
-            return Err(topcoat::router::internal_server_error(e).into());
+            return Err(internal_server_error(e).into());
         }
         *config_write = updated;
     }
     drop(config_write);
     if chat_changed && let Err(error) = state.apply_chat_config().await {
         tracing::error!("Failed to apply chat configuration: {error:#}");
-        return Err(topcoat::router::internal_server_error(error).into());
+        return Err(internal_server_error(error).into());
     }
     topcoat::router::IntoResponse::into_response(redirect, cx)
 }
@@ -483,7 +487,7 @@ async fn get_config(cx: &Cx) -> Result<topcoat::router::Response> {
 async fn import_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat::router::Response> {
     let imported = match parse_imported_config(&body) {
         Ok(config) => config,
-        Err(error) => return Err(topcoat::router::bad_request(error.to_string()).into()),
+        Err(error) => return Err(bad_request(error.to_string()).into()),
     };
 
     let state: &Arc<ProxyState> = app_context(cx);
@@ -493,7 +497,7 @@ async fn import_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
     if changed {
         if let Err(error) = state.config_store.save(&imported) {
             tracing::error!("Failed to import configuration into SQLite: {}", error);
-            return Err(topcoat::router::internal_server_error(error).into());
+            return Err(internal_server_error(error).into());
         }
         *config_write = imported;
     }
@@ -508,7 +512,7 @@ async fn import_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
 #[route(POST "/api/config/import-file")]
 async fn import_config_file(
     cx: &Cx,
-    mut multipart: topcoat::router::Multipart,
+    mut multipart: Multipart,
 ) -> Result<topcoat::router::Response> {
     const MAX_CONFIG_SIZE: usize = 1024 * 1024;
 
@@ -517,21 +521,17 @@ async fn import_config_file(
         if field.name() == Some("config_file") {
             let bytes = field.bytes().await?;
             if bytes.len() > MAX_CONFIG_SIZE {
-                return Err(topcoat::router::bad_request(
-                    "JSON configuration must be no larger than 1 MiB",
-                )
-                .into());
+                return Err(bad_request("JSON configuration must be no larger than 1 MiB").into());
             }
             config_bytes = Some(bytes);
             break;
         }
     }
-    let config_bytes = config_bytes.ok_or_else(|| {
-        topcoat::router::bad_request("The form did not contain a config_file upload")
-    })?;
+    let config_bytes =
+        config_bytes.ok_or_else(|| bad_request("The form did not contain a config_file upload"))?;
     let imported = match parse_imported_config(&config_bytes) {
         Ok(config) => config,
-        Err(error) => return Err(topcoat::router::bad_request(error.to_string()).into()),
+        Err(error) => return Err(bad_request(error.to_string()).into()),
     };
 
     let state: &Arc<ProxyState> = app_context(cx);
@@ -541,7 +541,7 @@ async fn import_config_file(
     if changed {
         if let Err(error) = state.config_store.save(&imported) {
             tracing::error!("Failed to import configuration into SQLite: {}", error);
-            return Err(topcoat::router::internal_server_error(error).into());
+            return Err(internal_server_error(error).into());
         }
         *config_write = imported;
     }
@@ -561,10 +561,9 @@ async fn test_stream(cx: &Cx) -> Result<topcoat::router::Response> {
     let stream_key = config.server.ingest_stream_key.clone();
     drop(config);
     if stream_key.is_empty() {
-        return Err(topcoat::router::bad_request(
-            "Configure an ingest stream key before starting a test stream",
-        )
-        .into());
+        return Err(
+            bad_request("Configure an ingest stream key before starting a test stream").into(),
+        );
     }
     let url = format!("rtmp://127.0.0.1:{}/live/{}", state.listen_port, stream_key);
     tokio::spawn(async move {
@@ -671,42 +670,70 @@ async fn acknowledge_chat_message(
     topcoat::router::IntoResponse::into_response(Json(inbox.snapshot()?), cx)
 }
 
-#[route(GET "/api/chat/events")]
-async fn chat_events(cx: &Cx) -> Result<topcoat::router::Response> {
+#[derive(Serialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+enum ServerEvent {
+    StreamStatus(crate::server::state::StreamStatus),
+    ChatChanged,
+}
+
+#[route(GET "/api/events")]
+async fn server_events(cx: &Cx, upgrade: WebSocketUpgrade) -> Result<topcoat::router::Response> {
     let state: &Arc<ProxyState> = app_context(cx);
-    let receiver = state.subscribe_chat_changes();
-    let events = stream::unfold((receiver, true), |(mut receiver, initial)| async move {
-        let payload = if initial {
-            format!("event: chat\ndata: {}\n\n", *receiver.borrow())
-        } else {
+    let state = Arc::clone(state);
+    upgrade.on_upgrade(|socket| async move {
+        let (mut sender, mut receiver) = socket.split();
+        let mut chat_changes = state.subscribe_chat_changes();
+        let mut status_interval = tokio::time::interval(std::time::Duration::from_millis(250));
+        let mut last_status = state.stream_status().await;
+
+        let initial_events = [
+            ServerEvent::StreamStatus(last_status),
+            ServerEvent::ChatChanged,
+        ];
+        for event in initial_events {
+            let Ok(payload) = serde_json::to_string(&event) else {
+                return;
+            };
+            if sender.send(Message::text(payload)).await.is_err() {
+                return;
+            }
+        }
+
+        loop {
             tokio::select! {
-                changed = receiver.changed() => {
-                    if changed.is_err() {
-                        return None;
+                _ = status_interval.tick() => {
+                    let status = state.stream_status().await;
+                    if status != last_status {
+                        last_status = status;
+                        let Ok(payload) = serde_json::to_string(&ServerEvent::StreamStatus(status)) else {
+                            break;
+                        };
+                        if sender.send(Message::text(payload)).await.is_err() {
+                            break;
+                        }
                     }
-                    format!("event: chat\ndata: {}\n\n", *receiver.borrow_and_update())
                 }
-                _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
-                    ": keep-alive\n\n".to_string()
+                changed = chat_changes.changed() => {
+                    if changed.is_err() {
+                        break;
+                    }
+                    let Ok(payload) = serde_json::to_string(&ServerEvent::ChatChanged) else {
+                        break;
+                    };
+                    if sender.send(Message::text(payload)).await.is_err() {
+                        break;
+                    }
+                }
+                message = receiver.next() => {
+                    match message {
+                        Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                        _ => {}
+                    }
                 }
             }
-        };
-        Some((
-            Ok::<_, Infallible>(Frame::data(Bytes::from(payload))),
-            (receiver, false),
-        ))
-    });
-    let mut response =
-        topcoat::router::Response::new(topcoat::router::Body::new(StreamBody::new(events)));
-    response.headers_mut().insert(
-        topcoat::router::header::CONTENT_TYPE,
-        topcoat::router::HeaderValue::from_static("text/event-stream"),
-    );
-    response.headers_mut().insert(
-        topcoat::router::header::CACHE_CONTROL,
-        topcoat::router::HeaderValue::from_static("no-cache, no-transform"),
-    );
-    Ok(response)
+        }
+    })
 }
 
 #[route(POST "/api/chat/ingest")]
@@ -733,7 +760,7 @@ async fn ingest_chat_message(
         );
     };
     if !bearer_token(cx).is_some_and(|submitted| token_matches(expected_token, submitted)) {
-        return Err(topcoat::router::unauthorized().into());
+        return Err(unauthorized().into());
     }
 
     let mut inbox = state.chat_inbox.lock().await;
@@ -741,7 +768,7 @@ async fn ingest_chat_message(
         Ok(EnqueueOutcome::Accepted) => "accepted",
         Ok(EnqueueOutcome::Duplicate) => "duplicate",
         Ok(EnqueueOutcome::Dropped) => "dropped",
-        Err(error) => return Err(topcoat::router::bad_request(error.to_string()).into()),
+        Err(error) => return Err(bad_request(error.to_string()).into()),
     };
     if outcome != "duplicate" {
         state.notify_chat_changed();

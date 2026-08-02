@@ -41,7 +41,7 @@ struct StagedStream {
     published: bool,
 }
 
-#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct StreamStatus {
     pub active: bool,
     pub preview_ready: bool,
