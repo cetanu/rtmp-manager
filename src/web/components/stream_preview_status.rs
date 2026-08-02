@@ -1,8 +1,8 @@
 use crate::web::components::ui::card::card_title;
 use crate::web::components::ui::status_badge::status_badge;
 use topcoat::{
-    view::{attributes, component, view},
     Result,
+    view::{attributes, component, view},
 };
 
 #[component]

@@ -1,25 +1,25 @@
 use crate::server::state::ProxyState;
 use crate::web::components::chat_inbox_content::chat_inbox_content;
-use crate::web::components::ui::button::{button_variants, ButtonSize, ButtonVariant};
+use crate::web::components::ui::button::{ButtonSize, ButtonVariant, button_variants};
 use crate::web::components::ui::card::{
     card, card_description, card_footer, card_header, card_title,
 };
 use std::sync::Arc;
 use topcoat::{
-    context::{app_context, Cx},
+    Result,
+    context::{Cx, app_context},
     runtime::procedure,
     view::{attributes, component, view},
-    Result,
 };
 
 #[procedure]
 async fn acknowledge_chat(cx: &Cx, displayed_id: String) -> Result<String> {
     let state: &Arc<ProxyState> = app_context(cx);
     let mut inbox = state.chat_inbox.lock().await;
-    if let Ok(displayed_id) = displayed_id.parse() {
-        if inbox.acknowledge(displayed_id)? {
-            state.notify_chat_changed();
-        }
+    if let Ok(displayed_id) = displayed_id.parse()
+        && inbox.acknowledge(displayed_id)?
+    {
+        state.notify_chat_changed();
     }
     Ok(current_message_id(&inbox.snapshot()?))
 }

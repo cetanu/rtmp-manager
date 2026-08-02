@@ -1,6 +1,6 @@
 use topcoat::{
-    view::{class, component, view, Attributes},
     Result,
+    view::{Attributes, class, component, view},
 };
 
 /// The classes for the [`input`] control.

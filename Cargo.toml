@@ -1,7 +1,8 @@
 [package]
 name = "rtmp-proxy"
 version = "0.1.6"
-edition = "2021"
+edition = "2024"
+rust-version = "1.95"
 authors = ["Vasilios Syrakis <syrakis@pm.me>"]
 description = "Self-hosted RTMP multiplexer and management dashboard"
 

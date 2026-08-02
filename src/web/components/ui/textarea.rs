@@ -1,6 +1,6 @@
 use topcoat::{
-    view::{class, component, view, Attributes, View},
     Result,
+    view::{Attributes, View, class, component, view},
 };
 
 const TEXTAREA: &str = "min-h-20 w-full resize-y rounded-lg border border-border bg-background \

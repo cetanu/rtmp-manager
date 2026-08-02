@@ -1,7 +1,7 @@
 use crate::chat::youtube::YouTubeIngestStatus;
 use topcoat::{
-    view::{component, view},
     Result,
+    view::{component, view},
 };
 
 #[component]

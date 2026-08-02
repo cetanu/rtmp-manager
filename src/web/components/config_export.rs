@@ -3,10 +3,10 @@ use crate::web::components::ui::form::{field_description, form_field};
 use crate::web::components::ui::textarea::textarea;
 use std::sync::Arc;
 use topcoat::{
-    context::{app_context, Cx},
+    Result,
+    context::{Cx, app_context},
     runtime::shard,
     view::{attributes, view},
-    Result,
 };
 
 #[shard]

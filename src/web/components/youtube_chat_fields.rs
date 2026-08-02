@@ -4,8 +4,8 @@ use crate::web::components::ui::form::{
 };
 use crate::web::components::ui::input::input;
 use topcoat::{
-    view::{attributes, component, view},
     Result,
+    view::{attributes, component, view},
 };
 
 #[component]

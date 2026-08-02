@@ -1,6 +1,6 @@
 use topcoat::{
-    view::{class, component, view, Attributes, View},
     Result,
+    view::{Attributes, View, class, component, view},
 };
 
 /// The visual style of a [`button`].

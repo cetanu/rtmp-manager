@@ -2,12 +2,12 @@ use crate::server::state::ProxyState;
 use crate::web::components::target_item::target_item;
 use std::sync::Arc;
 use topcoat::{
-    context::{app_context, Cx},
-    view::{attributes, component, view},
     Result,
+    context::{Cx, app_context},
+    view::{attributes, component, view},
 };
 
-use crate::web::components::ui::button::{button, ButtonVariant};
+use crate::web::components::ui::button::{ButtonVariant, button};
 use crate::web::components::ui::card::{card, card_content, card_header, card_title};
 use crate::web::components::ui::empty_state::empty_state;
 use crate::web::components::ui::icon::plus_icon;

@@ -1,9 +1,9 @@
-use crate::web::components::ui::button::{button, ButtonVariant};
+use crate::web::components::ui::button::{ButtonVariant, button};
 use crate::web::components::ui::form::form_field;
 use crate::web::components::ui::input::input;
 use topcoat::{
-    view::{attributes, component, view},
     Result,
+    view::{attributes, component, view},
 };
 
 #[component]

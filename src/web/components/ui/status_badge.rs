@@ -1,6 +1,6 @@
 use topcoat::{
-    view::{class, component, view, Attributes, View},
     Result,
+    view::{Attributes, View, class, component, view},
 };
 
 const STATUS_BADGE: &str = "stream-status-badge";

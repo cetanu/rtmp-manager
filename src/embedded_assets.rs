@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
-use topcoat::asset::{Asset, Manifest, ManifestEntry, MANIFEST_NAME, MANIFEST_VERSION};
+use topcoat::asset::{Asset, MANIFEST_NAME, MANIFEST_VERSION, Manifest, ManifestEntry};
 
 const TAILWIND_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/tailwind.css"));
 // Vendored from topcoat-runtime 0.4.0 so the browser runtime is part of the

@@ -1,5 +1,5 @@
-use anyhow::{bail, Context, Result};
-use rusqlite::{params, Connection, OptionalExtension};
+use anyhow::{Context, Result, bail};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::net::SocketAddr;
@@ -705,27 +705,33 @@ mod tests {
 
         config.web_auth.username = "operator".into();
         config.chat.ingest_token = Some("too-short".into());
-        assert!(config
-            .validate()
-            .unwrap_err()
-            .to_string()
-            .contains("at least 16"));
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("at least 16")
+        );
 
         config.chat.ingest_token = None;
         config.chat.twitch_channel = Some("invalid-channel!".into());
-        assert!(config
-            .validate()
-            .unwrap_err()
-            .to_string()
-            .contains("letters, numbers, or underscores"));
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("letters, numbers, or underscores")
+        );
 
         config.chat.twitch_channel = None;
         config.server.ingest_stream_key = "unsafe/key".into();
-        assert!(config
-            .validate()
-            .unwrap_err()
-            .to_string()
-            .contains("letters, numbers, hyphens, or underscores"));
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("letters, numbers, hyphens, or underscores")
+        );
     }
 
     #[test]

@@ -4,9 +4,9 @@ use crate::web::components::ui::form::form_field;
 use crate::web::components::ui::input::input;
 use std::sync::Arc;
 use topcoat::{
-    context::{app_context, Cx},
-    view::{attributes, component, view},
     Result,
+    context::{Cx, app_context},
+    view::{attributes, component, view},
 };
 
 #[component]

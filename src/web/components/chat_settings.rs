@@ -6,9 +6,9 @@ use crate::web::components::ui::card::{
 use crate::web::components::youtube_chat_fields::youtube_chat_fields;
 use std::sync::Arc;
 use topcoat::{
-    context::{app_context, Cx},
-    view::{attributes, component, view},
     Result,
+    context::{Cx, app_context},
+    view::{attributes, component, view},
 };
 
 #[component]

@@ -27,10 +27,10 @@ impl DiscordNotifier {
 
         let mut links = Vec::new();
         for target in targets {
-            if let Some(url) = &target.public_url {
-                if !url.trim().is_empty() {
-                    links.push(format!("[{}]({})", target.name, url.trim()));
-                }
+            if let Some(url) = &target.public_url
+                && !url.trim().is_empty()
+            {
+                links.push(format!("[{}]({})", target.name, url.trim()));
             }
         }
 

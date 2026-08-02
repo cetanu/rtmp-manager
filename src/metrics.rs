@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tracing::info;

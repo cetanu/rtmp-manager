@@ -1,10 +1,10 @@
 use crate::server::state::ProxyState;
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use std::sync::Arc;
 use topcoat::{
-    context::{app_context, CxBuilder},
-    router::{header, layer, Body, IntoResponse, Next, Response, StatusCode},
     Result,
+    context::{CxBuilder, app_context},
+    router::{Body, IntoResponse, Next, Response, StatusCode, header, layer},
 };
 
 const PUBLIC_INGEST_PATHS: [&str; 1] = ["/api/chat/ingest"];

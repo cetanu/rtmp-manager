@@ -1,12 +1,12 @@
 use crate::web::components::config_export::exported_config;
 use crate::web::components::config_import::config_import_form;
-use crate::web::components::ui::button::{button_link, button_variants, ButtonSize, ButtonVariant};
+use crate::web::components::ui::button::{ButtonSize, ButtonVariant, button_link, button_variants};
 use crate::web::components::ui::card::{
     card, card_content, card_description, card_header, card_title,
 };
 use topcoat::{
-    view::{attributes, component, view},
     Result,
+    view::{attributes, component, view},
 };
 
 #[component]

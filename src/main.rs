@@ -10,7 +10,7 @@ mod web;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use config::ConfigStore;
-use metrics::{run_health_server, Metrics};
+use metrics::{Metrics, run_health_server};
 use server::{run_rtmp_server, state::ProxyState};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -79,20 +79,20 @@ fn install_systemd(work_dir: &Path, config_path: &Path) -> Result<()> {
         .args(["daemon-reload"])
         .status();
 
-    if let Ok(s) = status {
-        if s.success() {
-            println!("Executed systemctl daemon-reload");
-        }
+    if let Ok(s) = status
+        && s.success()
+    {
+        println!("Executed systemctl daemon-reload");
     }
 
     let enable_status = std::process::Command::new("systemctl")
         .args(["enable", "--now", "rtmp-proxy"])
         .status();
 
-    if let Ok(s) = enable_status {
-        if s.success() {
-            println!("Successfully enabled and started rtmp-proxy systemd service!");
-        }
+    if let Ok(s) = enable_status
+        && s.success()
+    {
+        println!("Successfully enabled and started rtmp-proxy systemd service!");
     }
 
     Ok(())

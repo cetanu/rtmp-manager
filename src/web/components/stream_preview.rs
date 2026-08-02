@@ -3,8 +3,8 @@ use crate::web::components::stream_preview_player::stream_preview_player;
 use crate::web::components::stream_preview_status::stream_preview_status;
 use crate::web::components::ui::card::{card, card_content, card_header};
 use topcoat::{
-    view::{attributes, component, view},
     Result,
+    view::{attributes, component, view},
 };
 
 #[component]

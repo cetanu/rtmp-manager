@@ -1,7 +1,7 @@
-use crate::web::components::ui::button::{button, button_link, ButtonVariant};
+use crate::web::components::ui::button::{ButtonVariant, button, button_link};
 use topcoat::{
-    view::{attributes, component, view},
     Result,
+    view::{attributes, component, view},
 };
 
 #[component]

@@ -5,8 +5,8 @@ use crate::web::components::server_settings::server_settings;
 use crate::web::components::targets::targets;
 use crate::web::components::web_auth::web_auth;
 use topcoat::{
-    view::{component, view},
     Result,
+    view::{component, view},
 };
 
 #[component]

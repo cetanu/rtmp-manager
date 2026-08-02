@@ -1,6 +1,6 @@
 use crate::chat::{
-    youtube::{YouTubeChatConfig, YouTubeChatTarget, YouTubeIngestStatus},
     ChatInbox,
+    youtube::{YouTubeChatConfig, YouTubeChatTarget, YouTubeIngestStatus},
 };
 use crate::config::{AppConfig, ConfigStore};
 use crate::metrics::Metrics;
@@ -8,12 +8,12 @@ use reqwest::Client;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::Child;
-use tokio::sync::{watch, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, watch};
 use tokio::task::JoinHandle;
 
 pub struct ProxyState {
@@ -263,10 +263,10 @@ impl ProxyState {
             self.stop_relays(&stream.stream_key).await;
             let _ = stream.preview_process.kill().await;
         }
-        if let Err(error) = tokio::fs::remove_dir_all(&self.preview_dir).await {
-            if error.kind() != std::io::ErrorKind::NotFound {
-                tracing::warn!(%error, "Failed to remove HLS preview files");
-            }
+        if let Err(error) = tokio::fs::remove_dir_all(&self.preview_dir).await
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(%error, "Failed to remove HLS preview files");
         }
     }
 

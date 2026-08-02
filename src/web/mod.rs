@@ -15,10 +15,10 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use topcoat::asset::{AssetBundle, RouterBuilderAssetExt};
 use topcoat::{
-    context::{app_context, Cx},
-    router::{page, route, Json, Router, RouterBuilderDiscoverExt},
-    view::view,
     Result,
+    context::{Cx, app_context},
+    router::{Json, Router, RouterBuilderDiscoverExt, page, route},
+    view::view,
 };
 
 pub mod auth;
@@ -438,14 +438,12 @@ async fn update_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
             public_url: None,
             enabled: false,
         });
-    } else if action.starts_with("remove_target:") {
-        if let Some(idx_str) = action.split(':').nth(1) {
-            if let Ok(idx) = idx_str.parse::<usize>() {
-                if idx < updated.targets.len() {
-                    updated.targets.remove(idx);
-                }
-            }
-        }
+    } else if action.starts_with("remove_target:")
+        && let Some(idx_str) = action.split(':').nth(1)
+        && let Ok(idx) = idx_str.parse::<usize>()
+        && idx < updated.targets.len()
+    {
+        updated.targets.remove(idx);
     }
 
     if let Err(error) = updated.validate() {
@@ -462,11 +460,9 @@ async fn update_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
         *config_write = updated;
     }
     drop(config_write);
-    if chat_changed {
-        if let Err(error) = state.apply_chat_config().await {
-            tracing::error!("Failed to apply chat configuration: {error:#}");
-            return Err(topcoat::router::internal_server_error(error).into());
-        }
+    if chat_changed && let Err(error) = state.apply_chat_config().await {
+        tracing::error!("Failed to apply chat configuration: {error:#}");
+        return Err(topcoat::router::internal_server_error(error).into());
     }
     topcoat::router::IntoResponse::into_response(redirect, cx)
 }
@@ -980,16 +976,20 @@ mod tests {
     #[test]
     fn import_rejects_incomplete_or_invalid_configs() {
         let incomplete = br#"{"server": {}, "targets": []}"#;
-        assert!(parse_imported_config(incomplete)
-            .unwrap_err()
-            .to_string()
-            .contains("notifications"));
+        assert!(
+            parse_imported_config(incomplete)
+                .unwrap_err()
+                .to_string()
+                .contains("notifications")
+        );
 
         let legacy_export = br#"{"server": {}, "notifications": {}, "targets": []}"#;
-        assert!(parse_imported_config(legacy_export)
-            .unwrap_err()
-            .to_string()
-            .contains("web_auth"));
+        assert!(
+            parse_imported_config(legacy_export)
+                .unwrap_err()
+                .to_string()
+                .contains("web_auth")
+        );
 
         let invalid_target = br#"{
             "server": {},
@@ -1004,10 +1004,12 @@ mod tests {
                 "enabled": true
             }]
         }"#;
-        assert!(parse_imported_config(invalid_target)
-            .unwrap_err()
-            .to_string()
-            .contains("invalid URL"));
+        assert!(
+            parse_imported_config(invalid_target)
+                .unwrap_err()
+                .to_string()
+                .contains("invalid URL")
+        );
     }
 }
 

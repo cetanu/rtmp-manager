@@ -1,6 +1,6 @@
 use topcoat::{
-    view::{class, component, view, Attributes, View},
     Result,
+    view::{Attributes, View, class, component, view},
 };
 
 const TEXT_LINK: &str = "text-sm font-medium underline underline-offset-4 outline-none \

@@ -1,7 +1,7 @@
 use crate::chat::ChatMessage;
 use topcoat::{
-    view::{component, view},
     Result,
+    view::{component, view},
 };
 
 #[component]

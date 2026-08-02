@@ -1,11 +1,11 @@
 use crate::config::TargetConfig;
-use crate::web::components::ui::button::{button, ButtonSize, ButtonVariant};
+use crate::web::components::ui::button::{ButtonSize, ButtonVariant, button};
 use crate::web::components::ui::form::{form_field, switch_field};
 use crate::web::components::ui::icon::trash_icon;
 use crate::web::components::ui::input::input;
 use topcoat::{
-    view::{attributes, component, view},
     Result,
+    view::{attributes, component, view},
 };
 
 #[component]

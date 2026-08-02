@@ -1,12 +1,12 @@
 use crate::server::state::ProxyState;
 use crate::web::components::ui::card::{card, card_content};
 use crate::web::components::ui::link::text_link;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use topcoat::{
-    context::{app_context, Cx},
-    view::{component, view, View},
     Result,
+    context::{Cx, app_context},
+    view::{View, component, view},
 };
 
 #[component]

@@ -2,8 +2,8 @@ use crate::web::components::ui::input::input;
 use crate::web::components::ui::label::label;
 use crate::web::components::ui::switch::switch;
 use topcoat::{
-    view::{attributes, class, component, view, Attributes, View},
     Result,
+    view::{Attributes, View, attributes, class, component, view},
 };
 
 /// A labeled form field with consistent vertical spacing.

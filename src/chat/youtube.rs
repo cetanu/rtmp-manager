@@ -1,6 +1,6 @@
 use crate::chat::{EnqueueOutcome, IncomingChatMessage};
 use crate::server::state::ProxyState;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};

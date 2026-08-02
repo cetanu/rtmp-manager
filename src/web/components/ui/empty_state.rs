@@ -1,6 +1,6 @@
 use topcoat::{
-    view::{class, component, view, Attributes, View},
     Result,
+    view::{Attributes, View, class, component, view},
 };
 
 const EMPTY_STATE: &str = "rounded-xl border border-dashed p-8 text-center text-muted-foreground";
