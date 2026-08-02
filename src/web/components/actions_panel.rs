@@ -12,6 +12,7 @@ pub async fn actions_panel() -> Result {
                 button(
                     variant: ButtonVariant::Outline,
                     attrs: attributes! {
+                        id="test-stream"
                         type="submit"
                         formaction="/api/test-stream"
                         formmethod="post"

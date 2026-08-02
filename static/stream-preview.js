@@ -5,8 +5,9 @@
   const detail = document.getElementById("stream-stage-detail");
   const publishButton = document.getElementById("publish-staged-stream");
   const stopButton = document.getElementById("stop-publishing-stream");
+  const testButton = document.getElementById("test-stream");
   const errorMessage = document.getElementById("stream-action-error");
-  if (!video || !placeholder || !badge || !detail || !publishButton || !stopButton) return;
+  if (!video || !placeholder || !badge || !detail || !publishButton || !stopButton || !errorMessage) return;
 
   let player = null;
   let previewAttached = false;
@@ -104,10 +105,11 @@
     }
   }
 
-  async function performAction(url) {
+  async function performAction(url, actionButton) {
     errorMessage.classList.add("hidden");
     publishButton.disabled = true;
     stopButton.disabled = true;
+    if (actionButton) actionButton.disabled = true;
     try {
       const response = await fetch(url, { method: "POST" });
       if (!response.ok) {
@@ -118,11 +120,18 @@
       errorMessage.textContent = "The server could not be reached.";
       errorMessage.classList.remove("hidden");
     }
+    if (actionButton) actionButton.disabled = false;
     await refresh();
   }
 
   publishButton.addEventListener("click", () => performAction("/api/stream/publish"));
   stopButton.addEventListener("click", () => performAction("/api/stream/stop-publishing"));
+  if (testButton) {
+    testButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      performAction("/api/test-stream", testButton);
+    });
+  }
   refresh();
   window.setInterval(refresh, 1000);
 })();
