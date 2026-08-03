@@ -12,6 +12,7 @@ const CHAT_EVENTS: &[u8] = include_bytes!("../static/chat-events.js");
 const HLS_PLAYER: &[u8] = include_bytes!("../static/hls.min.js");
 const HLS_LICENSE: &[u8] = include_bytes!("../static/hls.LICENSE.txt");
 const STREAM_PREVIEW: &[u8] = include_bytes!("../static/stream-preview.js");
+const APP_NAVIGATION: &[u8] = include_bytes!("../static/app-navigation.js");
 
 struct EmbeddedAsset {
     id: Asset,
@@ -72,6 +73,13 @@ pub fn install(executable: &Path, tailwind_stylesheet: Asset) -> Result<()> {
             content_type: "text/javascript",
             contents: STREAM_PREVIEW,
         },
+        EmbeddedAsset {
+            id: crate::web::APP_NAVIGATION_SCRIPT,
+            stem: "app-navigation",
+            extension: "js",
+            content_type: "text/javascript",
+            contents: APP_NAVIGATION,
+        },
     ];
 
     let entries = assets
@@ -125,6 +133,7 @@ mod tests {
         assert!(bundle.get(crate::web::HLS_PLAYER_SCRIPT.id()).is_some());
         assert!(bundle.get(crate::web::HLS_PLAYER_LICENSE.id()).is_some());
         assert!(bundle.get(crate::web::STREAM_PREVIEW_SCRIPT.id()).is_some());
+        assert!(bundle.get(crate::web::APP_NAVIGATION_SCRIPT.id()).is_some());
 
         fs::remove_dir_all(test_dir).unwrap();
     }

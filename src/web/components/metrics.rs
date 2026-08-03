@@ -34,7 +34,7 @@ pub async fn metrics_grid(cx: &Cx) -> Result {
         <section class="mb-8">
             <div class="flex items-center justify-between mb-3">
                 <h2 class="text-sm font-medium text-muted-foreground">"Current activity"</h2>
-                text_link(attrs: topcoat::view::attributes! { href="/" }, "Refresh metrics")
+                text_link(attrs: topcoat::view::attributes! { href="/overview" }, "Refresh metrics")
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                 metric_card(id: "metric_streams", value: active_streams.to_string(), "Active Streams")

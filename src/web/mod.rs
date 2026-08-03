@@ -4,8 +4,8 @@ use crate::config::{
 };
 use crate::server::state::ProxyState;
 use anyhow::Context;
-use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
+use futures_util::StreamExt;
+use serde::Deserialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -18,19 +18,23 @@ use topcoat::{
         content::{
             Json,
             multipart::Multipart,
-            websocket::{Message, WebSocketUpgrade},
+            sse::{Event as SseEvent, KeepAlive, Sse},
         },
         error::{bad_request, internal_server_error, not_found, unauthorized},
         page, route,
     },
-    view::view,
+    view::{component, view},
 };
 
 pub mod auth;
 pub mod components;
 use components::{
-    chat_inbox::chat_inbox, config_transfer::config_transfer,
-    configuration_form::configuration_form, metrics::metrics_grid, stream_preview::stream_preview,
+    app_navigation::{app_navigation, page_heading},
+    chat_inbox::chat_inbox,
+    config_transfer::config_transfer,
+    configuration_form::configuration_form,
+    metrics::metrics_grid,
+    stream_preview::stream_preview,
 };
 
 pub(crate) const TAILWIND_STYLESHEET: topcoat::asset::Asset = topcoat::tailwind::stylesheet!();
@@ -42,6 +46,8 @@ pub(crate) const HLS_PLAYER_LICENSE: topcoat::asset::Asset =
     topcoat::asset::asset!("static/hls.LICENSE.txt");
 pub(crate) const STREAM_PREVIEW_SCRIPT: topcoat::asset::Asset =
     topcoat::asset::asset!("static/stream-preview.js");
+pub(crate) const APP_NAVIGATION_SCRIPT: topcoat::asset::Asset =
+    topcoat::asset::asset!("static/app-navigation.js");
 
 pub async fn run_web_server(
     state: Arc<ProxyState>,
@@ -62,15 +68,15 @@ pub async fn run_web_server(
     Ok(())
 }
 
-#[page("/")]
-async fn home() -> Result {
+#[component]
+async fn app_page(active_page: &'static str) -> Result {
     view! {
         <!DOCTYPE html>
         <html lang="en" class="dark">
         <head>
             <meta charset="UTF-8" />
             <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-            <title>"RTMP Manager"</title>
+            <title>(format!("{} · RTMP Manager", page_title(active_page)))</title>
             <meta name="description" content="Configuration dashboard for the RTMP Stream Multiplexer." />
             <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
             <link rel="stylesheet" href=(TAILWIND_STYLESHEET) />
@@ -78,19 +84,78 @@ async fn home() -> Result {
             <script src=(HLS_PLAYER_SCRIPT) defer="defer"></script>
             <script src=(STREAM_PREVIEW_SCRIPT) defer="defer"></script>
             <script src=(CHAT_EVENTS_SCRIPT) defer="defer"></script>
+            <script src=(APP_NAVIGATION_SCRIPT) defer="defer"></script>
         </head>
-        <body class="min-h-screen bg-background text-foreground font-sans antialiased relative">
-            <div class="container mx-auto max-w-7xl px-4 py-8">
-                metrics_grid()
-                stream_preview()
-                chat_inbox()
-
-                configuration_form()
-                config_transfer()
-            </div>
+        <body class="min-h-screen bg-background text-foreground font-sans antialiased">
+            app_navigation(active_page: active_page)
+            <main class="mx-auto max-w-7xl px-4 py-8 sm:py-10">
+                <section data-app-page="overview" hidden=(active_page != "overview")>
+                    page_heading(
+                        title: "Overview",
+                        description: "Monitor ingest activity, review the local preview, and control when a staged stream goes live."
+                    )
+                    metrics_grid()
+                    stream_preview()
+                </section>
+                <section data-app-page="chat" hidden=(active_page != "chat")>
+                    page_heading(
+                        title: "Chat",
+                        description: "Review and acknowledge incoming messages from every connected chat source."
+                    )
+                    chat_inbox()
+                </section>
+                configuration_form(active_page: active_page)
+                <section data-app-page="export" hidden=(active_page != "export")>
+                    page_heading(
+                        title: "Export",
+                        description: "Back up, inspect, or replace the complete RTMP Manager configuration."
+                    )
+                    config_transfer()
+                </section>
+            </main>
         </body>
         </html>
     }
+}
+
+fn page_title(page: &str) -> &'static str {
+    match page {
+        "chat" => "Chat",
+        "settings" => "Settings",
+        "targets" => "Targets",
+        "export" => "Export",
+        _ => "Overview",
+    }
+}
+
+#[page("/")]
+async fn home() -> Result {
+    view! { app_page(active_page: "overview") }
+}
+
+#[page("/overview")]
+async fn overview_page() -> Result {
+    view! { app_page(active_page: "overview") }
+}
+
+#[page("/chat")]
+async fn chat_page() -> Result {
+    view! { app_page(active_page: "chat") }
+}
+
+#[page("/settings")]
+async fn settings_page() -> Result {
+    view! { app_page(active_page: "settings") }
+}
+
+#[page("/targets")]
+async fn targets_page() -> Result {
+    view! { app_page(active_page: "targets") }
+}
+
+#[page("/export")]
+async fn export_page() -> Result {
+    view! { app_page(active_page: "export") }
 }
 
 #[topcoat::router::path_param]
@@ -131,24 +196,6 @@ async fn get_preview_file(cx: &Cx) -> Result<topcoat::router::Response> {
 async fn get_stream_status(cx: &Cx) -> Result<Json<crate::server::state::StreamStatus>> {
     let state: &Arc<ProxyState> = app_context(cx);
     Ok(Json(state.stream_status().await))
-}
-
-#[route(POST "/api/stream/publish")]
-async fn publish_stream(cx: &Cx) -> Result<topcoat::router::Response> {
-    let state: &Arc<ProxyState> = app_context(cx);
-    if let Err(error) = state.publish_staged_stream().await {
-        return Err(bad_request(error.to_string()).into());
-    }
-    topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
-}
-
-#[route(POST "/api/stream/stop-publishing")]
-async fn stop_publishing_stream(cx: &Cx) -> Result<topcoat::router::Response> {
-    let state: &Arc<ProxyState> = app_context(cx);
-    if let Err(error) = state.stop_publishing().await {
-        return Err(bad_request(error.to_string()).into());
-    }
-    topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
 }
 
 #[derive(Debug, Deserialize)]
@@ -266,6 +313,7 @@ struct ConfigForm {
     pub notifications: Option<NotificationsForm>,
     pub targets: Option<Vec<TargetForm>>,
     pub action: Option<String>,
+    pub return_to: Option<String>,
 }
 
 fn non_empty(value: Option<String>) -> Option<String> {
@@ -420,10 +468,14 @@ async fn update_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
     }
 
     let action = form.action.clone().unwrap_or_default();
+    let return_to = match form.return_to.as_deref() {
+        Some("/targets") => "/targets",
+        _ => "/settings",
+    };
 
     let redirect = (
         topcoat::router::StatusCode::SEE_OTHER,
-        [(topcoat::router::header::LOCATION, "/")],
+        [(topcoat::router::header::LOCATION, return_to)],
     );
 
     // Serialize read/merge/write so concurrent edits cannot both merge from the
@@ -550,87 +602,14 @@ async fn import_config_file(
         state.apply_chat_config().await?;
     }
 
-    redirect_home(cx)
+    redirect_to(cx, "/export")
 }
 
-#[route(POST "/api/test-stream")]
-async fn test_stream(cx: &Cx) -> Result<topcoat::router::Response> {
-    let state: &Arc<ProxyState> = app_context(cx);
-    let config = state.config.read().await;
-    let duration_secs = config.server.test_stream_duration_secs;
-    let stream_key = config.server.ingest_stream_key.clone();
-    drop(config);
-    if stream_key.is_empty() {
-        return Err(
-            bad_request("Configure an ingest stream key before starting a test stream").into(),
-        );
-    }
-    let url = format!("rtmp://127.0.0.1:{}/live/{}", state.listen_port, stream_key);
-    tokio::spawn(async move {
-        tracing::info!(
-            duration_secs,
-            "Starting test stream via ffmpeg to local ingest..."
-        );
-        let video_source = format!("testsrc=duration={duration_secs}:size=1280x720:rate=30");
-        let audio_source = format!("sine=frequency=1000:duration={duration_secs}");
-        let _ = tokio::process::Command::new("ffmpeg")
-            .args([
-                "-re",
-                "-f",
-                "lavfi",
-                "-i",
-                &video_source,
-                "-f",
-                "lavfi",
-                "-i",
-                &audio_source,
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-pix_fmt",
-                "yuv420p",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "128k",
-                "-f",
-                "flv",
-                &url,
-            ])
-            .output()
-            .await;
-        tracing::info!("Test stream finished.");
-    });
-    redirect_home(cx)
-}
-
-#[route(POST "/api/test-webhooks")]
-async fn test_webhooks(cx: &Cx) -> Result<topcoat::router::Response> {
-    let state: &Arc<ProxyState> = app_context(cx);
-    let config = state.config.read().await;
-    let active_targets = config
-        .targets
-        .iter()
-        .filter(|target| target.enabled)
-        .map(crate::notifications::NotificationTarget::from)
-        .collect::<Vec<_>>();
-    let dispatcher = crate::notifications::NotificationDispatcher::new(
-        &config.notifications,
-        state.http_client.clone(),
-    );
-    drop(config);
-    tokio::spawn(async move {
-        dispatcher.dispatch(&active_targets).await;
-    });
-    redirect_home(cx)
-}
-
-fn redirect_home(cx: &Cx) -> Result<topcoat::router::Response> {
+fn redirect_to(cx: &Cx, location: &'static str) -> Result<topcoat::router::Response> {
     topcoat::router::IntoResponse::into_response(
         (
             topcoat::router::StatusCode::SEE_OTHER,
-            [(topcoat::router::header::LOCATION, "/")],
+            [(topcoat::router::header::LOCATION, location)],
         ),
         cx,
     )
@@ -670,70 +649,53 @@ async fn acknowledge_chat_message(
     topcoat::router::IntoResponse::into_response(Json(inbox.snapshot()?), cx)
 }
 
-#[derive(Serialize)]
-#[serde(tag = "type", content = "data", rename_all = "snake_case")]
-enum ServerEvent {
-    StreamStatus(crate::server::state::StreamStatus),
-    ChatChanged,
-}
-
 #[route(GET "/api/events")]
-async fn server_events(cx: &Cx, upgrade: WebSocketUpgrade) -> Result<topcoat::router::Response> {
+async fn server_events(
+    cx: &Cx,
+) -> Result<Sse<impl futures_util::Stream<Item = Result<SseEvent>> + use<>>> {
     let state: &Arc<ProxyState> = app_context(cx);
     let state = Arc::clone(state);
-    upgrade.on_upgrade(|socket| async move {
-        let (mut sender, mut receiver) = socket.split();
-        let mut chat_changes = state.subscribe_chat_changes();
-        let mut status_interval = tokio::time::interval(std::time::Duration::from_millis(250));
-        let mut last_status = state.stream_status().await;
+    let chat_changes = state.subscribe_chat_changes();
+    let status_interval = tokio::time::interval(std::time::Duration::from_millis(250));
+    let last_status = state.stream_status().await;
+    let initial_status = SseEvent::new()
+        .event("stream_status")
+        .json_data(&last_status)?;
+    let initial_events = futures_util::stream::iter([
+        Ok(initial_status),
+        Ok(SseEvent::new().event("chat_changed").data("changed")),
+    ]);
 
-        let initial_events = [
-            ServerEvent::StreamStatus(last_status),
-            ServerEvent::ChatChanged,
-        ];
-        for event in initial_events {
-            let Ok(payload) = serde_json::to_string(&event) else {
-                return;
-            };
-            if sender.send(Message::text(payload)).await.is_err() {
-                return;
-            }
-        }
-
-        loop {
-            tokio::select! {
-                _ = status_interval.tick() => {
-                    let status = state.stream_status().await;
-                    if status != last_status {
-                        last_status = status;
-                        let Ok(payload) = serde_json::to_string(&ServerEvent::StreamStatus(status)) else {
-                            break;
-                        };
-                        if sender.send(Message::text(payload)).await.is_err() {
-                            break;
+    let changes = futures_util::stream::unfold(
+        (state, chat_changes, status_interval, last_status),
+        |(state, mut chat_changes, mut status_interval, mut last_status)| async move {
+            loop {
+                tokio::select! {
+                    _ = status_interval.tick() => {
+                        let status = state.stream_status().await;
+                        if status != last_status {
+                            last_status = status;
+                            let event = SseEvent::new()
+                                .event("stream_status")
+                                .json_data(&status);
+                            return Some((event, (state, chat_changes, status_interval, last_status)));
                         }
                     }
-                }
-                changed = chat_changes.changed() => {
-                    if changed.is_err() {
-                        break;
-                    }
-                    let Ok(payload) = serde_json::to_string(&ServerEvent::ChatChanged) else {
-                        break;
-                    };
-                    if sender.send(Message::text(payload)).await.is_err() {
-                        break;
-                    }
-                }
-                message = receiver.next() => {
-                    match message {
-                        Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
-                        _ => {}
+                    changed = chat_changes.changed() => {
+                        if changed.is_err() {
+                            return None;
+                        }
+                        return Some((
+                            Ok(SseEvent::new().event("chat_changed").data("changed")),
+                            (state, chat_changes, status_interval, last_status),
+                        ));
                     }
                 }
             }
-        }
-    })
+        },
+    );
+
+    Ok(Sse::new(initial_events.chain(changes)).keep_alive(KeepAlive::new()))
 }
 
 #[route(POST "/api/chat/ingest")]

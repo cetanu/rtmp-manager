@@ -1,4 +1,5 @@
 pub mod actions_panel;
+pub mod app_navigation;
 pub mod chat_inbox;
 pub mod chat_inbox_content;
 pub mod chat_ingest_fields;

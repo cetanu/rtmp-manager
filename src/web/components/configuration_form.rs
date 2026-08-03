@@ -1,4 +1,5 @@
 use crate::web::components::actions_panel::actions_panel;
+use crate::web::components::app_navigation::page_heading;
 use crate::web::components::chat_settings::chat_settings;
 use crate::web::components::notifications::notifications;
 use crate::web::components::server_settings::server_settings;
@@ -10,15 +11,42 @@ use topcoat::{
 };
 
 #[component]
-pub async fn configuration_form() -> Result {
+pub async fn configuration_form(active_page: &'static str) -> Result {
     view! {
-        <form id="configForm" method="post" action="/api/config" class="relative grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <section class="min-w-0">server_settings()</section>
-            <section class="min-w-0">web_auth()</section>
-            <section class="min-w-0">chat_settings()</section>
-            <section class="min-w-0">notifications()</section>
-            <section class="min-w-0 lg:col-span-2">targets()</section>
-            <section class="min-w-0 lg:col-span-2">actions_panel()</section>
+        <form
+            id="configForm"
+            method="post"
+            action="/api/config"
+            data-app-config="true"
+            hidden=(active_page != "settings" && active_page != "targets")
+            class="relative"
+        >
+            <input
+                type="hidden"
+                name="return_to"
+                data-app-return-to="true"
+                value=(if active_page == "targets" { "/targets" } else { "/settings" })
+            />
+            <section data-app-page="settings" hidden=(active_page != "settings")>
+                page_heading(
+                    title: "Settings",
+                    description: "Configure the RTMP server, dashboard access, chat ingestion, and stream notifications."
+                )
+                <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                    <div class="min-w-0">server_settings()</div>
+                    <div class="min-w-0">web_auth()</div>
+                    <div class="min-w-0">chat_settings()</div>
+                    <div class="min-w-0">notifications()</div>
+                </div>
+            </section>
+            <section data-app-page="targets" hidden=(active_page != "targets")>
+                page_heading(
+                    title: "Targets",
+                    description: "Choose where staged streams are published and manage the credentials for each destination."
+                )
+                targets()
+            </section>
+            <div class="mt-6">actions_panel()</div>
         </form>
     }
 }

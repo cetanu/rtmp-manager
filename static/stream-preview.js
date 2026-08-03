@@ -1,17 +1,14 @@
 (() => {
+  // Browser media and hls.js APIs are outside Topcoat's runtime vocabulary.
   const video = document.getElementById("stream-preview-video");
-  const placeholder = document.getElementById("stream-preview-placeholder");
-  const badge = document.getElementById("stream-stage-badge");
-  const detail = document.getElementById("stream-stage-detail");
-  const publishButton = document.getElementById("publish-staged-stream");
-  const stopButton = document.getElementById("stop-publishing-stream");
-  const testButton = document.getElementById("test-stream");
-  const errorMessage = document.getElementById("stream-action-error");
-  if (!video || !placeholder || !badge || !detail || !publishButton || !stopButton || !errorMessage) return;
+  const errorMessage = document.getElementById("stream-preview-error");
+  const statusRefresh = document.getElementById("stream-status-refresh");
+  if (!video || !errorMessage) return;
 
   let player = null;
   let previewAttached = false;
   let lastActive = false;
+  let lastStatusSignature = null;
   let sessionId = null;
 
   function detachPreview() {
@@ -52,47 +49,30 @@
       previewAttached = true;
     } else {
       errorMessage.textContent = "This browser does not support HLS preview playback.";
-      errorMessage.classList.remove("hidden");
+      errorMessage.hidden = false;
     }
   }
 
   function render(status) {
+    const statusSignature = JSON.stringify(status);
+    if (statusSignature !== lastStatusSignature) {
+      lastStatusSignature = statusSignature;
+      statusRefresh?.click();
+    }
+
     if (status.session_id !== sessionId) {
       detachPreview();
       sessionId = status.session_id;
+      errorMessage.hidden = true;
+      errorMessage.textContent = "";
     }
     if (!status.active) {
       if (lastActive) detachPreview();
-      badge.textContent = "Offline";
-      badge.dataset.state = "offline";
-      detail.textContent = "Waiting for an RTMP stream. Nothing will be sent to external targets automatically.";
-      placeholder.textContent = "Start streaming to the RTMP ingest to create a preview.";
-      placeholder.classList.remove("hidden");
     } else if (status.preview_failed) {
       if (previewAttached) detachPreview();
-      badge.textContent = "Preview error";
-      badge.dataset.state = "error";
-      detail.textContent = "The HLS preview process stopped. Check the server logs, then reconnect the RTMP stream.";
-      placeholder.textContent = "HLS preview unavailable.";
-      placeholder.classList.remove("hidden");
-    } else if (status.published) {
-      badge.textContent = "Live";
-      badge.dataset.state = "live";
-      detail.textContent = "Publishing to enabled targets. The local preview remains available.";
-      placeholder.classList.toggle("hidden", status.preview_ready);
-    } else {
-      badge.textContent = "Staged";
-      badge.dataset.state = "staged";
-      detail.textContent = status.preview_ready
-        ? "Preview ready. Review it before publishing to enabled targets."
-        : "Stream connected. Preparing the HLS preview…";
-      placeholder.textContent = "Preparing HLS preview…";
-      placeholder.classList.toggle("hidden", status.preview_ready);
     }
 
     if (status.preview_ready) attachPreview();
-    publishButton.disabled = !status.active || status.published;
-    stopButton.disabled = !status.active || !status.published;
     lastActive = status.active;
   }
 
@@ -105,34 +85,7 @@
     }
   }
 
-  async function performAction(url, actionButton) {
-    errorMessage.classList.add("hidden");
-    publishButton.disabled = true;
-    stopButton.disabled = true;
-    if (actionButton) actionButton.disabled = true;
-    try {
-      const response = await fetch(url, { method: "POST" });
-      if (!response.ok) {
-        errorMessage.textContent = (await response.text()) || "The stream action failed.";
-        errorMessage.classList.remove("hidden");
-      }
-    } catch (_error) {
-      errorMessage.textContent = "The server could not be reached.";
-      errorMessage.classList.remove("hidden");
-    }
-    if (actionButton) actionButton.disabled = false;
-    await refresh();
-  }
-
   window.addEventListener("rtmp:stream-status", (event) => render(event.detail));
-  publishButton.addEventListener("click", () => performAction("/api/stream/publish"));
-  stopButton.addEventListener("click", () => performAction("/api/stream/stop-publishing"));
-  if (testButton) {
-    testButton.addEventListener("click", (event) => {
-      event.preventDefault();
-      performAction("/api/test-stream", testButton);
-    });
-  }
   refresh();
-  if (!window.WebSocket) window.setInterval(refresh, 1000);
+  if (!window.EventSource) window.setInterval(refresh, 1000);
 })();

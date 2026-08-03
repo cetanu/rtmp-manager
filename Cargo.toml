@@ -19,7 +19,7 @@ serde_json = "1.0.151"
 hmac = "0.12.1"
 sha2 = "0.10.9"
 time = { version = "0.3.54", features = ["parsing"] }
-topcoat = { version = "0.5.0", features = ["ui", "tailwind", "asset", "multipart", "runtime", "websocket"] }
+topcoat = { version = "0.5.0", features = ["ui", "tailwind", "asset", "multipart", "runtime", "sse"] }
 serde_qs = "1.1.2"
 rusqlite = { version = "0.38.0", features = ["bundled"] }
 base64 = "0.22.1"
