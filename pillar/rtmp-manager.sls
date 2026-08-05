@@ -8,6 +8,8 @@ rtmp_proxy:
     archive_dir: ffmpeg-n8.1-latest-linux64-gpl-8.1
   environment:
     foo=bar
+  caddy:
+    domain: rtmp.vsyrakis.dev
   config: |
     -----BEGIN PGP MESSAGE-----
 
