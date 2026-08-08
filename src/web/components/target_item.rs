@@ -1,6 +1,6 @@
 use crate::config::TargetConfig;
 use crate::web::components::ui::button::{ButtonSize, ButtonVariant, button};
-use crate::web::components::ui::form::{form_field, switch_field};
+use crate::web::components::ui::form::{form_field, secret_input, switch_field};
 use crate::web::components::ui::icon::trash_icon;
 use crate::web::components::ui::input::input;
 use topcoat::{
@@ -50,13 +50,14 @@ pub async fn target_item(index: usize, target: &TargetConfig) -> Result {
                     form_field(
                         control_id: key_id.clone(),
                         label_text: "Stream Key",
-                        input(attrs: attributes! {
-                            type="password"
-                            id=(key_id)
-                            name=(format!("targets[{index}][stream_key]"))
-                            value=""
-                            placeholder=(if target.stream_key.is_empty() { "Optional when already included in the RTMP URL" } else { "Configured — leave blank to keep it" })
-                        })
+                        secret_input(
+                            control_id: key_id,
+                            attrs: attributes! {
+                                name=(format!("targets[{index}][stream_key]"))
+                                value=(target.stream_key.clone())
+                                placeholder="Optional when already included in the RTMP URL"
+                            }
+                        )
                     )
                     form_field(
                         control_id: public_url_id.clone(),

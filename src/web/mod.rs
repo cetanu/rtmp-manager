@@ -53,6 +53,8 @@ pub(crate) const LOG_VIEWER_SCRIPT: topcoat::asset::Asset =
     topcoat::asset::asset!("static/log-viewer.js");
 pub(crate) const METRICS_CHARTS_SCRIPT: topcoat::asset::Asset =
     topcoat::asset::asset!("static/metrics-charts.js");
+pub(crate) const SECRET_FIELDS_SCRIPT: topcoat::asset::Asset =
+    topcoat::asset::asset!("static/secret-fields.js");
 
 pub async fn run_web_server(
     state: Arc<ProxyState>,
@@ -101,6 +103,7 @@ async fn app_page(active_page: &'static str) -> Result {
             <script src=(APP_NAVIGATION_SCRIPT) defer="defer"></script>
             <script src=(LOG_VIEWER_SCRIPT) defer="defer"></script>
             <script src=(METRICS_CHARTS_SCRIPT) defer="defer"></script>
+            <script src=(SECRET_FIELDS_SCRIPT) defer="defer"></script>
         </head>
         <body class="min-h-screen bg-background text-foreground font-sans antialiased">
             app_navigation(active_page: active_page)

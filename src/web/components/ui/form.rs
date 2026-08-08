@@ -1,3 +1,4 @@
+use crate::web::components::ui::icon::eye_icon;
 use crate::web::components::ui::input::input;
 use crate::web::components::ui::label::label;
 use crate::web::components::ui::switch::switch;
@@ -32,7 +33,30 @@ pub async fn field_description(#[default] mut attrs: Attributes, #[default] chil
     }
 }
 
-/// A password field that preserves a configured secret unless explicitly cleared.
+#[component]
+pub async fn secret_input(#[into] control_id: String, #[default] mut attrs: Attributes) -> Result {
+    view! {
+        <div class="relative">
+            input(attrs: attributes! {
+                type="password"
+                id=(control_id.clone())
+                class=(class!("pr-11", attrs.remove("class")))
+                (attrs)
+            })
+            <button
+                type="button"
+                data-secret-toggle=(control_id.clone())
+                aria-controls=(control_id)
+                aria-pressed="false"
+                aria-label="Show value"
+                title="Show value"
+                class="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >eye_icon()</button>
+        </div>
+    }
+}
+
+/// A password field whose configured value can be revealed, edited, or cleared.
 #[component]
 pub async fn clearable_secret_field(
     #[into] control_id: String,
@@ -40,20 +64,21 @@ pub async fn clearable_secret_field(
     #[into] clear_name: String,
     #[into] label_text: String,
     #[into] empty_placeholder: String,
-    configured: bool,
+    #[into] value: String,
 ) -> Result {
     let clear_id = format!("clear_{control_id}");
     view! {
         form_field(
             control_id: control_id.clone(),
             label_text: label_text,
-            input(attrs: attributes! {
-                type="password"
-                id=(control_id)
-                name=(name)
-                value=""
-                placeholder=(if configured { "Configured — leave blank to keep it" } else { &empty_placeholder })
-            })
+            secret_input(
+                control_id: control_id,
+                attrs: attributes! {
+                    name=(name)
+                    value=(value)
+                    placeholder=(empty_placeholder)
+                }
+            )
             <div class="flex items-center gap-2">
                 switch(attrs: attributes! {
                     id=(clear_id.clone())

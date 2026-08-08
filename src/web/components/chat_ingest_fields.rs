@@ -16,10 +16,7 @@ pub async fn chat_ingest_fields(chat: &ChatSettings) -> Result {
                 clear_name: "chat[clear_ingest_token]",
                 label_text: "Generic ingest bearer token",
                 empty_placeholder: "Not configured",
-                configured: chat
-                    .ingest_token
-                    .as_ref()
-                    .is_some_and(|value| !value.trim().is_empty())
+                value: chat.ingest_token.clone().unwrap_or_default()
             )
             form_field(
                 control_id: "chat_queue_capacity",

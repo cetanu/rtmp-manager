@@ -15,6 +15,7 @@ const STREAM_PREVIEW: &[u8] = include_bytes!("../static/stream-preview.js");
 const APP_NAVIGATION: &[u8] = include_bytes!("../static/app-navigation.js");
 const LOG_VIEWER: &[u8] = include_bytes!("../static/log-viewer.js");
 const METRICS_CHARTS: &[u8] = include_bytes!("../static/metrics-charts.js");
+const SECRET_FIELDS: &[u8] = include_bytes!("../static/secret-fields.js");
 
 struct EmbeddedAsset {
     id: Asset,
@@ -95,6 +96,13 @@ pub fn install(executable: &Path, tailwind_stylesheet: Asset) -> Result<()> {
             extension: "js",
             content_type: "text/javascript",
             contents: METRICS_CHARTS,
+        },
+        EmbeddedAsset {
+            id: crate::web::SECRET_FIELDS_SCRIPT,
+            stem: "secret-fields",
+            extension: "js",
+            content_type: "text/javascript",
+            contents: SECRET_FIELDS,
         },
     ];
 

@@ -1,6 +1,6 @@
 use crate::server::state::ProxyState;
 use crate::web::components::ui::card::{card, card_content, card_header, card_title};
-use crate::web::components::ui::form::form_field;
+use crate::web::components::ui::form::{form_field, secret_input};
 use crate::web::components::ui::input::input;
 use std::sync::Arc;
 use topcoat::{
@@ -70,13 +70,15 @@ pub async fn server_settings(cx: &Cx) -> Result {
                     form_field(
                         control_id: "ingest_stream_key",
                         label_text: "Ingest Stream Key",
-                        input(attrs: attributes! {
-                            type="password"
-                            id="ingest_stream_key"
-                            name="server[ingest_stream_key]"
-                            placeholder=(if config.server.ingest_stream_key.is_empty() { "Required before streaming" } else { "Configured — leave blank to keep it" })
-                            autocomplete="new-password"
-                        })
+                        secret_input(
+                            control_id: "ingest_stream_key",
+                            attrs: attributes! {
+                                name="server[ingest_stream_key]"
+                                value=(config.server.ingest_stream_key.clone())
+                                placeholder="Required before streaming"
+                                autocomplete="new-password"
+                            }
+                        )
                     )
                 </div>
             )

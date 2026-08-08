@@ -18,10 +18,7 @@ pub async fn youtube_chat_fields(chat: &ChatSettings) -> Result {
                 clear_name: "chat[clear_youtube_api_key]",
                 label_text: "YouTube API key",
                 empty_placeholder: "Not configured",
-                configured: chat
-                    .youtube_api_key
-                    .as_ref()
-                    .is_some_and(|value| !value.trim().is_empty())
+                value: chat.youtube_api_key.clone().unwrap_or_default()
             )
             <div class="grid gap-6 md:grid-cols-3">
                 form_field(

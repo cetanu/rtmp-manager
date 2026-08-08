@@ -1,6 +1,6 @@
 use crate::server::state::ProxyState;
 use crate::web::components::ui::card::{card, card_content, card_header, card_title};
-use crate::web::components::ui::form::{field_description, form_field};
+use crate::web::components::ui::form::{field_description, form_field, secret_input};
 use crate::web::components::ui::input::input;
 use std::sync::Arc;
 use topcoat::{
@@ -35,15 +35,16 @@ pub async fn web_auth(cx: &Cx) -> Result {
                     form_field(
                         control_id: "web_auth_password",
                         label_text: "New password",
-                        input(attrs: attributes! {
-                            type="password"
-                            id="web_auth_password"
-                            name="web_auth[password]"
-                            autocomplete="new-password"
-                            value=""
-                            minlength="12"
-                            placeholder=(if auth.password.is_empty() { "At least 12 characters" } else { "Configured — leave blank to keep it" })
-                        })
+                        secret_input(
+                            control_id: "web_auth_password",
+                            attrs: attributes! {
+                                name="web_auth[password]"
+                                autocomplete="new-password"
+                                value=(auth.password)
+                                minlength="12"
+                                placeholder="At least 12 characters"
+                            }
+                        )
                         field_description(
                             "Changing this takes effect immediately and prompts the browser to sign in again."
                         )
