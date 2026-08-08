@@ -463,7 +463,7 @@ fn parse_ffmpeg_bitrate(value: &str) -> Option<u64> {
         .then_some((number.max(0.0) * 1_000.0) as u64)
 }
 
-fn redact_secrets(text: &str, secrets: &[String]) -> String {
+pub(crate) fn redact_secrets(text: &str, secrets: &[String]) -> String {
     let redacted = secrets
         .iter()
         .filter(|secret| !secret.is_empty())

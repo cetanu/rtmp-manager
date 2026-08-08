@@ -58,7 +58,10 @@ async fn start_test_stream(cx: &Cx) -> Result<String> {
                         tracing::info!(name = %target.name, "Direct target test completed successfully");
                     }
                     Ok(output) => {
-                        let detail = safe_ffmpeg_failure(&String::from_utf8_lossy(&output.stderr));
+                        let detail = safe_ffmpeg_failure(
+                            &String::from_utf8_lossy(&output.stderr),
+                            &[target.stream_key.clone(), destination],
+                        );
                         tracing::error!(name = %target.name, status = %output.status, %detail, "Direct target test failed");
                     }
                     Err(error) => {
@@ -76,7 +79,7 @@ async fn start_test_stream(cx: &Cx) -> Result<String> {
     Ok(String::new())
 }
 
-fn safe_ffmpeg_failure(stderr: &str) -> &'static str {
+fn safe_ffmpeg_failure(stderr: &str, secrets: &[String]) -> String {
     let detail = stderr.to_ascii_lowercase();
     for (needle, message) in [
         ("connection refused", "Connection refused by target"),
@@ -92,10 +95,23 @@ fn safe_ffmpeg_failure(stderr: &str) -> &'static str {
         ("unknown encoder", "Required FFmpeg encoder is unavailable"),
     ] {
         if detail.contains(needle) {
-            return message;
+            return message.to_owned();
         }
     }
-    "FFmpeg failed; destination and credentials omitted from logs"
+    let sanitized = crate::server::state::redact_secrets(stderr, secrets)
+        .chars()
+        .filter(|character| !character.is_control() || matches!(character, '\n' | '\t'))
+        .collect::<String>();
+    let sanitized = sanitized.trim();
+    if sanitized.is_empty() {
+        return "FFmpeg exited without diagnostic output".to_owned();
+    }
+    let desired_start = sanitized.len().saturating_sub(2_000);
+    let start = sanitized
+        .char_indices()
+        .find(|(index, _)| *index >= desired_start)
+        .map_or(0, |(index, _)| index);
+    sanitized[start..].to_owned()
 }
 
 #[procedure]
@@ -189,7 +205,22 @@ mod tests {
     #[test]
     fn ffmpeg_failure_summary_does_not_echo_diagnostics() {
         let stderr = "rtmp://example.test/app/private-key: Connection refused";
-        assert_eq!(safe_ffmpeg_failure(stderr), "Connection refused by target");
-        assert!(!safe_ffmpeg_failure(stderr).contains("private-key"));
+        let secrets = ["private-key".to_owned()];
+        assert_eq!(
+            safe_ffmpeg_failure(stderr, &secrets),
+            "Connection refused by target"
+        );
+        assert!(!safe_ffmpeg_failure(stderr, &secrets).contains("private-key"));
+    }
+
+    #[test]
+    fn unknown_ffmpeg_failure_keeps_safe_diagnostic_text() {
+        let stderr =
+            "rtmp://example.test/app/private-key: Invalid data found when processing input";
+        let detail = safe_ffmpeg_failure(stderr, &["private-key".to_owned()]);
+        assert_eq!(
+            detail,
+            "[RTMP_URL_REDACTED] Invalid data found when processing input"
+        );
     }
 }
