@@ -33,6 +33,7 @@ use components::{
     chat_inbox::chat_inbox,
     config_transfer::config_transfer,
     configuration_form::configuration_form,
+    log_viewer::log_viewer,
     metrics::metrics_grid,
     stream_preview::stream_preview,
 };
@@ -48,6 +49,8 @@ pub(crate) const STREAM_PREVIEW_SCRIPT: topcoat::asset::Asset =
     topcoat::asset::asset!("static/stream-preview.js");
 pub(crate) const APP_NAVIGATION_SCRIPT: topcoat::asset::Asset =
     topcoat::asset::asset!("static/app-navigation.js");
+pub(crate) const LOG_VIEWER_SCRIPT: topcoat::asset::Asset =
+    topcoat::asset::asset!("static/log-viewer.js");
 
 pub async fn run_web_server(
     state: Arc<ProxyState>,
@@ -85,6 +88,7 @@ async fn app_page(active_page: &'static str) -> Result {
             <script src=(STREAM_PREVIEW_SCRIPT) defer="defer"></script>
             <script src=(CHAT_EVENTS_SCRIPT) defer="defer"></script>
             <script src=(APP_NAVIGATION_SCRIPT) defer="defer"></script>
+            <script src=(LOG_VIEWER_SCRIPT) defer="defer"></script>
         </head>
         <body class="min-h-screen bg-background text-foreground font-sans antialiased">
             app_navigation(active_page: active_page)
@@ -104,6 +108,13 @@ async fn app_page(active_page: &'static str) -> Result {
                     )
                     chat_inbox()
                 </section>
+                <section data-app-page="logs" hidden=(active_page != "logs")>
+                    page_heading(
+                        title: "Logs",
+                        description: "Inspect recent RTMP Manager activity and follow new service output live."
+                    )
+                    log_viewer()
+                </section>
                 configuration_form(active_page: active_page)
                 <section data-app-page="export" hidden=(active_page != "export")>
                     page_heading(
@@ -121,6 +132,7 @@ async fn app_page(active_page: &'static str) -> Result {
 fn page_title(page: &str) -> &'static str {
     match page {
         "chat" => "Chat",
+        "logs" => "Logs",
         "settings" => "Settings",
         "targets" => "Targets",
         "export" => "Export",
@@ -141,6 +153,11 @@ async fn overview_page() -> Result {
 #[page("/chat")]
 async fn chat_page() -> Result {
     view! { app_page(active_page: "chat") }
+}
+
+#[page("/logs")]
+async fn logs_page() -> Result {
+    view! { app_page(active_page: "logs") }
 }
 
 #[page("/settings")]
@@ -696,6 +713,31 @@ async fn server_events(
     );
 
     Ok(Sse::new(initial_events.chain(changes)).keep_alive(KeepAlive::new()))
+}
+
+#[route(GET "/api/logs")]
+async fn service_logs(
+    _cx: &Cx,
+) -> Result<Sse<impl futures_util::Stream<Item = Result<SseEvent>> + use<>>> {
+    let logs = crate::log_buffer::global();
+    let receiver = logs.subscribe();
+    let initial = futures_util::stream::iter(
+        logs.snapshot()
+            .into_iter()
+            .map(|entry| SseEvent::new().event("log").json_data(&entry)),
+    );
+    let live = futures_util::stream::unfold(receiver, |mut receiver| async move {
+        loop {
+            match receiver.recv().await {
+                Ok(entry) => {
+                    return Some((SseEvent::new().event("log").json_data(&entry), receiver));
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    });
+    Ok(Sse::new(initial.chain(live)).keep_alive(KeepAlive::new()))
 }
 
 #[route(POST "/api/chat/ingest")]

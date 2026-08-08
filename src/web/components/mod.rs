@@ -9,6 +9,7 @@ pub mod config_export;
 pub mod config_import;
 pub mod config_transfer;
 pub mod configuration_form;
+pub mod log_viewer;
 pub mod metrics;
 pub mod notifications;
 pub mod publishing_controls;

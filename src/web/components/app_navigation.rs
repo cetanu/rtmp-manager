@@ -46,6 +46,14 @@ pub async fn app_navigation(active_page: &'static str) -> Result {
                         aria-current=(if active_page == "chat" { "page" } else { "false" })
                     >"Chat"</a>
                     <a
+                        href="/logs"
+                        data-app-link="logs"
+                        data-active-class=(ACTIVE_LINK)
+                        data-inactive-class=(INACTIVE_LINK)
+                        class=(link_class(active_page, "logs"))
+                        aria-current=(if active_page == "logs" { "page" } else { "false" })
+                    >"Logs"</a>
+                    <a
                         href="/settings"
                         data-app-link="settings"
                         data-active-class=(ACTIVE_LINK)

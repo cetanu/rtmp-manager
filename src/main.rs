@@ -1,6 +1,7 @@
 mod chat;
 mod config;
 mod embedded_assets;
+mod log_buffer;
 mod metrics;
 mod notifications;
 mod server;
@@ -16,6 +17,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{info, warn};
+use tracing_subscriber::prelude::*;
 
 // Embed standalone systemd unit template at compile time
 const SYSTEMD_UNIT_TEMPLATE: &str = include_str!("../systemd/rtmp-proxy.service");
@@ -105,11 +107,14 @@ fn install_embedded_assets(executable: &Path) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
+    let (_, log_layer) = log_buffer::init();
+    tracing_subscriber::registry()
+        .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "rtmp_proxy=info,rtmp_rs=info".into()),
         )
+        .with(tracing_subscriber::fmt::layer())
+        .with(log_layer)
         .init();
 
     let cli = CliArgs::parse();

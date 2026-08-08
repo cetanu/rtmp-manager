@@ -1,9 +1,10 @@
 (() => {
   // Topcoat 0.5 has no client-side navigation or History API binding.
-  const pages = new Set(["overview", "chat", "settings", "targets", "export"]);
+  const pages = new Set(["overview", "chat", "logs", "settings", "targets", "export"]);
   const pageTitles = {
     overview: "Overview",
     chat: "Chat",
+    logs: "Logs",
     settings: "Settings",
     targets: "Targets",
     export: "Export",

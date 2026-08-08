@@ -22,7 +22,7 @@ fn normal_startup_installs_the_embedded_asset_bundle() {
     );
 
     let bundle = AssetBundle::load_dir(test_dir.join("assets")).unwrap();
-    assert_eq!(bundle.catalog().assets().count(), 7);
+    assert_eq!(bundle.catalog().assets().count(), 8);
 
     fs::remove_dir_all(test_dir).unwrap();
 }
