@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
 use tokio::sync::{Mutex, RwLock, watch};
 use tokio::task::JoinHandle;
@@ -20,7 +21,7 @@ pub struct ProxyState {
     pub metrics: Arc<Metrics>,
     pub config: Arc<RwLock<AppConfig>>,
     pub http_client: Client,
-    pub active_relays: Mutex<HashMap<String, Vec<Child>>>,
+    pub active_relays: Mutex<HashMap<String, Vec<RelayProcess>>>,
     staged_stream: Mutex<Option<StagedStream>>,
     next_stream_session_id: AtomicU64,
     preview_dir: PathBuf,
@@ -39,6 +40,11 @@ struct StagedStream {
     preview_process: Child,
     preview_failed: bool,
     published: bool,
+}
+
+pub struct RelayProcess {
+    child: Child,
+    target_name: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -187,6 +193,10 @@ impl ProxyState {
                 .args([
                     "-loglevel",
                     "warning",
+                    "-stats_period",
+                    "1",
+                    "-progress",
+                    "pipe:1",
                     "-i",
                     &source_url,
                     "-c",
@@ -195,14 +205,30 @@ impl ProxyState {
                     "flv",
                     &target_full_url,
                 ])
-                .stdout(Stdio::null())
+                .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .kill_on_drop(true)
                 .spawn();
             match child {
-                Ok(child) => {
+                Ok(mut child) => {
                     tracing::info!(name = %target.name, "Stream target published");
-                    children.push(child);
+                    let bitrate = self.metrics.register_target(target.name.clone());
+                    if let Some(stdout) = child.stdout.take() {
+                        tokio::spawn(async move {
+                            let mut lines = BufReader::new(stdout).lines();
+                            while let Ok(Some(line)) = lines.next_line().await {
+                                if let Some(value) = line.strip_prefix("bitrate=")
+                                    && let Some(bps) = parse_ffmpeg_bitrate(value)
+                                {
+                                    bitrate.update_from_ffmpeg(bps);
+                                }
+                            }
+                        });
+                    }
+                    children.push(RelayProcess {
+                        child,
+                        target_name: target.name,
+                    });
                 }
                 Err(error) => {
                     tracing::error!(name = %target.name, %error, "Failed to publish stream target");
@@ -215,8 +241,9 @@ impl ProxyState {
             .is_some_and(|stream| stream.session_id == session_id && stream.published);
         if !still_published {
             drop(staged);
-            for child in &mut children {
-                let _ = child.kill().await;
+            for relay in &mut children {
+                let _ = relay.child.kill().await;
+                self.metrics.unregister_target(&relay.target_name);
             }
             anyhow::bail!("The staged stream changed while publishing was starting");
         }
@@ -272,8 +299,9 @@ impl ProxyState {
 
     async fn stop_relays(&self, stream_key: &str) {
         if let Some(mut children) = self.active_relays.lock().await.remove(stream_key) {
-            for child in &mut children {
-                let _ = child.kill().await;
+            for relay in &mut children {
+                let _ = relay.child.kill().await;
+                self.metrics.unregister_target(&relay.target_name);
             }
         }
     }
@@ -388,11 +416,19 @@ impl Drop for ProxyState {
         }
         for relays in self.active_relays.get_mut().values_mut() {
             for relay in relays {
-                let _ = relay.start_kill();
+                let _ = relay.child.start_kill();
             }
         }
         let _ = std::fs::remove_dir_all(&self.preview_dir);
     }
+}
+
+fn parse_ffmpeg_bitrate(value: &str) -> Option<u64> {
+    let value = value.trim();
+    let number = value.strip_suffix("kbits/s")?.trim().parse::<f64>().ok()?;
+    number
+        .is_finite()
+        .then_some((number.max(0.0) * 1_000.0) as u64)
 }
 
 fn valid_preview_file_name(name: &str) -> bool {
@@ -417,7 +453,7 @@ fn create_preview_dir(path: &std::path::Path) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::valid_preview_file_name;
+    use super::{parse_ffmpeg_bitrate, valid_preview_file_name};
 
     #[test]
     fn preview_files_are_strictly_allowlisted() {
@@ -426,5 +462,11 @@ mod tests {
         assert!(!valid_preview_file_name("../config.sqlite3"));
         assert!(!valid_preview_file_name("segment_.ts"));
         assert!(!valid_preview_file_name("segment_1.m3u8"));
+    }
+
+    #[test]
+    fn parses_ffmpeg_progress_bitrate() {
+        assert_eq!(parse_ffmpeg_bitrate(" 2450.5kbits/s"), Some(2_450_500));
+        assert_eq!(parse_ffmpeg_bitrate("N/A"), None);
     }
 }

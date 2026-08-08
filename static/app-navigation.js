@@ -1,8 +1,9 @@
 (() => {
   // Topcoat 0.5 has no client-side navigation or History API binding.
-  const pages = new Set(["overview", "chat", "logs", "settings", "targets", "export"]);
+  const pages = new Set(["preview", "metrics", "chat", "logs", "settings", "targets", "export"]);
   const pageTitles = {
-    overview: "Overview",
+    preview: "Preview",
+    metrics: "Metrics",
     chat: "Chat",
     logs: "Logs",
     settings: "Settings",
@@ -16,11 +17,12 @@
 
   function pageFromPath() {
     const page = window.location.pathname.replace(/^\/+|\/+$/g, "");
-    return pages.has(page) ? page : "overview";
+    if (page === "overview") return "preview";
+    return pages.has(page) ? page : "preview";
   }
 
   function showPage(page, updateHistory, focusHeading) {
-    if (!pages.has(page)) page = "overview";
+    if (!pages.has(page)) page = "preview";
 
     pageSections.forEach((section) => {
       section.hidden = section.dataset.appPage !== page;

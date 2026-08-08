@@ -20,7 +20,6 @@ pub async fn chat_settings(cx: &Cx) -> Result {
             attrs: attributes! { class="h-full" },
             card_header(
                 card_title("Chat Ingest")
-                card_description("Changes are persisted to SQLite and applied without restarting the server.")
             )
             card_content(
                 <div class="flex flex-col gap-6">

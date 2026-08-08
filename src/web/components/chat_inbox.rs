@@ -53,10 +53,6 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
 
         card(
             attrs: attributes! { class="mb-8" },
-            card_header(
-                card_title("Chat Inbox")
-                card_description("One message at a time from every connected chat source.")
-            )
             chat_inbox_content(revision: $(revision.get()))
             card_footer(
                 attrs: attributes! { class="justify-end" },
@@ -70,7 +66,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
                         revision.set(revision.get() + 1.0);
                     })
                 >
-                    "Check for messages"
+                    "Check"
                 </button>
                 <button
                     type="button"
@@ -82,7 +78,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
                         revision.set(revision.get() + 1.0);
                     })
                 >
-                    "Acknowledge message"
+                    "Acknowledge"
                 </button>
             )
         )

@@ -17,10 +17,6 @@ pub async fn config_transfer() -> Result {
         signal import_open = false;
 
         card(
-            card_header(
-                card_title("Configuration JSON")
-                card_description("Export or replace the complete saved configuration, including secrets.")
-            )
             card_content(
                 <div class="flex flex-wrap gap-3">
                     <button

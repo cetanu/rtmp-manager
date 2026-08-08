@@ -34,7 +34,7 @@ use components::{
     config_transfer::config_transfer,
     configuration_form::configuration_form,
     log_viewer::log_viewer,
-    metrics::metrics_grid,
+    metrics::metrics_page,
     stream_preview::stream_preview,
 };
 
@@ -51,16 +51,27 @@ pub(crate) const APP_NAVIGATION_SCRIPT: topcoat::asset::Asset =
     topcoat::asset::asset!("static/app-navigation.js");
 pub(crate) const LOG_VIEWER_SCRIPT: topcoat::asset::Asset =
     topcoat::asset::asset!("static/log-viewer.js");
+pub(crate) const METRICS_CHARTS_SCRIPT: topcoat::asset::Asset =
+    topcoat::asset::asset!("static/metrics-charts.js");
 
 pub async fn run_web_server(
     state: Arc<ProxyState>,
     addr: std::net::SocketAddr,
 ) -> anyhow::Result<()> {
+    let sampler_metrics = Arc::clone(&state.metrics);
     let app = Router::builder()
         .discover()
         .assets(AssetBundle::load()?)
         .app_context(state)
         .build();
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+        loop {
+            interval.tick().await;
+            sampler_metrics.record_sample();
+        }
+    });
 
     let listener = TcpListener::bind(addr).await?;
     tracing::info!(
@@ -79,7 +90,7 @@ async fn app_page(active_page: &'static str) -> Result {
         <head>
             <meta charset="UTF-8" />
             <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-            <title>(format!("{} · RTMP Manager", page_title(active_page)))</title>
+            <title>"RTMP-Manager"</title>
             <meta name="description" content="Configuration dashboard for the RTMP Stream Multiplexer." />
             <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
             <link rel="stylesheet" href=(TAILWIND_STYLESHEET) />
@@ -89,38 +100,25 @@ async fn app_page(active_page: &'static str) -> Result {
             <script src=(CHAT_EVENTS_SCRIPT) defer="defer"></script>
             <script src=(APP_NAVIGATION_SCRIPT) defer="defer"></script>
             <script src=(LOG_VIEWER_SCRIPT) defer="defer"></script>
+            <script src=(METRICS_CHARTS_SCRIPT) defer="defer"></script>
         </head>
         <body class="min-h-screen bg-background text-foreground font-sans antialiased">
             app_navigation(active_page: active_page)
             <main class="mx-auto max-w-7xl px-4 py-8 sm:py-10">
-                <section data-app-page="overview" hidden=(active_page != "overview")>
-                    page_heading(
-                        title: "Overview",
-                        description: "Monitor ingest activity, review the local preview, and control when a staged stream goes live."
-                    )
-                    metrics_grid()
+                <section data-app-page="preview" hidden=(active_page != "preview")>
                     stream_preview()
                 </section>
+                <section data-app-page="metrics" hidden=(active_page != "metrics")>
+                    metrics_page()
+                </section>
                 <section data-app-page="chat" hidden=(active_page != "chat")>
-                    page_heading(
-                        title: "Chat",
-                        description: "Review and acknowledge incoming messages from every connected chat source."
-                    )
                     chat_inbox()
                 </section>
                 <section data-app-page="logs" hidden=(active_page != "logs")>
-                    page_heading(
-                        title: "Logs",
-                        description: "Inspect recent RTMP Manager activity and follow new service output live."
-                    )
                     log_viewer()
                 </section>
                 configuration_form(active_page: active_page)
                 <section data-app-page="export" hidden=(active_page != "export")>
-                    page_heading(
-                        title: "Export",
-                        description: "Back up, inspect, or replace the complete RTMP Manager configuration."
-                    )
                     config_transfer()
                 </section>
             </main>
@@ -129,25 +127,24 @@ async fn app_page(active_page: &'static str) -> Result {
     }
 }
 
-fn page_title(page: &str) -> &'static str {
-    match page {
-        "chat" => "Chat",
-        "logs" => "Logs",
-        "settings" => "Settings",
-        "targets" => "Targets",
-        "export" => "Export",
-        _ => "Overview",
-    }
-}
-
 #[page("/")]
 async fn home() -> Result {
-    view! { app_page(active_page: "overview") }
+    view! { app_page(active_page: "preview") }
 }
 
 #[page("/overview")]
 async fn overview_page() -> Result {
-    view! { app_page(active_page: "overview") }
+    view! { app_page(active_page: "preview") }
+}
+
+#[page("/preview")]
+async fn preview_page() -> Result {
+    view! { app_page(active_page: "preview") }
+}
+
+#[page("/metrics")]
+async fn metrics_page_route() -> Result {
+    view! { app_page(active_page: "metrics") }
 }
 
 #[page("/chat")]
@@ -213,6 +210,12 @@ async fn get_preview_file(cx: &Cx) -> Result<topcoat::router::Response> {
 async fn get_stream_status(cx: &Cx) -> Result<Json<crate::server::state::StreamStatus>> {
     let state: &Arc<ProxyState> = app_context(cx);
     Ok(Json(state.stream_status().await))
+}
+
+#[route(GET "/api/metrics/history")]
+async fn get_metrics_history(cx: &Cx) -> Result<Json<Vec<crate::metrics::MetricsSample>>> {
+    let state: &Arc<ProxyState> = app_context(cx);
+    Ok(Json(state.metrics.history()))
 }
 
 #[derive(Debug, Deserialize)]

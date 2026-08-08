@@ -19,24 +19,28 @@ pub async fn app_navigation(active_page: &'static str) -> Result {
     view! {
         <header class="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur">
             <div class="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-                <a href="/overview" data-app-link="overview" class="flex items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    <span class="flex size-9 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground shadow-xs">
-                        "RM"
-                    </span>
+                <a href="/preview" data-app-link="preview" class="flex items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     <span>
                         <span class="block text-sm font-semibold leading-tight">"RTMP Manager"</span>
-                        <span class="block text-xs text-muted-foreground">"Stream control centre"</span>
                     </span>
                 </a>
                 <nav aria-label="Primary navigation" class="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1 sm:mx-0 sm:pb-0">
                     <a
-                        href="/overview"
-                        data-app-link="overview"
+                        href="/preview"
+                        data-app-link="preview"
                         data-active-class=(ACTIVE_LINK)
                         data-inactive-class=(INACTIVE_LINK)
-                        class=(link_class(active_page, "overview"))
-                        aria-current=(if active_page == "overview" { "page" } else { "false" })
-                    >"Overview"</a>
+                        class=(link_class(active_page, "preview"))
+                        aria-current=(if active_page == "preview" { "page" } else { "false" })
+                    >"Preview"</a>
+                    <a
+                        href="/metrics"
+                        data-app-link="metrics"
+                        data-active-class=(ACTIVE_LINK)
+                        data-inactive-class=(INACTIVE_LINK)
+                        class=(link_class(active_page, "metrics"))
+                        aria-current=(if active_page == "metrics" { "page" } else { "false" })
+                    >"Metrics"</a>
                     <a
                         href="/chat"
                         data-app-link="chat"

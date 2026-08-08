@@ -1,4 +1,5 @@
 use super::state::ProxyState;
+use rtmp_rs::media::flv::FlvTag;
 use rtmp_rs::protocol::message::{ConnectParams, PublishParams};
 use rtmp_rs::session::SessionContext;
 use rtmp_rs::session::context::StreamContext;
@@ -12,6 +13,13 @@ pub struct ProxyHandler {
 }
 
 impl RtmpHandler for ProxyHandler {
+    async fn on_media_tag(&self, ctx: &StreamContext, tag: &FlvTag) -> bool {
+        if ctx.is_publishing {
+            self.state.metrics.add_ingest_bytes(tag.size() as u64);
+        }
+        true
+    }
+
     async fn on_connect(&self, ctx: &SessionContext, params: &ConnectParams) -> AuthResult {
         info!(
             session_id = %ctx.session_id,

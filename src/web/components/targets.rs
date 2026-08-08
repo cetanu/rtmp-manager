@@ -8,7 +8,7 @@ use topcoat::{
 };
 
 use crate::web::components::ui::button::{ButtonVariant, button};
-use crate::web::components::ui::card::{card, card_content, card_header, card_title};
+use crate::web::components::ui::card::{card, card_content, card_footer, card_header, card_title};
 use crate::web::components::ui::empty_state::empty_state;
 use crate::web::components::ui::icon::plus_icon;
 
@@ -23,6 +23,19 @@ pub async fn targets(cx: &Cx) -> Result {
             card_header(
                 attrs: attributes! { class="flex flex-row justify-between items-center" },
                 card_title("RTMP Targets")
+            )
+            card_content(
+                <div id="targetsContainer">
+                    for (index, target) in targets.iter().enumerate() {
+                        target_item(index: index, target: target)
+                    }
+                </div>
+
+                empty_state(attrs: attributes! { id="emptyTargets" hidden=(!targets.is_empty()) },
+                    "No targets configured."
+                )
+            )
+            card_footer(
                 button(
                     variant: ButtonVariant::Secondary,
                     attrs: attributes! {
@@ -33,17 +46,6 @@ pub async fn targets(cx: &Cx) -> Result {
                     },
                     plus_icon()
                     "Add Target"
-                )
-            )
-            card_content(
-                <div id="targetsContainer">
-                    for (index, target) in targets.iter().enumerate() {
-                        target_item(index: index, target: target)
-                    }
-                </div>
-
-                empty_state(attrs: attributes! { id="emptyTargets" hidden=(!targets.is_empty()) },
-                    "No targets configured. Stream will be ingested locally without forwarding."
                 )
             )
         )

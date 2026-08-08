@@ -28,10 +28,6 @@ pub async fn configuration_form(active_page: &'static str) -> Result {
                 value=(if active_page == "targets" { "/targets" } else { "/settings" })
             />
             <section data-app-page="settings" hidden=(active_page != "settings")>
-                page_heading(
-                    title: "Settings",
-                    description: "Configure the RTMP server, dashboard access, chat ingestion, and stream notifications."
-                )
                 <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
                     <div class="min-w-0">server_settings()</div>
                     <div class="min-w-0">web_auth()</div>
@@ -40,10 +36,6 @@ pub async fn configuration_form(active_page: &'static str) -> Result {
                 </div>
             </section>
             <section data-app-page="targets" hidden=(active_page != "targets")>
-                page_heading(
-                    title: "Targets",
-                    description: "Choose where staged streams are published and manage the credentials for each destination."
-                )
                 targets()
             </section>
             <div class="mt-6">actions_panel()</div>
