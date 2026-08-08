@@ -1,5 +1,4 @@
 use crate::web::components::actions_panel::actions_panel;
-use crate::web::components::app_navigation::page_heading;
 use crate::web::components::chat_settings::chat_settings;
 use crate::web::components::notifications::notifications;
 use crate::web::components::server_settings::server_settings;

@@ -29,7 +29,7 @@ use topcoat::{
 pub mod auth;
 pub mod components;
 use components::{
-    app_navigation::{app_navigation, page_heading},
+    app_navigation::{app_navigation},
     chat_inbox::chat_inbox,
     config_transfer::config_transfer,
     configuration_form::configuration_form,

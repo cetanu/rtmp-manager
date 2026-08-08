@@ -1,5 +1,4 @@
 use crate::server::state::ProxyState;
-use crate::web::components::app_navigation::page_heading;
 use crate::web::components::ui::card::{card, card_content, card_header, card_title};
 use crate::web::components::ui::empty_state::empty_state;
 use std::collections::HashMap;
