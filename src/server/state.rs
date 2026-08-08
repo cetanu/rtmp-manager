@@ -206,12 +206,12 @@ impl ProxyState {
                     &target_full_url,
                 ])
                 .stdout(Stdio::piped())
-                .stderr(Stdio::null())
+                .stderr(Stdio::piped())
                 .kill_on_drop(true)
                 .spawn();
             match child {
                 Ok(mut child) => {
-                    tracing::info!(name = %target.name, "Stream target published");
+                    tracing::info!(name = %target.name, "Stream target relay started");
                     let bitrate = self.metrics.register_target(target.name.clone());
                     if let Some(stdout) = child.stdout.take() {
                         tokio::spawn(async move {
@@ -221,6 +221,19 @@ impl ProxyState {
                                     && let Some(bps) = parse_ffmpeg_bitrate(value)
                                 {
                                     bitrate.update_from_ffmpeg(bps);
+                                }
+                            }
+                        });
+                    }
+                    if let Some(stderr) = child.stderr.take() {
+                        let target_name = target.name.clone();
+                        let secrets = [stream_key.clone(), target.stream_key.clone()];
+                        tokio::spawn(async move {
+                            let mut lines = BufReader::new(stderr).lines();
+                            while let Ok(Some(line)) = lines.next_line().await {
+                                let detail = redact_secrets(&line, &secrets);
+                                if !detail.trim().is_empty() {
+                                    tracing::warn!(name = %target_name, %detail, "Relay FFmpeg diagnostic");
                                 }
                             }
                         });
@@ -322,7 +335,7 @@ impl ProxyState {
             }
         }
         let preview_failed = staged.as_ref().is_some_and(|stream| stream.preview_failed);
-        StreamStatus {
+        let status = StreamStatus {
             active: staged.is_some(),
             preview_ready: staged.is_some()
                 && !preview_failed
@@ -330,7 +343,26 @@ impl ProxyState {
             preview_failed,
             published: staged.as_ref().is_some_and(|stream| stream.published),
             session_id: staged.as_ref().map(|stream| stream.session_id),
+        };
+        drop(staged);
+
+        let mut active_relays = self.active_relays.lock().await;
+        for relays in active_relays.values_mut() {
+            relays.retain_mut(|relay| match relay.child.try_wait() {
+                Ok(Some(status)) => {
+                    tracing::error!(name = %relay.target_name, %status, "Stream target relay exited");
+                    self.metrics.unregister_target(&relay.target_name);
+                    false
+                }
+                Err(error) => {
+                    tracing::error!(name = %relay.target_name, %error, "Failed to inspect stream target relay");
+                    self.metrics.unregister_target(&relay.target_name);
+                    false
+                }
+                Ok(None) => true,
+            });
         }
+        status
     }
 
     pub fn preview_file(&self, name: &str) -> Option<PathBuf> {
@@ -431,6 +463,26 @@ fn parse_ffmpeg_bitrate(value: &str) -> Option<u64> {
         .then_some((number.max(0.0) * 1_000.0) as u64)
 }
 
+fn redact_secrets(text: &str, secrets: &[String]) -> String {
+    let redacted = secrets
+        .iter()
+        .filter(|secret| !secret.is_empty())
+        .fold(text.to_owned(), |redacted, secret| {
+            redacted.replace(secret, "[REDACTED]")
+        });
+    redacted
+        .split_whitespace()
+        .map(|part| {
+            if part.contains("rtmp://") || part.contains("rtmps://") {
+                "[RTMP_URL_REDACTED]"
+            } else {
+                part
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn valid_preview_file_name(name: &str) -> bool {
     name == "index.m3u8"
         || name
@@ -453,7 +505,7 @@ fn create_preview_dir(path: &std::path::Path) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_ffmpeg_bitrate, valid_preview_file_name};
+    use super::{parse_ffmpeg_bitrate, redact_secrets, valid_preview_file_name};
 
     #[test]
     fn preview_files_are_strictly_allowlisted() {
@@ -468,5 +520,13 @@ mod tests {
     fn parses_ffmpeg_progress_bitrate() {
         assert_eq!(parse_ffmpeg_bitrate(" 2450.5kbits/s"), Some(2_450_500));
         assert_eq!(parse_ffmpeg_bitrate("N/A"), None);
+    }
+
+    #[test]
+    fn ffmpeg_diagnostics_redact_every_stream_key() {
+        let secrets = ["local-key".to_owned(), "twitch-key".to_owned()];
+        let line = "rtmp://localhost/live/local-key -> rtmp://twitch/app/twitch-key";
+        let redacted = redact_secrets(line, &secrets);
+        assert_eq!(redacted, "[RTMP_URL_REDACTED] -> [RTMP_URL_REDACTED]");
     }
 }

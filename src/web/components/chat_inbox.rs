@@ -1,9 +1,7 @@
 use crate::server::state::ProxyState;
 use crate::web::components::chat_inbox_content::chat_inbox_content;
 use crate::web::components::ui::button::{ButtonSize, ButtonVariant, button_variants};
-use crate::web::components::ui::card::{
-    card, card_footer,
-};
+use crate::web::components::ui::card::{card, card_footer};
 use std::sync::Arc;
 use topcoat::{
     Result,

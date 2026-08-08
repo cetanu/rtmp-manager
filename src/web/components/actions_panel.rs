@@ -13,53 +13,89 @@ async fn start_test_stream(cx: &Cx) -> Result<String> {
     let state: &Arc<ProxyState> = app_context(cx);
     let config = state.config.read().await;
     let duration_secs = config.server.test_stream_duration_secs;
-    let stream_key = config.server.ingest_stream_key.clone();
+    let targets = config
+        .targets
+        .iter()
+        .filter(|target| target.enabled)
+        .cloned()
+        .collect::<Vec<_>>();
     drop(config);
-    if stream_key.is_empty() {
-        return Ok("Configure an ingest stream key before starting a test stream".to_owned());
+    if targets.is_empty() {
+        return Ok("Enable at least one target before starting a test stream".to_owned());
     }
 
-    let url = format!("rtmp://127.0.0.1:{}/live/{}", state.listen_port, stream_key);
     tokio::spawn(async move {
         tracing::info!(
             duration_secs,
-            "Starting test stream via ffmpeg to local ingest..."
+            target_count = targets.len(),
+            "Starting direct test stream to enabled targets"
         );
-        let video_source = format!("testsrc=duration={duration_secs}:size=1280x720:rate=30");
-        let audio_source = format!("sine=frequency=1000:duration={duration_secs}");
-        let result = tokio::process::Command::new("ffmpeg")
-            .args([
-                "-re",
-                "-f",
-                "lavfi",
-                "-i",
-                &video_source,
-                "-f",
-                "lavfi",
-                "-i",
-                &audio_source,
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-pix_fmt",
-                "yuv420p",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "128k",
-                "-f",
-                "flv",
-                &url,
-            ])
-            .output()
-            .await;
-        if let Err(error) = result {
-            tracing::error!(%error, "Test stream failed to start");
+        let mut tasks = tokio::task::JoinSet::new();
+        for target in targets {
+            tasks.spawn(async move {
+                let destination = if target.stream_key.is_empty() {
+                    target.url.clone()
+                } else if target.url.ends_with('/') {
+                    format!("{}{}", target.url, target.stream_key)
+                } else {
+                    format!("{}/{}", target.url, target.stream_key)
+                };
+                let video_source = format!("testsrc=duration={duration_secs}:size=1280x720:rate=30");
+                let audio_source = format!("sine=frequency=1000:duration={duration_secs}");
+                let output = tokio::process::Command::new("ffmpeg")
+                    .args([
+                        "-hide_banner", "-loglevel", "warning", "-re", "-f", "lavfi", "-i",
+                        &video_source, "-f", "lavfi", "-i", &audio_source, "-c:v", "libx264",
+                        "-preset", "veryfast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a",
+                        "128k", "-f", "flv", &destination,
+                    ])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::piped())
+                    .output()
+                    .await;
+                match output {
+                    Ok(output) if output.status.success() => {
+                        tracing::info!(name = %target.name, "Direct target test completed successfully");
+                    }
+                    Ok(output) => {
+                        let detail = safe_ffmpeg_failure(&String::from_utf8_lossy(&output.stderr));
+                        tracing::error!(name = %target.name, status = %output.status, %detail, "Direct target test failed");
+                    }
+                    Err(error) => {
+                        tracing::error!(name = %target.name, %error, "Direct target test FFmpeg failed to start");
+                    }
+                }
+            });
         }
-        tracing::info!("Test stream finished.");
+        while let Some(result) = tasks.join_next().await {
+            if let Err(error) = result {
+                tracing::error!(%error, "Direct target test task failed");
+            }
+        }
     });
     Ok(String::new())
+}
+
+fn safe_ffmpeg_failure(stderr: &str) -> &'static str {
+    let detail = stderr.to_ascii_lowercase();
+    for (needle, message) in [
+        ("connection refused", "Connection refused by target"),
+        ("connection timed out", "Connection to target timed out"),
+        ("network is unreachable", "Target network is unreachable"),
+        (
+            "name or service not known",
+            "Target hostname could not be resolved",
+        ),
+        ("authentication", "Target rejected authentication"),
+        ("broken pipe", "Target closed the connection"),
+        ("server error", "Target returned a server error"),
+        ("unknown encoder", "Required FFmpeg encoder is unavailable"),
+    ] {
+        if detail.contains(needle) {
+            return message;
+        }
+    }
+    "FFmpeg failed; destination and credentials omitted from logs"
 }
 
 #[procedure]
@@ -143,5 +179,17 @@ pub async fn actions_panel() -> Result {
                 )
             </div>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_ffmpeg_failure;
+
+    #[test]
+    fn ffmpeg_failure_summary_does_not_echo_diagnostics() {
+        let stderr = "rtmp://example.test/app/private-key: Connection refused";
+        assert_eq!(safe_ffmpeg_failure(stderr), "Connection refused by target");
+        assert!(!safe_ffmpeg_failure(stderr).contains("private-key"));
     }
 }

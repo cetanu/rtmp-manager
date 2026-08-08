@@ -108,11 +108,12 @@ fn install_embedded_assets(executable: &Path) -> Result<()> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let (_, log_layer) = log_buffer::init();
+    let log_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "rtmp_proxy=info,rtmp_rs=off".into())
+        // rtmp-rs includes raw publish keys in events at multiple levels.
+        .add_directive("rtmp_rs=off".parse().expect("valid log directive"));
     tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "rtmp_proxy=info,rtmp_rs=info".into()),
-        )
+        .with(log_filter)
         .with(tracing_subscriber::fmt::layer())
         .with(log_layer)
         .init();

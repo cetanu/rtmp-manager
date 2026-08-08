@@ -29,12 +29,8 @@ use topcoat::{
 pub mod auth;
 pub mod components;
 use components::{
-    app_navigation::{app_navigation},
-    chat_inbox::chat_inbox,
-    config_transfer::config_transfer,
-    configuration_form::configuration_form,
-    log_viewer::log_viewer,
-    metrics::metrics_page,
+    app_navigation::app_navigation, chat_inbox::chat_inbox, config_transfer::config_transfer,
+    configuration_form::configuration_form, log_viewer::log_viewer, metrics::metrics_page,
     stream_preview::stream_preview,
 };
 
