@@ -64,14 +64,14 @@ pub struct StreamStatus {
 }
 
 impl ProxyState {
-    pub fn new(
+    pub async fn new(
         metrics: Arc<Metrics>,
         config: AppConfig,
         http_client: Client,
         listen_port: u16,
         config_store: ConfigStore,
     ) -> anyhow::Result<Self> {
-        let chat_inbox = ChatInbox::open(config_store.path(), config.chat.queue_capacity)?;
+        let chat_inbox = ChatInbox::open(config_store.path(), config.chat.queue_capacity).await?;
         let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let preview_dir =
             std::env::temp_dir().join(format!("rtmp-manager-hls-{}-{unique}", std::process::id()));
@@ -282,7 +282,7 @@ impl ProxyState {
             }
         }
         let preview_failed = staged.as_ref().is_some_and(|stream| stream.preview_failed);
-        
+
         StreamStatus {
             active: staged.is_some(),
             preview_ready: staged.is_some()
@@ -309,7 +309,11 @@ impl ProxyState {
 
     pub async fn apply_chat_config(self: &Arc<Self>) -> anyhow::Result<()> {
         let chat = self.config.read().await.chat.clone();
-        self.chat_inbox.lock().await.resize(chat.queue_capacity)?;
+        self.chat_inbox
+            .lock()
+            .await
+            .resize(chat.queue_capacity)
+            .await?;
 
         if let Some(task) = self.twitch_task.lock().await.take() {
             task.abort();

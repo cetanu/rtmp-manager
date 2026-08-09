@@ -5,13 +5,12 @@ mod log_buffer;
 mod metrics;
 mod notifications;
 mod server;
-
 mod web;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use config::ConfigStore;
-use metrics::{Metrics, run_health_server};
+use metrics::Metrics;
 use server::{run_rtmp_server, state::ProxyState};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -25,17 +24,9 @@ const SYSTEMD_UNIT_TEMPLATE: &str = include_str!("../systemd/rtmp-proxy.service"
 #[derive(Parser, Debug)]
 #[command(author, version, about = "RTMP Stream Multiplexer powered by rtmp-rs", long_about = None)]
 struct CliArgs {
-    /// Path to the SQLite database, or a legacy JSON file to import once
+    /// Path to the SQLite database; a `.json` suffix maps to a `.sqlite3` path
     #[arg(short, long, env = "CONFIG_PATH", default_value = "config.json")]
     config: PathBuf,
-
-    /// Initial web username, persisted only when SQLite has no web credentials
-    #[arg(long, env = "WEB_AUTH_BOOTSTRAP_USERNAME", hide_env_values = true)]
-    web_auth_bootstrap_username: Option<String>,
-
-    /// Initial web password, persisted only when SQLite has no web credentials
-    #[arg(long, env = "WEB_AUTH_BOOTSTRAP_PASSWORD", hide_env_values = true)]
-    web_auth_bootstrap_password: Option<String>,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -43,13 +34,10 @@ struct CliArgs {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Install systemd unit service for self-managed background execution
     InstallSystemd {
-        /// Working directory for systemd service
         #[arg(long, default_value = "/opt/rtmp-proxy")]
         work_dir: PathBuf,
 
-        /// Path to config file for systemd service
         #[arg(long, default_value = "/opt/rtmp-proxy/config.json")]
         config_path: PathBuf,
     },
@@ -58,8 +46,6 @@ enum Commands {
 fn install_systemd(work_dir: &Path, config_path: &Path) -> Result<()> {
     let current_exe =
         std::env::current_exe().context("Failed to determine path of current executable")?;
-
-    install_embedded_assets().unwrap();
 
     let state_dir = config_path
         .parent()
@@ -100,11 +86,6 @@ fn install_systemd(work_dir: &Path, config_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn install_embedded_assets() -> Result<()> {
-    embedded_assets::install(web::TAILWIND_STYLESHEET)
-        .context("Failed to install embedded web assets")
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let (_, log_layer) = log_buffer::init();
@@ -127,34 +108,12 @@ async fn main() -> Result<()> {
         return install_systemd(&work_dir, &config_path);
     }
 
-    install_embedded_assets()?;
+    embedded_assets::install(web::TAILWIND_STYLESHEET)
+        .context("Failed to install embedded web assets")?;
 
     info!(path = ?cli.config, "Loading configuration");
-    let (config_store, mut config) = ConfigStore::open(&cli.config)?;
-    if config.web_auth.username.is_empty() && config.web_auth.password.is_empty() {
-        match (
-            cli.web_auth_bootstrap_username
-                .filter(|value| !value.trim().is_empty()),
-            cli.web_auth_bootstrap_password
-                .filter(|value| !value.is_empty()),
-        ) {
-            (Some(username), Some(password)) => {
-                config.web_auth.username = username.trim().to_string();
-                config.web_auth.password = password;
-                config.validate()?;
-                config_store.save(&config)?;
-                info!("Persisted initial web authentication credentials to SQLite");
-            }
-            (None, None) => warn!(
-                "Web authentication is disabled; configure web_auth or provide both bootstrap credentials"
-            ),
-            _ => anyhow::bail!(
-                "Both WEB_AUTH_BOOTSTRAP_USERNAME and WEB_AUTH_BOOTSTRAP_PASSWORD are required together"
-            ),
-        }
-    }
+    let (config_store, config) = ConfigStore::open(&cli.config).await?;
     config.validate()?;
-    info!(path = %config_store.path().display(), "Using SQLite configuration database");
 
     let metrics = Arc::new(Metrics::default());
     let http_client = reqwest::Client::builder()
@@ -176,13 +135,8 @@ async fn main() -> Result<()> {
 
     let web_addr = config.server.api_listen;
     let listen_port = config.server.listen.port();
-    let state = Arc::new(ProxyState::new(
-        Arc::clone(&metrics),
-        config,
-        http_client,
-        listen_port,
-        config_store,
-    )?);
+    let state =
+        Arc::new(ProxyState::new(metrics, config, http_client, listen_port, config_store).await?);
     state.apply_chat_config().await?;
 
     // Spawn Web Server
@@ -190,15 +144,6 @@ async fn main() -> Result<()> {
     tokio::spawn(async move {
         if let Err(e) = crate::web::run_web_server(web_state, web_addr).await {
             warn!("Web interface server error: {:#}", e);
-        }
-    });
-
-    // Spawn Health Check HTTP Server on localhost
-    let health_addr = state.config.read().await.server.health_listen;
-    let health_metrics = Arc::clone(&metrics);
-    tokio::spawn(async move {
-        if let Err(e) = run_health_server(health_addr, health_metrics).await {
-            warn!("Health check server error: {:#}", e);
         }
     });
 

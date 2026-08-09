@@ -80,7 +80,7 @@ async fn read_connection(state: &Arc<ProxyState>, channel: &str) -> Result<()> {
             avatar_url: None,
             sent_at: None,
         };
-        match state.chat_inbox.lock().await.enqueue(message) {
+        match state.chat_inbox.lock().await.enqueue(message).await {
             Ok(EnqueueOutcome::Accepted | EnqueueOutcome::Dropped) => {
                 state.notify_chat_changed();
             }

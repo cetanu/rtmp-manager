@@ -15,18 +15,18 @@ async fn acknowledge_chat(cx: &Cx, displayed_id: String) -> Result<String> {
     let state: &Arc<ProxyState> = app_context(cx);
     let mut inbox = state.chat_inbox.lock().await;
     if let Ok(displayed_id) = displayed_id.parse()
-        && inbox.acknowledge(displayed_id)?
+        && inbox.acknowledge(displayed_id).await?
     {
         state.notify_chat_changed();
     }
-    Ok(current_message_id(&inbox.snapshot()?))
+    Ok(current_message_id(&inbox.snapshot().await?))
 }
 
 #[procedure]
 async fn refresh_chat(cx: &Cx) -> Result<String> {
     let state: &Arc<ProxyState> = app_context(cx);
     Ok(current_message_id(
-        &state.chat_inbox.lock().await.snapshot()?,
+        &state.chat_inbox.lock().await.snapshot().await?,
     ))
 }
 
@@ -41,7 +41,7 @@ fn current_message_id(snapshot: &crate::chat::ChatInboxSnapshot) -> String {
 #[component]
 pub async fn chat_inbox(cx: &Cx) -> Result {
     let state: &Arc<ProxyState> = app_context(cx);
-    let initial_id = current_message_id(&state.chat_inbox.lock().await.snapshot()?);
+    let initial_id = current_message_id(&state.chat_inbox.lock().await.snapshot().await?);
     let outline_button = button_variants(ButtonVariant::Outline, ButtonSize::Md);
     let primary_button = button_variants(ButtonVariant::Primary, ButtonSize::Md);
 

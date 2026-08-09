@@ -272,7 +272,6 @@ fn parse_imported_config(body: &[u8]) -> anyhow::Result<AppConfig> {
 #[derive(Debug, Default, Deserialize)]
 struct ServerForm {
     listen: Option<String>,
-    health_listen: Option<String>,
     api_listen: Option<String>,
     test_stream_duration_secs: Option<u64>,
     ingest_stream_key: Option<String>,
@@ -357,11 +356,6 @@ fn merge_form(current: &AppConfig, form: ConfigForm) -> anyhow::Result<AppConfig
     if let Some(server) = form.server {
         config.server = ServerSettings {
             listen: parse_address(server.listen, config.server.listen, "RTMP listen")?,
-            health_listen: parse_address(
-                server.health_listen,
-                config.server.health_listen,
-                "health listen",
-            )?,
             api_listen: parse_address(server.api_listen, config.server.api_listen, "API listen")?,
             test_stream_duration_secs: server
                 .test_stream_duration_secs
@@ -528,7 +522,7 @@ async fn update_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
     let changed = updated != *config_write;
     let chat_changed = updated.chat != config_write.chat;
     if changed {
-        if let Err(e) = state.config_store.save(&updated) {
+        if let Err(e) = state.config_store.save(&updated).await {
             tracing::error!("Failed to save configuration to SQLite: {}", e);
             return Err(internal_server_error(e).into());
         }
@@ -566,7 +560,7 @@ async fn import_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
     let changed = imported != *config_write;
     let chat_changed = imported.chat != config_write.chat;
     if changed {
-        if let Err(error) = state.config_store.save(&imported) {
+        if let Err(error) = state.config_store.save(&imported).await {
             tracing::error!("Failed to import configuration into SQLite: {}", error);
             return Err(internal_server_error(error).into());
         }
@@ -610,7 +604,7 @@ async fn import_config_file(
     let changed = imported != *config_write;
     let chat_changed = imported.chat != config_write.chat;
     if changed {
-        if let Err(error) = state.config_store.save(&imported) {
+        if let Err(error) = state.config_store.save(&imported).await {
             tracing::error!("Failed to import configuration into SQLite: {}", error);
             return Err(internal_server_error(error).into());
         }
@@ -637,7 +631,7 @@ fn redirect_to(cx: &Cx, location: &'static str) -> Result<topcoat::router::Respo
 #[route(GET "/api/chat")]
 async fn get_chat_inbox(cx: &Cx) -> Result<topcoat::router::Response> {
     let state: &Arc<ProxyState> = app_context(cx);
-    let snapshot = state.chat_inbox.lock().await.snapshot()?;
+    let snapshot = state.chat_inbox.lock().await.snapshot().await?;
     topcoat::router::IntoResponse::into_response(
         (
             [(topcoat::router::header::CACHE_CONTROL, "no-store")],
@@ -654,7 +648,7 @@ async fn acknowledge_chat_message(
 ) -> Result<topcoat::router::Response> {
     let state: &Arc<ProxyState> = app_context(cx);
     let mut inbox = state.chat_inbox.lock().await;
-    if !inbox.acknowledge(request.id)? {
+    if !inbox.acknowledge(request.id).await? {
         return topcoat::router::IntoResponse::into_response(
             (
                 topcoat::router::StatusCode::CONFLICT,
@@ -665,7 +659,7 @@ async fn acknowledge_chat_message(
     }
     state.notify_chat_changed();
 
-    topcoat::router::IntoResponse::into_response(Json(inbox.snapshot()?), cx)
+    topcoat::router::IntoResponse::into_response(Json(inbox.snapshot().await?), cx)
 }
 
 #[route(GET "/api/events")]
@@ -770,7 +764,7 @@ async fn ingest_chat_message(
     }
 
     let mut inbox = state.chat_inbox.lock().await;
-    let outcome = match inbox.enqueue(message) {
+    let outcome = match inbox.enqueue(message).await {
         Ok(EnqueueOutcome::Accepted) => "accepted",
         Ok(EnqueueOutcome::Duplicate) => "duplicate",
         Ok(EnqueueOutcome::Dropped) => "dropped",
@@ -781,7 +775,7 @@ async fn ingest_chat_message(
     }
     let response = ChatIngestResponse {
         outcome,
-        inbox: inbox.snapshot()?,
+        inbox: inbox.snapshot().await?,
     };
 
     topcoat::router::IntoResponse::into_response(
@@ -798,7 +792,6 @@ mod tests {
         AppConfig {
             server: ServerSettings {
                 listen: "0.0.0.0:1935".parse().unwrap(),
-                health_listen: "127.0.0.1:8080".parse().unwrap(),
                 api_listen: "10.0.0.1:3000".parse().unwrap(),
                 test_stream_duration_secs: 15,
                 ingest_stream_key: "existing-ingest-key".into(),

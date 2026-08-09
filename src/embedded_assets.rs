@@ -27,6 +27,10 @@ struct EmbeddedAsset {
 
 pub fn install(tailwind_stylesheet: Asset) -> Result<()> {
     let executable = std::env::current_exe().unwrap();
+    install_at(&executable, tailwind_stylesheet)
+}
+
+fn install_at(executable: &Path, tailwind_stylesheet: Asset) -> Result<()> {
     let executable_dir = executable
         .parent()
         .context("executable has no parent directory")?;
@@ -149,7 +153,8 @@ mod tests {
         ));
         let executable = test_dir.join("rtmp-proxy");
 
-        install(&executable, crate::web::TAILWIND_STYLESHEET).unwrap();
+        std::fs::create_dir_all(&test_dir).unwrap();
+        install_at(&executable, crate::web::TAILWIND_STYLESHEET).unwrap();
         let bundle = AssetBundle::load_dir(test_dir.join("assets")).unwrap();
 
         assert!(bundle.get(crate::web::TAILWIND_STYLESHEET.id()).is_some());

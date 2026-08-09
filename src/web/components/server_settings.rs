@@ -33,17 +33,6 @@ pub async fn server_settings(cx: &Cx) -> Result {
                         })
                     )
                     form_field(
-                        control_id: "health_listen",
-                        label_text: "Health Listen Address",
-                        input(attrs: attributes! {
-                            type="text"
-                            id="health_listen"
-                            name="server[health_listen]"
-                            value=(config.server.health_listen.to_string())
-                            placeholder="127.0.0.1:8080"
-                        })
-                    )
-                    form_field(
                         control_id: "api_listen",
                         label_text: "Web UI Listen Address",
                         input(attrs: attributes! {

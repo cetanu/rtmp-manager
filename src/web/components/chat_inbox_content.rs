@@ -15,7 +15,7 @@ use topcoat::{
 pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result {
     let _ = revision;
     let state: &Arc<ProxyState> = app_context(cx);
-    let snapshot = state.chat_inbox.lock().await.snapshot()?;
+    let snapshot = state.chat_inbox.lock().await.snapshot().await?;
     let youtube_status = state.youtube_status.read().await.clone();
 
     view! {

@@ -179,7 +179,7 @@ pub async fn run(state: Arc<ProxyState>, config: YouTubeChatConfig) {
                             avatar_url: item.author_details.profile_image_url,
                             sent_at: item.snippet.published_at,
                         };
-                        match inbox.enqueue(message) {
+                        match inbox.enqueue(message).await {
                             Ok(EnqueueOutcome::Accepted) => accepted += 1,
                             Ok(EnqueueOutcome::Duplicate | EnqueueOutcome::Dropped) => {}
                             Err(error) => {

@@ -1,35 +1,34 @@
 use anyhow::{Context, Result, bail};
-use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
+use serde_valid::Validate;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Validate)]
 pub struct ServerSettings {
     #[serde(default = "default_listen")]
     pub listen: SocketAddr,
-
-    #[serde(default = "default_health_listen")]
-    pub health_listen: SocketAddr,
 
     #[serde(default = "default_api_listen")]
     pub api_listen: SocketAddr,
 
     #[serde(default = "default_test_stream_duration_secs")]
+    #[validate(minimum = 1)]
+    #[validate(maximum = 86_400)]
     pub test_stream_duration_secs: u64,
 
     #[serde(default)]
+    #[validate(max_length = 256)]
+    #[validate(
+        pattern = r"^[A-Za-z0-9_-]*$",
+        message = "Ingest stream key must contain only ASCII letters, numbers, hyphens, or underscores"
+    )]
     pub ingest_stream_key: String,
 }
 
 fn default_listen() -> SocketAddr {
     "0.0.0.0:1935".parse().unwrap()
-}
-
-fn default_health_listen() -> SocketAddr {
-    "127.0.0.1:8080".parse().unwrap()
 }
 
 fn default_api_listen() -> SocketAddr {
@@ -44,7 +43,6 @@ impl Default for ServerSettings {
     fn default() -> Self {
         Self {
             listen: default_listen(),
-            health_listen: default_health_listen(),
             api_listen: default_api_listen(),
             test_stream_duration_secs: default_test_stream_duration_secs(),
             ingest_stream_key: String::new(),
@@ -82,12 +80,8 @@ pub struct TargetConfig {
     pub stream_key: String,
     #[serde(default)]
     pub public_url: Option<String>,
-    #[serde(default = "default_enabled")]
+    #[serde(default)]
     pub enabled: bool,
-}
-
-fn default_enabled() -> bool {
-    true
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq)]
@@ -98,11 +92,12 @@ pub struct WebAuthSettings {
     pub password: String,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Validate)]
 pub struct ChatSettings {
     #[serde(default)]
     pub ingest_token: Option<String>,
     #[serde(default = "default_chat_queue_capacity")]
+    #[validate(minimum = 1)]
     pub queue_capacity: usize,
     #[serde(default)]
     pub twitch_channel: Option<String>,
@@ -115,6 +110,7 @@ pub struct ChatSettings {
     #[serde(default)]
     pub youtube_channel_id: Option<String>,
     #[serde(default = "default_youtube_min_poll_interval_secs")]
+    #[validate(minimum = 1)]
     pub youtube_min_poll_interval_secs: u64,
     #[serde(default = "default_true")]
     pub youtube_adaptive_polling: bool,
@@ -167,20 +163,15 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let content = fs::read_to_string(path.as_ref())
-            .with_context(|| format!("Failed to read configuration file: {:?}", path.as_ref()))?;
-        let config: AppConfig = serde_json::from_str(&content).with_context(|| {
-            format!(
-                "Failed to parse JSON configuration from {:?}",
-                path.as_ref()
-            )
-        })?;
-        Ok(config)
-    }
-
     /// Validate enabled target URLs (allows 0 enabled targets for ingest-only mode)
     pub fn validate(&self) -> Result<()> {
+        self.server
+            .validate()
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        self.chat
+            .validate()
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+
         let username_set = !self.web_auth.username.trim().is_empty();
         let password_set = !self.web_auth.password.is_empty();
         if username_set != password_set {
@@ -211,30 +202,6 @@ impl AppConfig {
                     .all(|character| character.is_ascii_alphanumeric() || character == '_')
         }) {
             bail!("Twitch channel must be 1-25 ASCII letters, numbers, or underscores");
-        }
-        if self.chat.queue_capacity == 0 {
-            bail!("Chat queue capacity must be positive");
-        }
-        if self.chat.youtube_min_poll_interval_secs == 0 {
-            bail!("YouTube minimum poll interval must be positive");
-        }
-        if self.server.test_stream_duration_secs == 0 {
-            bail!("Test stream duration must be positive");
-        }
-        if self.server.test_stream_duration_secs > 86_400 {
-            bail!("Test stream duration must not exceed 86400 seconds");
-        }
-        if !self.server.ingest_stream_key.is_empty()
-            && (self.server.ingest_stream_key.len() > 256
-                || !self
-                    .server
-                    .ingest_stream_key
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')))
-        {
-            bail!(
-                "Ingest stream key must contain only ASCII letters, numbers, hyphens, or underscores"
-            );
         }
         let youtube_selectors = [
             &self.chat.youtube_live_chat_id,
@@ -274,19 +241,26 @@ impl AppConfig {
     }
 }
 
-/// SQLite-backed configuration storage.
+#[derive(Debug, toasty::Model)]
+#[table = "app_config"]
+struct StoredConfig {
+    #[key]
+    id: i64,
+    data: String,
+}
+
+/// Toasty-backed SQLite configuration storage.
 ///
-/// A `.json` path is treated as a legacy bootstrap file. It is imported only
-/// when the sibling `.sqlite3` database has no configuration yet.
-#[derive(Debug, Clone)]
+/// A `.json` path maps to a `.sqlite3` database path; the JSON file is not used
+/// as storage.
+#[derive(Clone)]
 pub struct ConfigStore {
     path: PathBuf,
+    database: toasty::Db,
 }
 
 impl ConfigStore {
-    const STORAGE_VERSION: &'static str = "1";
-
-    pub fn open<P: AsRef<Path>>(config_path: P) -> Result<(Self, AppConfig)> {
+    pub async fn open<P: AsRef<Path>>(config_path: P) -> Result<(Self, AppConfig)> {
         let config_path = config_path.as_ref();
         let is_json = config_path.extension().is_some_and(|ext| ext == "json");
         let database_path = if is_json {
@@ -294,52 +268,52 @@ impl ConfigStore {
         } else {
             config_path.to_path_buf()
         };
-
+        let database_exists = database_path.exists();
         if is_json && !config_path.exists() && !database_path.exists() {
             bail!(
-                "Neither legacy configuration '{}' nor database '{}' exists",
-                config_path.display(),
-                database_path.display()
+                "Configuration database '{}' (from '{}') does not exist",
+                database_path.display(),
+                config_path.display()
             );
         }
 
+        let database = toasty::Db::builder()
+            .models(toasty::models!(StoredConfig))
+            .connect(&format!("sqlite:{}", database_path.display()))
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to open config database '{}'",
+                    database_path.display()
+                )
+            })?;
+        #[cfg(unix)]
+        if !database_exists {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&database_path, fs::Permissions::from_mode(0o600)).with_context(
+                || {
+                    format!(
+                        "Failed to secure config database '{}'",
+                        database_path.display()
+                    )
+                },
+            )?;
+        }
         let store = Self {
             path: database_path,
+            database,
         };
-        store.initialize()?;
-
-        // Databases created by the broken form decoder have no storage-version
-        // marker. Re-import the legacy JSON once when upgrading those databases,
-        // then leave JSON untouched and use SQLite exclusively.
-        let storage_version = store.metadata("storage_version")?;
-        let needs_legacy_import = is_json
-            && config_path.exists()
-            && storage_version.as_deref() != Some(Self::STORAGE_VERSION);
-
-        let config = if needs_legacy_import {
-            let config = AppConfig::load_from_file(config_path)?;
-            config.validate()?;
-            store.save(&config)?;
-            config
-        } else {
-            match store.load()? {
-                Some(config) => config,
-                None if is_json && config_path.exists() => {
-                    let config = AppConfig::load_from_file(config_path)?;
-                    config.validate()?;
-                    store.save(&config)?;
-                    config
-                }
-                None => {
-                    let config = AppConfig::default();
-                    store.save(&config)?;
-                    config
-                }
+        if !database_exists {
+            store.database.push_schema().await?;
+        }
+        let config = match store.load().await? {
+            Some(config) => config,
+            None => {
+                let config = AppConfig::default();
+                store.save(&config).await?;
+                config
             }
         };
-        if storage_version.as_deref() != Some(Self::STORAGE_VERSION) {
-            store.set_metadata("storage_version", Self::STORAGE_VERSION)?;
-        }
 
         Ok((store, config))
     }
@@ -348,345 +322,35 @@ impl ConfigStore {
         &self.path
     }
 
-    fn connect(&self) -> Result<Connection> {
-        let database_exists = self.path.exists();
-        let connection = Connection::open(&self.path)
-            .with_context(|| format!("Failed to open config database '{}'", self.path.display()))?;
-        connection.busy_timeout(Duration::from_secs(5))?;
-        #[cfg(unix)]
-        if !database_exists {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&self.path, fs::Permissions::from_mode(0o600)).with_context(
-                || format!("Failed to secure config database '{}'", self.path.display()),
-            )?;
-        }
-        Ok(connection)
-    }
-
-    fn initialize(&self) -> Result<()> {
-        let connection = self.connect()?;
-        connection.execute_batch(
-            "
-            PRAGMA foreign_keys = ON;
-            CREATE TABLE IF NOT EXISTS settings (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                server_listen TEXT NOT NULL,
-                health_listen TEXT NOT NULL,
-                api_listen TEXT NOT NULL,
-                test_stream_duration_secs INTEGER NOT NULL DEFAULT 15,
-                ingest_stream_key TEXT NOT NULL DEFAULT '',
-                discord_webhook TEXT,
-                live_message TEXT NOT NULL,
-                webhook_url TEXT
-            );
-            CREATE TABLE IF NOT EXISTS targets (
-                id INTEGER PRIMARY KEY,
-                position INTEGER NOT NULL UNIQUE,
-                name TEXT NOT NULL,
-                url TEXT NOT NULL,
-                stream_key TEXT NOT NULL,
-                public_url TEXT,
-                enabled INTEGER NOT NULL CHECK (enabled IN (0, 1))
-            );
-            CREATE TABLE IF NOT EXISTS metadata (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS web_auth (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                username TEXT NOT NULL,
-                password TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS chat_settings (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                ingest_token TEXT,
-                queue_capacity INTEGER NOT NULL,
-                twitch_channel TEXT,
-                youtube_api_key TEXT,
-                youtube_live_chat_id TEXT,
-                youtube_video_id TEXT,
-                youtube_channel_id TEXT,
-                youtube_min_poll_interval_secs INTEGER NOT NULL,
-                youtube_adaptive_polling INTEGER NOT NULL CHECK (youtube_adaptive_polling IN (0, 1))
-            );
-            ",
-        )?;
-        let has_twitch_channel: bool = connection.query_row(
-            "SELECT EXISTS(
-                SELECT 1 FROM pragma_table_info('chat_settings')
-                WHERE name = 'twitch_channel'
-             )",
-            [],
-            |row| row.get(0),
-        )?;
-        if !has_twitch_channel {
-            connection.execute(
-                "ALTER TABLE chat_settings ADD COLUMN twitch_channel TEXT",
-                [],
-            )?;
-        }
-        let has_test_stream_duration: bool = connection.query_row(
-            "SELECT EXISTS(
-                SELECT 1 FROM pragma_table_info('settings')
-                WHERE name = 'test_stream_duration_secs'
-             )",
-            [],
-            |row| row.get(0),
-        )?;
-        if !has_test_stream_duration {
-            connection.execute(
-                "ALTER TABLE settings ADD COLUMN test_stream_duration_secs INTEGER NOT NULL DEFAULT 15",
-                [],
-            )?;
-        }
-        let has_ingest_stream_key: bool = connection.query_row(
-            "SELECT EXISTS(
-                SELECT 1 FROM pragma_table_info('settings')
-                WHERE name = 'ingest_stream_key'
-             )",
-            [],
-            |row| row.get(0),
-        )?;
-        if !has_ingest_stream_key {
-            connection.execute(
-                "ALTER TABLE settings ADD COLUMN ingest_stream_key TEXT NOT NULL DEFAULT ''",
-                [],
-            )?;
-        }
-        let has_eventsub_secret: bool = connection.query_row(
-            "SELECT EXISTS(
-                SELECT 1 FROM pragma_table_info('chat_settings')
-                WHERE name = 'twitch_eventsub_secret'
-             )",
-            [],
-            |row| row.get(0),
-        )?;
-        if has_eventsub_secret {
-            connection.execute(
-                "ALTER TABLE chat_settings DROP COLUMN twitch_eventsub_secret",
-                [],
-            )?;
-        }
-        Ok(())
-    }
-
-    fn metadata(&self, key: &str) -> Result<Option<String>> {
-        let connection = self.connect()?;
-        Ok(connection
-            .query_row("SELECT value FROM metadata WHERE key = ?1", [key], |row| {
-                row.get(0)
+    pub async fn load(&self) -> Result<Option<AppConfig>> {
+        let mut database = self.database.clone();
+        let record = StoredConfig::filter(StoredConfig::fields().id().eq(1_i64))
+            .first()
+            .exec(&mut database)
+            .await?;
+        record
+            .map(|record| {
+                serde_json::from_str(&record.data)
+                    .context("Failed to deserialize configuration from Toasty")
             })
-            .optional()?)
+            .transpose()
     }
 
-    fn set_metadata(&self, key: &str, value: &str) -> Result<()> {
-        let connection = self.connect()?;
-        connection.execute(
-            "INSERT INTO metadata (key, value) VALUES (?1, ?2)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            [key, value],
-        )?;
-        Ok(())
-    }
-
-    pub fn load(&self) -> Result<Option<AppConfig>> {
-        let connection = self.connect()?;
-        let settings = connection
-            .query_row(
-                "SELECT server_listen, health_listen, api_listen,
-                        test_stream_duration_secs, ingest_stream_key, discord_webhook,
-                        live_message, webhook_url
-                 FROM settings WHERE id = 1",
-                [],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, i64>(3)? as u64,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, Option<String>>(5)?,
-                        row.get::<_, String>(6)?,
-                        row.get::<_, Option<String>>(7)?,
-                    ))
-                },
-            )
-            .optional()?;
-
-        let Some((
-            server_listen,
-            health_listen,
-            api_listen,
-            test_stream_duration_secs,
-            ingest_stream_key,
-            discord_webhook,
-            live_message,
-            webhook_url,
-        )) = settings
-        else {
-            return Ok(None);
-        };
-
-        let mut statement = connection.prepare(
-            "SELECT name, url, stream_key, public_url, enabled
-             FROM targets ORDER BY position",
-        )?;
-        let targets = statement
-            .query_map([], |row| {
-                Ok(TargetConfig {
-                    name: row.get(0)?,
-                    url: row.get(1)?,
-                    stream_key: row.get(2)?,
-                    public_url: row.get(3)?,
-                    enabled: row.get(4)?,
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-
-        let web_auth = connection
-            .query_row(
-                "SELECT username, password FROM web_auth WHERE id = 1",
-                [],
-                |row| {
-                    Ok(WebAuthSettings {
-                        username: row.get(0)?,
-                        password: row.get(1)?,
-                    })
-                },
-            )
-            .optional()?
-            .unwrap_or_default();
-        let chat = connection
-            .query_row(
-                "SELECT ingest_token, queue_capacity, twitch_channel,
-                        youtube_api_key, youtube_live_chat_id, youtube_video_id,
-                        youtube_channel_id, youtube_min_poll_interval_secs,
-                        youtube_adaptive_polling
-                 FROM chat_settings WHERE id = 1",
-                [],
-                |row| {
-                    Ok(ChatSettings {
-                        ingest_token: row.get(0)?,
-                        queue_capacity: row.get::<_, i64>(1)? as usize,
-                        twitch_channel: row.get(2)?,
-                        youtube_api_key: row.get(3)?,
-                        youtube_live_chat_id: row.get(4)?,
-                        youtube_video_id: row.get(5)?,
-                        youtube_channel_id: row.get(6)?,
-                        youtube_min_poll_interval_secs: row.get::<_, i64>(7)? as u64,
-                        youtube_adaptive_polling: row.get(8)?,
-                    })
-                },
-            )
-            .optional()?
-            .unwrap_or_default();
-
-        let config = AppConfig {
-            server: ServerSettings {
-                listen: server_listen
-                    .parse()
-                    .context("Invalid server listen address")?,
-                health_listen: health_listen
-                    .parse()
-                    .context("Invalid health listen address")?,
-                api_listen: api_listen.parse().context("Invalid API listen address")?,
-                test_stream_duration_secs,
-                ingest_stream_key,
-            },
-            notifications: NotificationSettings {
-                discord_webhook,
-                live_message,
-                webhook_url,
-            },
-            targets,
-            web_auth,
-            chat,
-        };
-        Ok(Some(config))
-    }
-
-    pub fn save(&self, config: &AppConfig) -> Result<()> {
+    pub async fn save(&self, config: &AppConfig) -> Result<()> {
         config.validate()?;
-        let mut connection = self.connect()?;
-        let transaction = connection.transaction()?;
-        transaction.execute(
-            "INSERT INTO settings (
-                id, server_listen, health_listen, api_listen, discord_webhook,
-                live_message, webhook_url, test_stream_duration_secs, ingest_stream_key
-             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-             ON CONFLICT(id) DO UPDATE SET
-                server_listen = excluded.server_listen,
-                health_listen = excluded.health_listen,
-                api_listen = excluded.api_listen,
-                discord_webhook = excluded.discord_webhook,
-                live_message = excluded.live_message,
-                webhook_url = excluded.webhook_url,
-                test_stream_duration_secs = excluded.test_stream_duration_secs,
-                ingest_stream_key = excluded.ingest_stream_key",
-            params![
-                config.server.listen.to_string(),
-                config.server.health_listen.to_string(),
-                config.server.api_listen.to_string(),
-                config.notifications.discord_webhook,
-                config.notifications.live_message,
-                config.notifications.webhook_url,
-                config.server.test_stream_duration_secs as i64,
-                config.server.ingest_stream_key,
-            ],
-        )?;
-        transaction.execute("DELETE FROM targets", [])?;
-        for (position, target) in config.targets.iter().enumerate() {
-            transaction.execute(
-                "INSERT INTO targets (
-                    position, name, url, stream_key, public_url, enabled
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    position as i64,
-                    target.name,
-                    target.url,
-                    target.stream_key,
-                    target.public_url,
-                    target.enabled,
-                ],
-            )?;
+        let data = serde_json::to_string(config)?;
+        let mut database = self.database.clone();
+        if let Some(mut record) = StoredConfig::filter(StoredConfig::fields().id().eq(1_i64))
+            .first()
+            .exec(&mut database)
+            .await?
+        {
+            record.update().data(data).exec(&mut database).await?;
+        } else {
+            toasty::create!(StoredConfig { id: 1, data })
+                .exec(&mut database)
+                .await?;
         }
-        transaction.execute(
-            "INSERT INTO web_auth (id, username, password) VALUES (1, ?1, ?2)
-             ON CONFLICT(id) DO UPDATE SET
-                username = excluded.username,
-                password = excluded.password",
-            params![config.web_auth.username, config.web_auth.password],
-        )?;
-        transaction.execute(
-            "INSERT INTO chat_settings (
-                id, ingest_token, queue_capacity, twitch_channel,
-                youtube_api_key, youtube_live_chat_id, youtube_video_id,
-                youtube_channel_id, youtube_min_poll_interval_secs,
-                youtube_adaptive_polling
-             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-             ON CONFLICT(id) DO UPDATE SET
-                ingest_token = excluded.ingest_token,
-                queue_capacity = excluded.queue_capacity,
-                twitch_channel = excluded.twitch_channel,
-                youtube_api_key = excluded.youtube_api_key,
-                youtube_live_chat_id = excluded.youtube_live_chat_id,
-                youtube_video_id = excluded.youtube_video_id,
-                youtube_channel_id = excluded.youtube_channel_id,
-                youtube_min_poll_interval_secs = excluded.youtube_min_poll_interval_secs,
-                youtube_adaptive_polling = excluded.youtube_adaptive_polling",
-            params![
-                config.chat.ingest_token,
-                config.chat.queue_capacity as i64,
-                config.chat.twitch_channel,
-                config.chat.youtube_api_key,
-                config.chat.youtube_live_chat_id,
-                config.chat.youtube_video_id,
-                config.chat.youtube_channel_id,
-                config.chat.youtube_min_poll_interval_secs as i64,
-                config.chat.youtube_adaptive_polling,
-            ],
-        )?;
-        transaction.commit()?;
         Ok(())
     }
 }
@@ -734,38 +398,16 @@ mod tests {
         );
     }
 
-    #[test]
-    fn imports_legacy_json_once_and_round_trips_sqlite() {
+    #[tokio::test]
+    async fn stores_and_round_trips_config_with_toasty() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         let directory = std::env::temp_dir().join(format!("rtmp-proxy-config-{unique}"));
         fs::create_dir(&directory).unwrap();
-        let json_path = directory.join("config.json");
-        fs::write(
-            &json_path,
-            r#"{
-                "server": {
-                    "api_listen": "127.0.0.1:3001"
-                },
-                "notifications": {
-                    "live_message": "first"
-                },
-                "targets": [{
-                    "name": "Twitch",
-                    "url": "rtmps://example.test/app",
-                    "enabled": true
-                }]
-            }"#,
-        )
-        .unwrap();
-
-        let (store, mut config) = ConfigStore::open(&json_path).unwrap();
-        assert_eq!(config.server.api_listen.port(), 3001);
-        assert_eq!(config.server.test_stream_duration_secs, 15);
-        assert_eq!(config.server.ingest_stream_key, "");
-        assert_eq!(config.targets[0].stream_key, "");
+        let database_path = directory.join("config.sqlite3");
+        let (store, mut config) = ConfigStore::open(&database_path).await.unwrap();
         config.server.test_stream_duration_secs = 30;
         config.server.ingest_stream_key = "new-ingest-key".into();
         config.notifications.live_message = "saved in sqlite".into();
@@ -776,14 +418,9 @@ mod tests {
         config.chat.ingest_token = Some("chat-token-long-enough".into());
         config.chat.youtube_video_id = Some("video-id".into());
         config.chat.youtube_api_key = Some("api-key".into());
-        store.save(&config).unwrap();
+        store.save(&config).await.unwrap();
 
-        fs::write(
-            &json_path,
-            r#"{"notifications": {"live_message": "changed json"}}"#,
-        )
-        .unwrap();
-        let (_, reloaded) = ConfigStore::open(&json_path).unwrap();
+        let (_, reloaded) = ConfigStore::open(&database_path).await.unwrap();
         assert_eq!(reloaded.server.test_stream_duration_secs, 30);
         assert_eq!(reloaded.server.ingest_stream_key, "new-ingest-key");
         assert_eq!(reloaded.notifications.live_message, "saved in sqlite");
@@ -796,50 +433,5 @@ mod tests {
         assert_eq!(reloaded.chat.youtube_video_id.as_deref(), Some("video-id"));
 
         fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn existing_database_migrates_to_an_empty_ingest_stream_key() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let database_path =
-            std::env::temp_dir().join(format!("rtmp-proxy-ingest-key-migration-{unique}.sqlite3"));
-        let connection = Connection::open(&database_path).unwrap();
-        connection
-            .execute_batch(
-                "CREATE TABLE settings (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
-                    server_listen TEXT NOT NULL,
-                    health_listen TEXT NOT NULL,
-                    api_listen TEXT NOT NULL,
-                    test_stream_duration_secs INTEGER NOT NULL DEFAULT 15,
-                    discord_webhook TEXT,
-                    live_message TEXT NOT NULL,
-                    webhook_url TEXT
-                );
-                INSERT INTO settings (
-                    id, server_listen, health_listen, api_listen,
-                    test_stream_duration_secs, live_message
-                ) VALUES (
-                    1, '0.0.0.0:1935', '127.0.0.1:8080', '0.0.0.0:3000', 15, 'Live'
-                );",
-            )
-            .unwrap();
-        drop(connection);
-
-        let (store, mut config) = ConfigStore::open(&database_path).unwrap();
-        assert_eq!(config.server.ingest_stream_key, "");
-
-        config.server.ingest_stream_key = "configured-after-upgrade".into();
-        store.save(&config).unwrap();
-        let (_, reloaded) = ConfigStore::open(&database_path).unwrap();
-        assert_eq!(
-            reloaded.server.ingest_stream_key,
-            "configured-after-upgrade"
-        );
-
-        fs::remove_file(database_path).unwrap();
     }
 }
