@@ -86,17 +86,3 @@ pub async fn app_navigation(active_page: &'static str) -> Result {
         </header>
     }
 }
-
-#[component]
-pub async fn page_heading(title: &'static str, description: &'static str) -> Result {
-    view! {
-        <div class="mb-6">
-            <h1 data-page-heading="true" tabindex="-1" class="text-2xl font-semibold tracking-tight outline-none sm:text-3xl">
-                (title)
-            </h1>
-            <p class="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground sm:text-base">
-                (description)
-            </p>
-        </div>
-    }
-}

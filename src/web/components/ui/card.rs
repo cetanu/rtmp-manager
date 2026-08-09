@@ -65,19 +65,6 @@ pub async fn card_title(#[default] mut attrs: Attributes, #[default] child: View
     }
 }
 
-/// The supporting text under a [`card_title`].
-#[component]
-pub async fn card_description(#[default] mut attrs: Attributes, #[default] child: View) -> Result {
-    view! {
-        <p
-            class=(class!("text-sm text-muted-foreground", attrs.remove("class")))
-            (attrs)
-        >
-            (child)
-        </p>
-    }
-}
-
 /// The main body of a [`card`].
 #[component]
 pub async fn card_content(#[default] mut attrs: Attributes, #[default] child: View) -> Result {

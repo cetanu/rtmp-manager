@@ -25,7 +25,8 @@ struct EmbeddedAsset {
     contents: &'static [u8],
 }
 
-pub fn install(executable: &Path, tailwind_stylesheet: Asset) -> Result<()> {
+pub fn install(tailwind_stylesheet: Asset) -> Result<()> {
+    let executable = std::env::current_exe().unwrap();
     let executable_dir = executable
         .parent()
         .context("executable has no parent directory")?;

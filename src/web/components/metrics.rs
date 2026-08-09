@@ -42,8 +42,9 @@ pub async fn metrics_page(cx: &Cx) -> Result {
         .lock()
         .await
         .values()
-        .map(Vec::len)
-        .sum();
+        .flat_map(|relays| relays.iter())
+        .filter(|relay| relay.is_running())
+        .count();
     let current = state
         .metrics
         .current_target_bitrates()

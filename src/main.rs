@@ -59,7 +59,7 @@ fn install_systemd(work_dir: &Path, config_path: &Path) -> Result<()> {
     let current_exe =
         std::env::current_exe().context("Failed to determine path of current executable")?;
 
-    install_embedded_assets(&current_exe)?;
+    install_embedded_assets().unwrap();
 
     let state_dir = config_path
         .parent()
@@ -100,8 +100,8 @@ fn install_systemd(work_dir: &Path, config_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn install_embedded_assets(executable: &Path) -> Result<()> {
-    embedded_assets::install(executable, web::TAILWIND_STYLESHEET)
+fn install_embedded_assets() -> Result<()> {
+    embedded_assets::install(web::TAILWIND_STYLESHEET)
         .context("Failed to install embedded web assets")
 }
 
@@ -110,7 +110,6 @@ async fn main() -> Result<()> {
     let (_, log_layer) = log_buffer::init();
     let log_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| "rtmp_proxy=info,rtmp_rs=off".into())
-        // rtmp-rs includes raw publish keys in events at multiple levels.
         .add_directive("rtmp_rs=off".parse().expect("valid log directive"));
     tracing_subscriber::registry()
         .with(log_filter)
@@ -128,9 +127,7 @@ async fn main() -> Result<()> {
         return install_systemd(&work_dir, &config_path);
     }
 
-    let current_exe =
-        std::env::current_exe().context("Failed to determine path of current executable")?;
-    install_embedded_assets(&current_exe)?;
+    install_embedded_assets()?;
 
     info!(path = ?cli.config, "Loading configuration");
     let (config_store, mut config) = ConfigStore::open(&cli.config)?;

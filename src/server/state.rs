@@ -2,14 +2,14 @@ use crate::chat::{
     ChatInbox,
     youtube::{YouTubeChatConfig, YouTubeChatTarget, YouTubeIngestStatus},
 };
-use crate::config::{AppConfig, ConfigStore};
+use crate::config::{AppConfig, ConfigStore, TargetConfig};
 use crate::metrics::Metrics;
 use reqwest::Client;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -43,8 +43,15 @@ struct StagedStream {
 }
 
 pub struct RelayProcess {
-    child: Child,
-    target_name: String,
+    running: Arc<AtomicBool>,
+    cancel: watch::Sender<bool>,
+    task: JoinHandle<()>,
+}
+
+impl RelayProcess {
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::Relaxed)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -179,74 +186,13 @@ impl ProxyState {
         drop(config);
 
         let source_url = format!("rtmp://127.0.0.1:{}/live/{}", self.listen_port, stream_key);
-        let mut children = Vec::new();
+        let mut relays = Vec::new();
         for target in active_targets {
-            let target_full_url = if target.stream_key.is_empty() {
-                target.url.clone()
-            } else if target.url.ends_with('/') {
-                format!("{}{}", target.url, target.stream_key)
-            } else {
-                format!("{}/{}", target.url, target.stream_key)
-            };
-
-            let child = tokio::process::Command::new("ffmpeg")
-                .args([
-                    "-loglevel",
-                    "warning",
-                    "-stats_period",
-                    "1",
-                    "-progress",
-                    "pipe:1",
-                    "-i",
-                    &source_url,
-                    "-c",
-                    "copy",
-                    "-f",
-                    "flv",
-                    &target_full_url,
-                ])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true)
-                .spawn();
-            match child {
-                Ok(mut child) => {
-                    tracing::info!(name = %target.name, "Stream target relay started");
-                    let bitrate = self.metrics.register_target(target.name.clone());
-                    if let Some(stdout) = child.stdout.take() {
-                        tokio::spawn(async move {
-                            let mut lines = BufReader::new(stdout).lines();
-                            while let Ok(Some(line)) = lines.next_line().await {
-                                if let Some(value) = line.strip_prefix("bitrate=")
-                                    && let Some(bps) = parse_ffmpeg_bitrate(value)
-                                {
-                                    bitrate.update_from_ffmpeg(bps);
-                                }
-                            }
-                        });
-                    }
-                    if let Some(stderr) = child.stderr.take() {
-                        let target_name = target.name.clone();
-                        let secrets = [stream_key.clone(), target.stream_key.clone()];
-                        tokio::spawn(async move {
-                            let mut lines = BufReader::new(stderr).lines();
-                            while let Ok(Some(line)) = lines.next_line().await {
-                                let detail = redact_secrets(&line, &secrets);
-                                if !detail.trim().is_empty() {
-                                    tracing::warn!(name = %target_name, %detail, "Relay FFmpeg diagnostic");
-                                }
-                            }
-                        });
-                    }
-                    children.push(RelayProcess {
-                        child,
-                        target_name: target.name,
-                    });
-                }
-                Err(error) => {
-                    tracing::error!(name = %target.name, %error, "Failed to publish stream target");
-                }
-            }
+            relays.push(spawn_relay_supervisor(
+                Arc::clone(&self.metrics),
+                source_url.clone(),
+                target,
+            ));
         }
         let staged = self.staged_stream.lock().await;
         let still_published = staged
@@ -254,13 +200,13 @@ impl ProxyState {
             .is_some_and(|stream| stream.session_id == session_id && stream.published);
         if !still_published {
             drop(staged);
-            for relay in &mut children {
-                let _ = relay.child.kill().await;
-                self.metrics.unregister_target(&relay.target_name);
+            for relay in relays {
+                let _ = relay.cancel.send(true);
+                let _ = relay.task.await;
             }
             anyhow::bail!("The staged stream changed while publishing was starting");
         }
-        self.active_relays.lock().await.insert(stream_key, children);
+        self.active_relays.lock().await.insert(stream_key, relays);
         drop(staged);
         tokio::spawn(async move {
             dispatcher.dispatch(&notification_targets).await;
@@ -311,10 +257,11 @@ impl ProxyState {
     }
 
     async fn stop_relays(&self, stream_key: &str) {
-        if let Some(mut children) = self.active_relays.lock().await.remove(stream_key) {
-            for relay in &mut children {
-                let _ = relay.child.kill().await;
-                self.metrics.unregister_target(&relay.target_name);
+        let relays = self.active_relays.lock().await.remove(stream_key);
+        if let Some(relays) = relays {
+            for relay in relays {
+                let _ = relay.cancel.send(true);
+                let _ = relay.task.await;
             }
         }
     }
@@ -335,7 +282,8 @@ impl ProxyState {
             }
         }
         let preview_failed = staged.as_ref().is_some_and(|stream| stream.preview_failed);
-        let status = StreamStatus {
+        
+        StreamStatus {
             active: staged.is_some(),
             preview_ready: staged.is_some()
                 && !preview_failed
@@ -343,26 +291,7 @@ impl ProxyState {
             preview_failed,
             published: staged.as_ref().is_some_and(|stream| stream.published),
             session_id: staged.as_ref().map(|stream| stream.session_id),
-        };
-        drop(staged);
-
-        let mut active_relays = self.active_relays.lock().await;
-        for relays in active_relays.values_mut() {
-            relays.retain_mut(|relay| match relay.child.try_wait() {
-                Ok(Some(status)) => {
-                    tracing::error!(name = %relay.target_name, %status, "Stream target relay exited");
-                    self.metrics.unregister_target(&relay.target_name);
-                    false
-                }
-                Err(error) => {
-                    tracing::error!(name = %relay.target_name, %error, "Failed to inspect stream target relay");
-                    self.metrics.unregister_target(&relay.target_name);
-                    false
-                }
-                Ok(None) => true,
-            });
         }
-        status
     }
 
     pub fn preview_file(&self, name: &str) -> Option<PathBuf> {
@@ -448,10 +377,174 @@ impl Drop for ProxyState {
         }
         for relays in self.active_relays.get_mut().values_mut() {
             for relay in relays {
-                let _ = relay.child.start_kill();
+                let _ = relay.cancel.send(true);
+                relay.task.abort();
             }
         }
         let _ = std::fs::remove_dir_all(&self.preview_dir);
+    }
+}
+
+fn spawn_relay_supervisor(
+    metrics: Arc<Metrics>,
+    source_url: String,
+    target: TargetConfig,
+) -> RelayProcess {
+    let running = Arc::new(AtomicBool::new(false));
+    let task_running = Arc::clone(&running);
+    let (cancel, cancel_rx) = watch::channel(false);
+    let task = tokio::spawn(supervise_relay(
+        metrics,
+        source_url,
+        target,
+        task_running,
+        cancel_rx,
+    ));
+    RelayProcess {
+        running,
+        cancel,
+        task,
+    }
+}
+
+async fn supervise_relay(
+    metrics: Arc<Metrics>,
+    source_url: String,
+    target: TargetConfig,
+    running: Arc<AtomicBool>,
+    mut cancel: watch::Receiver<bool>,
+) {
+    let bitrate = metrics.register_target(target.name.clone());
+    let destination = if target.stream_key.is_empty() {
+        target.url.clone()
+    } else if target.url.ends_with('/') {
+        format!("{}{}", target.url, target.stream_key)
+    } else {
+        format!("{}/{}", target.url, target.stream_key)
+    };
+    let secrets = [
+        source_url.clone(),
+        destination.clone(),
+        target.stream_key.clone(),
+    ];
+    let mut retry_seconds = 1_u64;
+    let mut attempt = 0_u64;
+
+    loop {
+        if *cancel.borrow() {
+            break;
+        }
+        attempt += 1;
+        let started_at = tokio::time::Instant::now();
+        let child = tokio::process::Command::new("ffmpeg")
+            .args([
+                "-loglevel",
+                "warning",
+                "-stats_period",
+                "1",
+                "-progress",
+                "pipe:1",
+                "-i",
+                &source_url,
+                "-c",
+                "copy",
+                "-f",
+                "flv",
+                &destination,
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn();
+
+        let mut child = match child {
+            Ok(child) => child,
+            Err(error) => {
+                tracing::error!(name = %target.name, attempt, %error, "Failed to start target relay FFmpeg");
+                if wait_for_retry(&mut cancel, retry_seconds).await {
+                    break;
+                }
+                retry_seconds = (retry_seconds * 2).min(30);
+                continue;
+            }
+        };
+        running.store(true, Ordering::Relaxed);
+        tracing::info!(name = %target.name, attempt, "Stream target relay process started");
+
+        let stdout_task = child.stdout.take().map(|stdout| {
+            let bitrate = Arc::clone(&bitrate);
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stdout).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if let Some(value) = line.strip_prefix("bitrate=")
+                        && let Some(bps) = parse_ffmpeg_bitrate(value)
+                    {
+                        bitrate.update_from_ffmpeg(bps);
+                    }
+                }
+            })
+        });
+        let stderr_task = child.stderr.take().map(|stderr| {
+            let target_name = target.name.clone();
+            let secrets = secrets.clone();
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let detail = redact_secrets(&line, &secrets);
+                    if !detail.trim().is_empty() {
+                        tracing::warn!(name = %target_name, %detail, "Relay FFmpeg diagnostic");
+                    }
+                }
+            })
+        });
+
+        let exit = tokio::select! {
+            changed = cancel.changed() => {
+                let _ = child.kill().await;
+                let _ = changed;
+                None
+            }
+            result = child.wait() => Some(result),
+        };
+        running.store(false, Ordering::Relaxed);
+        bitrate.update_from_ffmpeg(0);
+        if let Some(task) = stdout_task {
+            let _ = task.await;
+        }
+        if let Some(task) = stderr_task {
+            let _ = task.await;
+        }
+
+        let Some(exit) = exit else {
+            break;
+        };
+        match exit {
+            Ok(status) => {
+                tracing::error!(name = %target.name, %status, "Stream target relay disconnected")
+            }
+            Err(error) => {
+                tracing::error!(name = %target.name, %error, "Failed while waiting for target relay")
+            }
+        }
+        if started_at.elapsed() >= Duration::from_secs(30) {
+            retry_seconds = 1;
+        }
+        tracing::warn!(name = %target.name, retry_seconds, "Target relay will reconnect");
+        if wait_for_retry(&mut cancel, retry_seconds).await {
+            break;
+        }
+        retry_seconds = (retry_seconds * 2).min(30);
+    }
+
+    running.store(false, Ordering::Relaxed);
+    metrics.unregister_target(&target.name);
+    tracing::info!(name = %target.name, "Stream target relay supervisor stopped");
+}
+
+async fn wait_for_retry(cancel: &mut watch::Receiver<bool>, seconds: u64) -> bool {
+    tokio::select! {
+        _ = tokio::time::sleep(Duration::from_secs(seconds)) => false,
+        _ = cancel.changed() => true,
     }
 }
 
