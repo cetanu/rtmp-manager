@@ -357,6 +357,16 @@ impl ProxyState {
         let Some(target) = target else {
             return Ok(());
         };
+        if !chat.youtube_polling_enabled {
+            *self.youtube_status.write().await = Some(YouTubeIngestStatus {
+                state: "off".into(),
+                detail: "Polling is off. Turn it on when the YouTube stream is live.".into(),
+                ..YouTubeIngestStatus::default()
+            });
+            self.notify_chat_changed();
+            tracing::info!("YouTube live chat polling is off");
+            return Ok(());
+        }
 
         let state = Arc::clone(self);
         let task = tokio::spawn(crate::chat::youtube::run(

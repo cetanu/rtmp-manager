@@ -18,7 +18,8 @@
     "youtube_video_id": "",
     "youtube_channel_id": "",
     "youtube_min_poll_interval_secs": 5,
-    "youtube_adaptive_polling": true
+    "youtube_adaptive_polling": true,
+    "youtube_polling_enabled": false
   },
   "notifications": {
     "discord_webhook": "https://discord.com/api/webhooks/YOUR_DISCORD_WEBHOOK_URL",

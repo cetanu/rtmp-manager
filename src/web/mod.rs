@@ -413,6 +413,7 @@ fn merge_form(current: &AppConfig, form: ConfigForm) -> anyhow::Result<AppConfig
                 .youtube_min_poll_interval_secs
                 .unwrap_or(config.chat.youtube_min_poll_interval_secs),
             youtube_adaptive_polling: chat.youtube_adaptive_polling,
+            youtube_polling_enabled: config.chat.youtube_polling_enabled,
         };
     }
     if let Some(target_fields) = form.targets {
@@ -816,6 +817,7 @@ mod tests {
                 ingest_token: Some("generic-ingest-token".into()),
                 twitch_channel: Some("streamer".into()),
                 youtube_api_key: Some("youtube-api-key".into()),
+                youtube_polling_enabled: true,
                 ..ChatSettings::default()
             },
         }
