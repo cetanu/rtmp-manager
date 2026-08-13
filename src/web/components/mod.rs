@@ -21,5 +21,6 @@ pub mod target_item;
 pub mod targets;
 pub mod ui;
 pub mod web_auth;
+pub mod x_chat_fields;
 pub mod youtube_chat_fields;
 pub mod youtube_ingest_status;

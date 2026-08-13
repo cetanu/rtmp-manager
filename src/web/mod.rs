@@ -310,6 +310,9 @@ struct ChatForm {
     youtube_min_poll_interval_secs: Option<u64>,
     #[serde(default)]
     youtube_adaptive_polling: bool,
+    x_media_key: Option<String>,
+    #[serde(default)]
+    x_polling_enabled: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -414,6 +417,8 @@ fn merge_form(current: &AppConfig, form: ConfigForm) -> anyhow::Result<AppConfig
                 .unwrap_or(config.chat.youtube_min_poll_interval_secs),
             youtube_adaptive_polling: chat.youtube_adaptive_polling,
             youtube_polling_enabled: config.chat.youtube_polling_enabled,
+            x_media_key: non_empty(chat.x_media_key),
+            x_polling_enabled: chat.x_polling_enabled,
         };
     }
     if let Some(target_fields) = form.targets {

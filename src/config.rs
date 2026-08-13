@@ -116,6 +116,10 @@ pub struct ChatSettings {
     pub youtube_adaptive_polling: bool,
     #[serde(default)]
     pub youtube_polling_enabled: bool,
+    #[serde(default)]
+    pub x_media_key: Option<String>,
+    #[serde(default)]
+    pub x_polling_enabled: bool,
 }
 
 fn default_chat_queue_capacity() -> usize {
@@ -143,6 +147,8 @@ impl Default for ChatSettings {
             youtube_min_poll_interval_secs: default_youtube_min_poll_interval_secs(),
             youtube_adaptive_polling: true,
             youtube_polling_enabled: false,
+            x_media_key: None,
+            x_polling_enabled: false,
         }
     }
 }

@@ -1,5 +1,6 @@
 use crate::chat::{
     ChatInbox,
+    x::XChatConfig,
     youtube::{YouTubeChatConfig, YouTubeChatTarget, YouTubeIngestStatus},
 };
 use crate::config::{AppConfig, ConfigStore, TargetConfig};
@@ -30,6 +31,7 @@ pub struct ProxyState {
     pub youtube_status: RwLock<Option<YouTubeIngestStatus>>,
     twitch_task: Mutex<Option<JoinHandle<()>>>,
     youtube_task: Mutex<Option<JoinHandle<()>>>,
+    x_task: Mutex<Option<JoinHandle<()>>>,
     pub listen_port: u16,
     pub config_store: ConfigStore,
 }
@@ -89,6 +91,7 @@ impl ProxyState {
             youtube_status: RwLock::new(None),
             twitch_task: Mutex::new(None),
             youtube_task: Mutex::new(None),
+            x_task: Mutex::new(None),
             listen_port,
             config_store,
         })
@@ -321,6 +324,9 @@ impl ProxyState {
         if let Some(task) = self.youtube_task.lock().await.take() {
             task.abort();
         }
+        if let Some(task) = self.x_task.lock().await.take() {
+            task.abort();
+        }
         *self.youtube_status.write().await = None;
 
         if let Some(channel) = chat
@@ -332,6 +338,24 @@ impl ProxyState {
             let task = tokio::spawn(crate::chat::twitch::run(state, channel.clone()));
             *self.twitch_task.lock().await = Some(task);
             tracing::info!(channel, "Twitch anonymous IRC ingest configured");
+        }
+
+        if chat.x_polling_enabled {
+            let media_key = chat
+                .x_media_key
+                .clone()
+                .filter(|value| !value.trim().is_empty());
+            match media_key {
+                Some(media_key) => {
+                    let state = Arc::clone(self);
+                    let task = tokio::spawn(crate::chat::x::run(state, XChatConfig { media_key }));
+                    *self.x_task.lock().await = Some(task);
+                    tracing::info!("X live chat ingest configured");
+                }
+                None => {
+                    tracing::warn!("X live chat polling is enabled but no media key is configured");
+                }
+            }
         }
 
         let Some(api_key) = chat
