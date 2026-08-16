@@ -11,13 +11,6 @@ reload-systemd-for-rtmp-proxy:
     - onchanges:
       - file: /etc/systemd/system/rtmp-proxy.service
 
-caddy.service:
-  service.running:
-    - enable: true
-    - reload: true
-    - watch:
-      - file: /etc/caddy/apps/rtmp-proxy.caddy
-
 rtmp-proxy.service:
   service.running:
     - enable: true
