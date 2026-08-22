@@ -10,7 +10,6 @@ use topcoat::{
 use crate::web::components::ui::button::{ButtonVariant, button};
 use crate::web::components::ui::card::{card, card_content, card_footer, card_header, card_title};
 use crate::web::components::ui::empty_state::empty_state;
-use crate::web::components::ui::icon::plus_icon;
 
 #[component]
 pub async fn targets(cx: &Cx) -> Result {
@@ -20,10 +19,6 @@ pub async fn targets(cx: &Cx) -> Result {
 
     view! {
         card(
-            card_header(
-                attrs: attributes! { class="flex flex-row justify-between items-center" },
-                card_title("RTMP Targets")
-            )
             card_content(
                 <div id="targetsContainer">
                     for (index, target) in targets.iter().enumerate() {
@@ -44,8 +39,7 @@ pub async fn targets(cx: &Cx) -> Result {
                         value="add_target"
                         formaction="/api/config"
                     },
-                    plus_icon()
-                    "Add Target"
+                    "+ Add Target"
                 )
             )
         )

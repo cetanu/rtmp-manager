@@ -10,7 +10,7 @@ use topcoat::{
 #[component]
 pub async fn stream_preview_player(child: View) -> Result {
     view! {
-        <div class="relative aspect-video overflow-hidden rounded-xl border bg-black">
+        <div class="relative mx-auto h-[calc(100dvh-10rem)] max-h-[56.25vw] max-w-full aspect-video overflow-hidden bg-black">
             <video
                 id="stream-preview-video"
                 class="h-full w-full bg-black object-contain"
@@ -29,18 +29,10 @@ pub async fn stream_preview_placeholder(cx: &Cx, revision: f64) -> Result {
     let _ = revision;
     let state: &Arc<ProxyState> = app_context(cx);
     let status = state.stream_status().await;
-    let message = if !status.active {
-        "Start streaming to the RTMP ingest to create a preview."
-    } else if status.preview_failed {
-        "HLS preview unavailable."
-    } else {
-        "Preparing HLS preview…"
-    };
-
+    let message = status.state.to_string();
     view! {
         <div
-            hidden=(status.preview_ready)
-            class="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-white/70"
+            class="absolute inset-0 flex items-center justify-center text-center text-sm text-white/70"
         >
             (message)
         </div>

@@ -343,9 +343,13 @@ mod tests {
 
     fn database_path() -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
-            "rtmp-proxy-chat-test-{}-{}.sqlite3",
+            "rtmp-proxy-chat-test-{}-{}-{}.sqlite3",
             std::process::id(),
-            TEST_DATABASE_ID.fetch_add(1, Ordering::Relaxed)
+            TEST_DATABASE_ID.fetch_add(1, Ordering::Relaxed),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
         ))
     }
 
@@ -373,7 +377,8 @@ mod tests {
 
     #[tokio::test]
     async fn snapshot_shows_the_first_ten_messages() {
-        let mut inbox = inbox(12).await;
+        let path = database_path();
+        let mut inbox = ChatInbox::open(&path, 12).await.unwrap();
         for id in 1..=11 {
             inbox
                 .enqueue(message("twitch", &id.to_string(), &format!("message {id}")))
@@ -391,6 +396,8 @@ mod tests {
             inbox.snapshot().await.unwrap().messages[0].text,
             "message 2"
         );
+        drop(inbox);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[tokio::test]

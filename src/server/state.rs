@@ -6,13 +6,13 @@ use crate::chat::{
 use crate::config::{AppConfig, ConfigStore, TargetConfig};
 use crate::metrics::Metrics;
 use reqwest::Client;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::{collections::HashMap, fmt::Display};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
 use tokio::sync::{Mutex, RwLock, watch};
@@ -45,24 +45,38 @@ struct StagedStream {
 }
 
 pub struct RelayProcess {
-    running: Arc<AtomicBool>,
     cancel: watch::Sender<bool>,
     task: JoinHandle<()>,
 }
 
-impl RelayProcess {
-    pub fn is_running(&self) -> bool {
-        self.running.load(Ordering::Relaxed)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamState {
+    Offline,
+    Preparing,
+    PreviewReady,
+    PreviewFailed,
+    Live,
+}
+
+impl Display for StreamState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                StreamState::Offline => "Offline",
+                StreamState::Preparing => "Preparing...",
+                StreamState::PreviewFailed => "Preview unavailable",
+                _ => "",
+            }
+        )
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct StreamStatus {
-    pub active: bool,
-    pub preview_ready: bool,
-    pub preview_failed: bool,
-    pub published: bool,
-    pub session_id: Option<u64>,
+    pub state: StreamState,
 }
 
 impl ProxyState {
@@ -284,17 +298,15 @@ impl ProxyState {
                 _ => {}
             }
         }
-        let preview_failed = staged.as_ref().is_some_and(|stream| stream.preview_failed);
+        let state = match staged.as_ref() {
+            None => StreamState::Offline,
+            Some(stream) if stream.published => StreamState::Live,
+            Some(stream) if stream.preview_failed => StreamState::PreviewFailed,
+            Some(_) if self.preview_dir.join("index.m3u8").is_file() => StreamState::PreviewReady,
+            Some(_) => StreamState::Preparing,
+        };
 
-        StreamStatus {
-            active: staged.is_some(),
-            preview_ready: staged.is_some()
-                && !preview_failed
-                && self.preview_dir.join("index.m3u8").is_file(),
-            preview_failed,
-            published: staged.as_ref().is_some_and(|stream| stream.published),
-            session_id: staged.as_ref().map(|stream| stream.session_id),
-        }
+        StreamStatus { state }
     }
 
     pub fn preview_file(&self, name: &str) -> Option<PathBuf> {
@@ -428,28 +440,15 @@ fn spawn_relay_supervisor(
     source_url: String,
     target: TargetConfig,
 ) -> RelayProcess {
-    let running = Arc::new(AtomicBool::new(false));
-    let task_running = Arc::clone(&running);
     let (cancel, cancel_rx) = watch::channel(false);
-    let task = tokio::spawn(supervise_relay(
-        metrics,
-        source_url,
-        target,
-        task_running,
-        cancel_rx,
-    ));
-    RelayProcess {
-        running,
-        cancel,
-        task,
-    }
+    let task = tokio::spawn(supervise_relay(metrics, source_url, target, cancel_rx));
+    RelayProcess { cancel, task }
 }
 
 async fn supervise_relay(
     metrics: Arc<Metrics>,
     source_url: String,
     target: TargetConfig,
-    running: Arc<AtomicBool>,
     mut cancel: watch::Receiver<bool>,
 ) {
     let bitrate = metrics.register_target(target.name.clone());
@@ -506,7 +505,6 @@ async fn supervise_relay(
                 continue;
             }
         };
-        running.store(true, Ordering::Relaxed);
         tracing::info!(name = %target.name, attempt, "Stream target relay process started");
 
         let stdout_task = child.stdout.take().map(|stdout| {
@@ -544,7 +542,6 @@ async fn supervise_relay(
             }
             result = child.wait() => Some(result),
         };
-        running.store(false, Ordering::Relaxed);
         bitrate.update_from_ffmpeg(0);
         if let Some(task) = stdout_task {
             let _ = task.await;
@@ -574,7 +571,6 @@ async fn supervise_relay(
         retry_seconds = (retry_seconds * 2).min(30);
     }
 
-    running.store(false, Ordering::Relaxed);
     metrics.unregister_target(&target.name);
     tracing::info!(name = %target.name, "Stream target relay supervisor stopped");
 }

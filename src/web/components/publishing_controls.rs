@@ -1,11 +1,10 @@
-use crate::server::state::ProxyState;
-use crate::web::components::ui::button::{ButtonVariant, button};
+use crate::server::state::{ProxyState, StreamState};
 use std::sync::Arc;
 use topcoat::{
     Result,
     context::{Cx, app_context},
     runtime::{Event, procedure, shard},
-    view::{attributes, view},
+    view::view,
 };
 
 #[procedure]
@@ -35,50 +34,45 @@ pub async fn publishing_controls(cx: &Cx, revision: f64) -> Result {
     let _ = revision;
     let state: &Arc<ProxyState> = app_context(cx);
     let status = state.stream_status().await;
+    let is_live = status.state == StreamState::Live;
+    let toggle_available = is_live
+        || matches!(
+            status.state,
+            StreamState::Preparing | StreamState::PreviewReady | StreamState::PreviewFailed
+        );
+    let toggle_class = "inline-flex h-8 items-center justify-center rounded-md bg-foreground/10 px-3 text-xs font-medium text-muted-foreground shadow-xs transition-colors hover:bg-foreground/15 hover:text-foreground active:bg-foreground/20 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 data-[live=true]:bg-destructive data-[live=true]:text-destructive-foreground data-[live=true]:hover:bg-destructive/90 data-[live=true]:hover:text-destructive-foreground data-[live=true]:active:bg-destructive/80";
 
     view! {
         signal pending = false;
         signal action_error = String::new();
-        signal can_publish = status.active && !status.published;
-        signal can_stop = status.active && status.published;
+        signal live = is_live;
+        signal can_toggle = toggle_available;
 
-        <div class="flex flex-col justify-between gap-6 rounded-xl border bg-surface p-5">
-            <div>
-                <h3 class="font-semibold">"Publishing controls"</h3>
-                <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
-                    "Review the staged preview, then publish it to every enabled RTMP target. Going-live notifications are sent only when you publish."
-                </p>
-            </div>
-            <div class="flex flex-col gap-3">
-                button(
-                    attrs: attributes! {
-                        type="button"
-                        :disabled=$(if pending.get() { true } else { !can_publish.get() })
-                        @click=$(async |_event: Event| {
-                            pending.set(true);
-                            action_error.set(publish_stream().await);
-                            pending.set(false);
-                        })
-                    },
-                    "Publish Live"
-                )
-                button(
-                    variant: ButtonVariant::Destructive,
-                    attrs: attributes! {
-                        type="button"
-                        :disabled=$(if pending.get() { true } else { !can_stop.get() })
-                        @click=$(async |_event: Event| {
-                            pending.set(true);
-                            action_error.set(stop_stream().await);
-                            pending.set(false);
-                        })
-                    },
-                    "Stop Publishing"
-                )
-                <p :hidden=$(action_error.get().is_empty()) class="text-sm text-destructive">
-                    $(action_error.get())
-                </p>
-            </div>
+        <div class="flex items-center gap-2">
+            <button
+                type="button"
+                class=(toggle_class)
+                :data-live=$(live.get())
+                :disabled=$(if pending.get() { true } else { !can_toggle.get() })
+                @click=$(async |_event: Event| {
+                    pending.set(true);
+                    let error = if live.get() {
+                        stop_stream().await
+                    } else {
+                        publish_stream().await
+                    };
+                    if error.is_empty() {
+                        live.set(!live.get());
+                    }
+                    action_error.set(error);
+                    pending.set(false);
+                })
+            >
+                $(if live.get() { "LIVE" } else { "Go live" })
+            </button>
+            <p :hidden=$(action_error.get().is_empty()) class="text-sm text-destructive">
+                $(action_error.get())
+            </p>
         </div>
     }
 }

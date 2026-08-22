@@ -5,6 +5,5 @@ pub mod form;
 pub mod icon;
 pub mod input;
 pub mod label;
-pub mod status_badge;
 pub mod switch;
 pub mod textarea;

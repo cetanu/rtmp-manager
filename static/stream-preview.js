@@ -7,9 +7,7 @@
 
   let player = null;
   let previewAttached = false;
-  let lastActive = false;
   let lastStatusSignature = null;
-  let sessionId = null;
 
   function detachPreview() {
     if (player) {
@@ -60,20 +58,13 @@
       statusRefresh?.click();
     }
 
-    if (status.session_id !== sessionId) {
-      detachPreview();
-      sessionId = status.session_id;
-      errorMessage.hidden = true;
-      errorMessage.textContent = "";
-    }
-    if (!status.active) {
-      if (lastActive) detachPreview();
-    } else if (status.preview_failed) {
+    const previewReady = status.state === "preview_ready" || status.state === "live";
+    const previewFailed = status.state === "preview_failed";
+    if (!previewReady || previewFailed) {
       if (previewAttached) detachPreview();
     }
 
-    if (status.preview_ready) attachPreview();
-    lastActive = status.active;
+    if (previewReady) attachPreview();
   }
 
   async function refresh() {

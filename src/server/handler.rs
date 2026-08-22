@@ -5,7 +5,6 @@ use rtmp_rs::session::SessionContext;
 use rtmp_rs::session::context::StreamContext;
 use rtmp_rs::{AuthResult, RtmpHandler};
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use tracing::{error, info};
 
 pub struct ProxyHandler {
@@ -27,14 +26,6 @@ impl RtmpHandler for ProxyHandler {
             app = %params.app,
             "Client connected to RTMP Ingest"
         );
-        self.state
-            .metrics
-            .total_connections
-            .fetch_add(1, Ordering::Relaxed);
-        self.state
-            .metrics
-            .active_connections
-            .fetch_add(1, Ordering::Relaxed);
         AuthResult::Accept
     }
 
@@ -74,10 +65,6 @@ impl RtmpHandler for ProxyHandler {
 
     async fn on_disconnect(&self, ctx: &SessionContext) {
         info!(session_id = %ctx.session_id, "Client disconnected");
-        self.state
-            .metrics
-            .active_connections
-            .fetch_sub(1, Ordering::Relaxed);
     }
 }
 

@@ -12,8 +12,8 @@
   function draw(canvas, values, color, label) {
     const rect = canvas.getBoundingClientRect();
     const ratio = window.devicePixelRatio || 1;
-    const width = Math.max(320, Math.floor(rect.width));
-    const height = 208;
+    const width = Math.max(180, Math.floor(rect.width));
+    const height = Math.max(1, Math.floor(rect.height));
     canvas.width = width * ratio;
     canvas.height = height * ratio;
     const context = canvas.getContext("2d");

@@ -5,8 +5,6 @@ use std::sync::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub struct Metrics {
-    pub total_connections: AtomicU64,
-    pub active_connections: AtomicU64,
     ingest_bytes: AtomicU64,
     ingest_bps: AtomicU64,
     last_sample_ingest_bytes: AtomicU64,
@@ -37,8 +35,6 @@ pub struct MetricsSample {
 impl Default for Metrics {
     fn default() -> Self {
         Self {
-            total_connections: AtomicU64::new(0),
-            active_connections: AtomicU64::new(0),
             ingest_bytes: AtomicU64::new(0),
             ingest_bps: AtomicU64::new(0),
             last_sample_ingest_bytes: AtomicU64::new(0),

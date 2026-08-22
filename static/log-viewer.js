@@ -24,8 +24,8 @@
   }
 
   source.addEventListener("log", (event) => append(JSON.parse(event.data)));
-  source.onopen = () => { status.textContent = "Connected — following live output"; };
-  source.onerror = () => { status.textContent = "Disconnected — reconnecting…"; };
+  source.onopen = () => { status.textContent = "🟢 Connected - following live output"; };
+  source.onerror = () => { status.textContent = "🔴 Disconnected - reconnecting..."; };
   document.querySelector("[data-log-clear]")?.addEventListener("click", () => {
     output.replaceChildren();
     seen.clear();

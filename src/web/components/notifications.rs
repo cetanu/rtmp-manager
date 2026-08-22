@@ -35,18 +35,9 @@ pub async fn notifications(cx: &Cx) -> Result {
                         clearable_secret_field(
                             control_id: "discord_webhook",
                             name: "notifications[discord_webhook]",
-                            clear_name: "notifications[clear_discord_webhook]",
-                            label_text: "Discord Webhook URL (Optional)",
+                            label_text: "Discord Webhook URL",
                             empty_placeholder: "https://discord.com/api/webhooks/...",
                             value: config.notifications.discord_webhook.clone().unwrap_or_default()
-                        )
-                        clearable_secret_field(
-                            control_id: "generic_webhook",
-                            name: "notifications[webhook_url]",
-                            clear_name: "notifications[clear_webhook_url]",
-                            label_text: "Generic Webhook URL (Optional)",
-                            empty_placeholder: "https://api.example.com/webhook",
-                            value: config.notifications.webhook_url.clone().unwrap_or_default()
                         )
                     </div>
                 </div>

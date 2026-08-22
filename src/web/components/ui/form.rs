@@ -61,12 +61,10 @@ pub async fn secret_input(#[into] control_id: String, #[default] mut attrs: Attr
 pub async fn clearable_secret_field(
     #[into] control_id: String,
     #[into] name: String,
-    #[into] clear_name: String,
     #[into] label_text: String,
     #[into] empty_placeholder: String,
     #[into] value: String,
 ) -> Result {
-    let clear_id = format!("clear_{control_id}");
     view! {
         form_field(
             control_id: control_id.clone(),
@@ -79,17 +77,6 @@ pub async fn clearable_secret_field(
                     placeholder=(empty_placeholder)
                 }
             )
-            <div class="flex items-center gap-2">
-                switch(attrs: attributes! {
-                    id=(clear_id.clone())
-                    name=(clear_name)
-                    value="true"
-                })
-                label(
-                    attrs: attributes! { for=(clear_id) class="text-muted-foreground" },
-                    "Clear configured value"
-                )
-            </div>
         )
     }
 }

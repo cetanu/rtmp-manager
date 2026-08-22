@@ -17,9 +17,9 @@ pub async fn target_item(index: usize, target: &TargetConfig) -> Result {
     let public_url_id = format!("target_public_url_{index}");
 
     view! {
-        <div class="mb-4 flex flex-col items-start gap-6 rounded-xl border bg-surface p-4 transition-all hover:border-primary md:flex-row md:items-center">
-            <div class="flex w-full flex-1 flex-col gap-4">
-                <div class="grid gap-4 md:grid-cols-3">
+        <div class="mb-4 flex flex-col items-start gap-6 border bg-surface p-6 transition-all hover:border-primary hover:bg-foreground/5 hover:shadow-sm md:flex-row md:items-center">
+            <div class="flex w-full flex-1 flex-col gap-1">
+                <div class="grid gap-1 md:grid-cols-2">
                     form_field(
                         control_id: name_id.clone(),
                         label_text: "Target Name",
@@ -33,9 +33,21 @@ pub async fn target_item(index: usize, target: &TargetConfig) -> Result {
                         })
                     )
                     form_field(
+                        control_id: public_url_id.clone(),
+                        label_text: "Public URL (Optional)",
+                        input(attrs: attributes! {
+                            type="url"
+                            id=(public_url_id)
+                            name=(format!("targets[{index}][public_url]"))
+                            value=(target.public_url.clone().unwrap_or_default())
+                            placeholder="https://twitch.tv/mychannel"
+                        })
+                    )
+                </div>
+                <div class="grid gap-1 md:grid-cols-2">
+                    form_field(
                         control_id: url_id.clone(),
                         label_text: "RTMP URL Base",
-                        attrs: attributes! { class="md:col-span-2" },
                         input(attrs: attributes! {
                             type="url"
                             id=(url_id)
@@ -45,8 +57,6 @@ pub async fn target_item(index: usize, target: &TargetConfig) -> Result {
                             required="required"
                         })
                     )
-                </div>
-                <div class="grid gap-4 md:grid-cols-2">
                     form_field(
                         control_id: key_id.clone(),
                         label_text: "Stream Key",
@@ -59,41 +69,30 @@ pub async fn target_item(index: usize, target: &TargetConfig) -> Result {
                             }
                         )
                     )
-                    form_field(
-                        control_id: public_url_id.clone(),
-                        label_text: "Public Stream URL (Optional)",
-                        input(attrs: attributes! {
-                            type="url"
-                            id=(public_url_id)
-                            name=(format!("targets[{index}][public_url]"))
-                            value=(target.public_url.clone().unwrap_or_default())
-                            placeholder="https://twitch.tv/mychannel"
-                        })
+                </div>
+                <div class="mt-4 flex items-center justify-between gap-3">
+                    switch_field(
+                        control_id: enabled_id,
+                        name: format!("targets[{index}][enabled]"),
+                        label_text: "Enabled",
+                        checked: target.enabled
+                    )
+                    button(
+                        variant: ButtonVariant::Destructive,
+                        size: ButtonSize::Icon,
+                        attrs: attributes! {
+                            type="submit"
+                            class="!size-6 !rounded-md"
+                            name="action"
+                            value=(format!("remove_target:{index}"))
+                            title="Remove Target"
+                            aria-label=(format!("Remove {} target", target.name))
+                            formaction="/api/config"
+                            formnovalidate="formnovalidate"
+                        },
+                        trash_icon()
                     )
                 </div>
-            </div>
-
-            <div class="flex items-center gap-4 md:flex-col">
-                switch_field(
-                    control_id: enabled_id,
-                    name: format!("targets[{index}][enabled]"),
-                    label_text: "Enabled",
-                    checked: target.enabled
-                )
-                button(
-                    variant: ButtonVariant::Destructive,
-                    size: ButtonSize::Icon,
-                    attrs: attributes! {
-                        type="submit"
-                        name="action"
-                        value=(format!("remove_target:{index}"))
-                        title="Remove Target"
-                        aria-label=(format!("Remove {} target", target.name))
-                        formaction="/api/config"
-                        formnovalidate="formnovalidate"
-                    },
-                    trash_icon()
-                )
             </div>
         </div>
     }

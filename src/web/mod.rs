@@ -103,7 +103,7 @@ async fn app_page(active_page: &'static str) -> Result {
         </head>
         <body class="min-h-screen bg-background text-foreground font-sans antialiased">
             app_navigation(active_page: active_page)
-            <main class="mx-auto max-w-7xl px-4 py-8 sm:py-10">
+            <main class="mx-auto max-w-7xl px-3 py-3 sm:px-4 sm:py-4">
                 <section data-app-page="preview" hidden=(active_page != "preview")>
                     stream_preview()
                 </section>
@@ -1044,37 +1044,4 @@ mod tests {
                 .contains("invalid URL")
         );
     }
-}
-
-#[derive(serde::Serialize)]
-struct WebMetrics {
-    active_connections: u64,
-    total_connections: u64,
-    active_streams: usize,
-    active_relays: usize,
-}
-
-#[route(GET "/api/metrics")]
-async fn get_metrics(cx: &Cx) -> Result<Json<WebMetrics>> {
-    let state: &Arc<ProxyState> = app_context(cx);
-    let active_connections = state
-        .metrics
-        .active_connections
-        .load(std::sync::atomic::Ordering::Relaxed);
-    let total_connections = state
-        .metrics
-        .total_connections
-        .load(std::sync::atomic::Ordering::Relaxed);
-
-    let active_streams = usize::from(state.stream_status().await.active);
-    let relays_guard = state.active_relays.lock().await;
-    let active_relays = relays_guard.values().map(|v| v.len()).sum();
-    drop(relays_guard);
-
-    Ok(Json(WebMetrics {
-        active_connections,
-        total_connections,
-        active_streams,
-        active_relays,
-    }))
 }
