@@ -19,13 +19,13 @@ async fn acknowledge_chat(cx: &Cx, displayed_id: String) -> Result<String> {
     {
         state.notify_chat_changed();
     }
-    Ok(current_message_id(&inbox.snapshot().await?))
+    Ok(first_message_id(&inbox.snapshot().await?))
 }
 
 #[procedure]
 async fn refresh_chat(cx: &Cx) -> Result<String> {
     let state: &Arc<ProxyState> = app_context(cx);
-    Ok(current_message_id(
+    Ok(first_message_id(
         &state.chat_inbox.lock().await.snapshot().await?,
     ))
 }
@@ -45,10 +45,10 @@ async fn toggle_youtube_polling(cx: &Cx) -> Result<String> {
     Ok(if enabled { "on" } else { "off" }.into())
 }
 
-fn current_message_id(snapshot: &crate::chat::ChatInboxSnapshot) -> String {
+fn first_message_id(snapshot: &crate::chat::ChatInboxSnapshot) -> String {
     snapshot
-        .current
-        .as_ref()
+        .messages
+        .first()
         .map(|message| message.id.to_string())
         .unwrap_or_default()
 }
@@ -56,7 +56,7 @@ fn current_message_id(snapshot: &crate::chat::ChatInboxSnapshot) -> String {
 #[component]
 pub async fn chat_inbox(cx: &Cx) -> Result {
     let state: &Arc<ProxyState> = app_context(cx);
-    let initial_id = current_message_id(&state.chat_inbox.lock().await.snapshot().await?);
+    let initial_id = first_message_id(&state.chat_inbox.lock().await.snapshot().await?);
     let chat = state.config.read().await.chat.clone();
     let youtube_configured = chat
         .youtube_api_key

@@ -102,8 +102,8 @@ struct StoredChatState {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatInboxSnapshot {
-    pub current: Option<ChatMessage>,
-    pub waiting: usize,
+    pub messages: Vec<ChatMessage>,
+    pub queued: usize,
     pub dropped: u64,
 }
 
@@ -228,12 +228,17 @@ impl ChatInbox {
     pub async fn snapshot(&self) -> Result<ChatInboxSnapshot> {
         let mut database = self.database.clone();
         let messages = ordered_messages(&mut database).await?;
-        let current = messages.first().map(chat_message_from_model).transpose()?;
+        let queued = messages.len();
+        let messages = messages
+            .iter()
+            .take(10)
+            .map(chat_message_from_model)
+            .collect::<Result<_>>()?;
         let dropped = load_state(&mut database).await?.dropped;
 
         Ok(ChatInboxSnapshot {
-            current,
-            waiting: messages.len().saturating_sub(1),
+            messages,
+            queued,
             dropped,
         })
     }
@@ -357,13 +362,35 @@ mod tests {
             .unwrap();
 
         let first = inbox.snapshot().await.unwrap();
-        assert_eq!(first.current.unwrap().text, "first");
-        assert_eq!(first.waiting, 1);
+        assert_eq!(first.messages[0].text, "first");
+        assert_eq!(first.queued, 2);
         assert!(inbox.acknowledge(1).await.unwrap());
 
         let second = inbox.snapshot().await.unwrap();
-        assert_eq!(second.current.unwrap().text, "second");
-        assert_eq!(second.waiting, 0);
+        assert_eq!(second.messages[0].text, "second");
+        assert_eq!(second.queued, 1);
+    }
+
+    #[tokio::test]
+    async fn snapshot_shows_the_first_ten_messages() {
+        let mut inbox = inbox(12).await;
+        for id in 1..=11 {
+            inbox
+                .enqueue(message("twitch", &id.to_string(), &format!("message {id}")))
+                .await
+                .unwrap();
+        }
+
+        let snapshot = inbox.snapshot().await.unwrap();
+        assert_eq!(snapshot.queued, 11);
+        assert_eq!(snapshot.messages.len(), 10);
+        assert_eq!(snapshot.messages[0].text, "message 1");
+        assert_eq!(snapshot.messages[9].text, "message 10");
+        assert!(inbox.acknowledge(snapshot.messages[0].id).await.unwrap());
+        assert_eq!(
+            inbox.snapshot().await.unwrap().messages[0].text,
+            "message 2"
+        );
     }
 
     #[tokio::test]
@@ -379,10 +406,7 @@ mod tests {
             .unwrap();
         assert!(inbox.acknowledge(1).await.unwrap());
         assert!(!inbox.acknowledge(1).await.unwrap());
-        assert_eq!(
-            inbox.snapshot().await.unwrap().current.unwrap().text,
-            "second"
-        );
+        assert_eq!(inbox.snapshot().await.unwrap().messages[0].text, "second");
     }
 
     #[tokio::test]
@@ -403,7 +427,7 @@ mod tests {
                 .unwrap(),
             EnqueueOutcome::Duplicate
         );
-        assert!(inbox.snapshot().await.unwrap().current.is_none());
+        assert!(inbox.snapshot().await.unwrap().messages.is_empty());
     }
 
     #[tokio::test]
@@ -426,15 +450,12 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            inbox.snapshot().await.unwrap().current.unwrap().text,
-            "current"
-        );
-        assert_eq!(inbox.snapshot().await.unwrap().waiting, 2);
+        assert_eq!(inbox.snapshot().await.unwrap().messages[0].text, "current");
+        assert_eq!(inbox.snapshot().await.unwrap().queued, 3);
         assert_eq!(inbox.snapshot().await.unwrap().dropped, 1);
         assert!(inbox.acknowledge(1).await.unwrap());
         assert_eq!(
-            inbox.snapshot().await.unwrap().current.unwrap().text,
+            inbox.snapshot().await.unwrap().messages[0].text,
             "newer waiting"
         );
     }
@@ -452,7 +473,7 @@ mod tests {
         {
             let inbox = ChatInbox::open(&path, 3).await.unwrap();
             assert_eq!(
-                inbox.snapshot().await.unwrap().current.unwrap().text,
+                inbox.snapshot().await.unwrap().messages[0].text,
                 "still here"
             );
         }
@@ -484,14 +505,11 @@ mod tests {
         {
             let mut inbox = ChatInbox::open(&path, 2).await.unwrap();
             let snapshot = inbox.snapshot().await.unwrap();
-            assert_eq!(snapshot.current.unwrap().text, "current");
-            assert_eq!(snapshot.waiting, 1);
+            assert_eq!(snapshot.messages[0].text, "current");
+            assert_eq!(snapshot.queued, 2);
             assert_eq!(snapshot.dropped, 2);
             assert!(inbox.acknowledge(1).await.unwrap());
-            assert_eq!(
-                inbox.snapshot().await.unwrap().current.unwrap().text,
-                "newest"
-            );
+            assert_eq!(inbox.snapshot().await.unwrap().messages[0].text, "newest");
         }
         std::fs::remove_file(path).unwrap();
     }
@@ -508,10 +526,7 @@ mod tests {
                 .unwrap(),
             EnqueueOutcome::Accepted
         );
-        assert_eq!(
-            inbox.snapshot().await.unwrap().current.unwrap().text,
-            "works"
-        );
+        assert_eq!(inbox.snapshot().await.unwrap().messages[0].text, "works");
         std::fs::remove_file(path).unwrap();
     }
 }
