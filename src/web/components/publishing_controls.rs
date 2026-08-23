@@ -1,5 +1,4 @@
-use crate::server::state::{ProxyState, StreamState};
-use std::sync::Arc;
+use crate::server::state::{AppHandle, StreamState};
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -9,8 +8,9 @@ use topcoat::{
 
 #[procedure]
 async fn publish_stream(cx: &Cx) -> Result<String> {
-    let state: &Arc<ProxyState> = app_context(cx);
-    Ok(state
+    let app: &AppHandle = app_context(cx);
+    Ok(app
+        .stream
         .publish_staged_stream()
         .await
         .err()
@@ -20,8 +20,9 @@ async fn publish_stream(cx: &Cx) -> Result<String> {
 
 #[procedure]
 async fn stop_stream(cx: &Cx) -> Result<String> {
-    let state: &Arc<ProxyState> = app_context(cx);
-    Ok(state
+    let app: &AppHandle = app_context(cx);
+    Ok(app
+        .stream
         .stop_publishing()
         .await
         .err()
@@ -32,8 +33,8 @@ async fn stop_stream(cx: &Cx) -> Result<String> {
 #[shard]
 pub async fn publishing_controls(cx: &Cx, revision: f64) -> Result {
     let _ = revision;
-    let state: &Arc<ProxyState> = app_context(cx);
-    let status = state.stream_status().await;
+    let app: &AppHandle = app_context(cx);
+    let status = app.stream.status();
     let is_live = status.state == StreamState::Live;
     let toggle_available = is_live
         || matches!(

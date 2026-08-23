@@ -5,9 +5,8 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_valid::Validate;
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Mutex, RwLock, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use toasty::Executor;
 
@@ -116,7 +115,6 @@ pub enum EnqueueOutcome {
 }
 
 /// SQLite-backed persistent chat inbox with bounded queue capacity and deduplication.
-#[derive(Clone)]
 pub struct ChatInbox {
     capacity: usize,
     database: toasty::Db,
@@ -314,82 +312,120 @@ async fn load_state(executor: &mut dyn Executor) -> Result<StoredChatState> {
         .ok_or_else(|| anyhow::anyhow!("chat state row is missing"))
 }
 
-/// Comprehensive chat service managing message storage, revision events, and background platform workers.
-pub struct ChatService {
-    inbox: Mutex<ChatInbox>,
-    revision: watch::Sender<u64>,
-    pub youtube_status: RwLock<Option<YouTubeIngestStatus>>,
-    twitch_task: Mutex<Option<JoinHandle<()>>>,
-    youtube_task: Mutex<Option<JoinHandle<()>>>,
-    x_task: Mutex<Option<JoinHandle<()>>>,
+enum ChatCommand {
+    Enqueue {
+        message: IncomingChatMessage,
+        respond_to: oneshot::Sender<Result<EnqueueOutcome>>,
+    },
+    Acknowledge {
+        expected_id: u64,
+        respond_to: oneshot::Sender<Result<bool>>,
+    },
+    Snapshot {
+        respond_to: oneshot::Sender<Result<ChatInboxSnapshot>>,
+    },
+    ApplyConfig {
+        config: ChatSettings,
+        respond_to: oneshot::Sender<Result<()>>,
+    },
+    UpdateYouTubeStatus {
+        state: String,
+        detail: String,
+        last_success_at_unix_ms: Option<u64>,
+        newly_received: Option<u64>,
+    },
 }
 
-impl ChatService {
-    pub async fn open(path: &Path, capacity: usize) -> Result<Arc<Self>> {
-        let inbox = ChatInbox::open(path, capacity).await?;
-        let (revision, _) = watch::channel(0);
-        Ok(Arc::new(Self {
-            inbox: Mutex::new(inbox),
-            revision,
-            youtube_status: RwLock::new(None),
-            twitch_task: Mutex::new(None),
-            youtube_task: Mutex::new(None),
-            x_task: Mutex::new(None),
-        }))
-    }
+/// Actor owning chat queue storage and background platform workers exclusively without mutexes.
+struct ChatActor {
+    inbox: ChatInbox,
+    twitch_task: Option<JoinHandle<()>>,
+    youtube_task: Option<JoinHandle<()>>,
+    x_task: Option<JoinHandle<()>>,
+    youtube_status: Option<YouTubeIngestStatus>,
+    revision: u64,
+    revision_tx: watch::Sender<u64>,
+    youtube_status_tx: watch::Sender<Option<YouTubeIngestStatus>>,
+    http_client: Client,
+}
 
-    /// Enqueue a message into the inbox and notify subscribers if accepted or dropped.
-    pub async fn enqueue(&self, incoming: IncomingChatMessage) -> Result<EnqueueOutcome> {
-        let outcome = self.inbox.lock().await.enqueue(incoming).await?;
-        if matches!(outcome, EnqueueOutcome::Accepted | EnqueueOutcome::Dropped) {
-            self.notify_changed();
+impl ChatActor {
+    async fn run(mut self, mut receiver: mpsc::Receiver<ChatCommand>, handle: ChatHandle) {
+        while let Some(command) = receiver.recv().await {
+            match command {
+                ChatCommand::Enqueue {
+                    message,
+                    respond_to,
+                } => {
+                    let outcome = self.inbox.enqueue(message).await;
+                    if let Ok(outcome) = &outcome
+                        && matches!(outcome, EnqueueOutcome::Accepted | EnqueueOutcome::Dropped)
+                    {
+                        self.notify_changed();
+                    }
+                    let _ = respond_to.send(outcome);
+                }
+                ChatCommand::Acknowledge {
+                    expected_id,
+                    respond_to,
+                } => {
+                    let acknowledged = self.inbox.acknowledge(expected_id).await;
+                    if let Ok(true) = acknowledged {
+                        self.notify_changed();
+                    }
+                    let _ = respond_to.send(acknowledged);
+                }
+                ChatCommand::Snapshot { respond_to } => {
+                    let _ = respond_to.send(self.inbox.snapshot().await);
+                }
+                ChatCommand::ApplyConfig { config, respond_to } => {
+                    let res = self.handle_apply_config(&config, &handle).await;
+                    let _ = respond_to.send(res);
+                }
+                ChatCommand::UpdateYouTubeStatus {
+                    state,
+                    detail,
+                    last_success_at_unix_ms,
+                    newly_received,
+                } => {
+                    let status = self
+                        .youtube_status
+                        .get_or_insert_with(YouTubeIngestStatus::default);
+                    status.state = state;
+                    status.detail = detail.chars().take(240).collect();
+                    if let Some(last_success_at_unix_ms) = last_success_at_unix_ms {
+                        status.last_success_at_unix_ms = Some(last_success_at_unix_ms);
+                    }
+                    if let Some(newly_received) = newly_received {
+                        status.messages_received =
+                            status.messages_received.saturating_add(newly_received);
+                    }
+                    self.youtube_status_tx
+                        .send_replace(self.youtube_status.clone());
+                }
+            }
         }
-        Ok(outcome)
     }
 
-    /// Acknowledge a message by ID and notify subscribers if acknowledged.
-    pub async fn acknowledge(&self, expected_id: u64) -> Result<bool> {
-        let acknowledged = self.inbox.lock().await.acknowledge(expected_id).await?;
-        if acknowledged {
-            self.notify_changed();
-        }
-        Ok(acknowledged)
+    fn notify_changed(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+        self.revision_tx.send_replace(self.revision);
     }
 
-    /// Retrieve a snapshot of the current inbox messages and metrics.
-    pub async fn snapshot(&self) -> Result<ChatInboxSnapshot> {
-        self.inbox.lock().await.snapshot().await
-    }
+    async fn handle_apply_config(&mut self, chat: &ChatSettings, handle: &ChatHandle) -> Result<()> {
+        self.inbox.resize(chat.queue_capacity).await?;
 
-    /// Notify subscribers of a chat state change.
-    pub fn notify_changed(&self) {
-        self.revision
-            .send_modify(|revision| *revision = revision.wrapping_add(1));
-    }
-
-    /// Subscribe to chat state change notifications.
-    pub fn subscribe_changes(&self) -> watch::Receiver<u64> {
-        self.revision.subscribe()
-    }
-
-    /// Reconfigures background ingestion tasks according to updated settings.
-    pub async fn apply_config(
-        self: &Arc<Self>,
-        http_client: &Client,
-        chat: &ChatSettings,
-    ) -> Result<()> {
-        self.inbox.lock().await.resize(chat.queue_capacity).await?;
-
-        if let Some(task) = self.twitch_task.lock().await.take() {
+        if let Some(task) = self.twitch_task.take() {
             task.abort();
         }
-        if let Some(task) = self.youtube_task.lock().await.take() {
+        if let Some(task) = self.youtube_task.take() {
             task.abort();
         }
-        if let Some(task) = self.x_task.lock().await.take() {
+        if let Some(task) = self.x_task.take() {
             task.abort();
         }
-        *self.youtube_status.write().await = None;
+        self.youtube_status = None;
+        self.youtube_status_tx.send_replace(None);
 
         if let Some(channel) = chat
             .twitch_channel
@@ -397,9 +433,9 @@ impl ChatService {
             .filter(|value| !value.trim().is_empty())
             .map(|value| value.trim().trim_start_matches('#').to_ascii_lowercase())
         {
-            let chat_svc = Arc::clone(self);
-            let task = tokio::spawn(twitch::run(chat_svc, channel.clone()));
-            *self.twitch_task.lock().await = Some(task);
+            let handle_clone = handle.clone();
+            let task = tokio::spawn(twitch::run(handle_clone, channel.clone()));
+            self.twitch_task = Some(task);
             tracing::info!(channel, "Twitch anonymous IRC ingest configured");
         }
 
@@ -410,13 +446,13 @@ impl ChatService {
                 .filter(|value| !value.trim().is_empty());
             match media_key {
                 Some(media_key) => {
-                    let chat_svc = Arc::clone(self);
+                    let handle_clone = handle.clone();
                     let task = tokio::spawn(x::run(
-                        http_client.clone(),
-                        chat_svc,
+                        self.http_client.clone(),
+                        handle_clone,
                         x::XChatConfig { media_key },
                     ));
-                    *self.x_task.lock().await = Some(task);
+                    self.x_task = Some(task);
                     tracing::info!("X live chat ingest configured");
                 }
                 None => {
@@ -460,20 +496,22 @@ impl ChatService {
         };
 
         if !chat.youtube_polling_enabled {
-            *self.youtube_status.write().await = Some(YouTubeIngestStatus {
+            let status = YouTubeIngestStatus {
                 state: "off".into(),
                 detail: "Polling is off. Turn it on when the YouTube stream is live.".into(),
                 ..YouTubeIngestStatus::default()
-            });
+            };
+            self.youtube_status = Some(status.clone());
+            self.youtube_status_tx.send_replace(Some(status));
             self.notify_changed();
             tracing::info!("YouTube live chat polling is off");
             return Ok(());
         }
 
-        let chat_svc = Arc::clone(self);
+        let handle_clone = handle.clone();
         let task = tokio::spawn(youtube::run(
-            http_client.clone(),
-            chat_svc,
+            self.http_client.clone(),
+            handle_clone,
             YouTubeChatConfig {
                 api_key,
                 target,
@@ -481,9 +519,121 @@ impl ChatService {
                 adaptive_polling: chat.youtube_adaptive_polling,
             },
         ));
-        *self.youtube_task.lock().await = Some(task);
+        self.youtube_task = Some(task);
         tracing::info!("YouTube live chat ingest configured");
         Ok(())
+    }
+}
+
+/// Lightweight, cloneable handle to the ChatActor for lock-free reads and async command dispatch.
+#[derive(Clone)]
+pub struct ChatHandle {
+    sender: mpsc::Sender<ChatCommand>,
+    revision_rx: watch::Receiver<u64>,
+    #[allow(dead_code)]
+    youtube_status_rx: watch::Receiver<Option<YouTubeIngestStatus>>,
+}
+
+impl ChatHandle {
+    pub async fn spawn(path: &Path, capacity: usize, http_client: Client) -> Result<Self> {
+        let inbox = ChatInbox::open(path, capacity).await?;
+        let (revision_tx, revision_rx) = watch::channel(0);
+        let (youtube_status_tx, youtube_status_rx) = watch::channel(None);
+        let (sender, receiver) = mpsc::channel(64);
+
+        let handle = Self {
+            sender,
+            revision_rx,
+            youtube_status_rx,
+        };
+
+        let actor = ChatActor {
+            inbox,
+            twitch_task: None,
+            youtube_task: None,
+            x_task: None,
+            youtube_status: None,
+            revision: 0,
+            revision_tx,
+            youtube_status_tx,
+            http_client,
+        };
+
+        let handle_for_actor = handle.clone();
+        tokio::spawn(async move {
+            actor.run(receiver, handle_for_actor).await;
+        });
+
+        Ok(handle)
+    }
+
+    pub async fn enqueue(&self, message: IncomingChatMessage) -> Result<EnqueueOutcome> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(ChatCommand::Enqueue {
+                message,
+                respond_to: tx,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("Chat actor stopped"))?;
+        rx.await.context("Chat actor dropped enqueue response")?
+    }
+
+    pub async fn acknowledge(&self, expected_id: u64) -> Result<bool> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(ChatCommand::Acknowledge {
+                expected_id,
+                respond_to: tx,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("Chat actor stopped"))?;
+        rx.await.context("Chat actor dropped acknowledge response")?
+    }
+
+    pub async fn snapshot(&self) -> Result<ChatInboxSnapshot> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(ChatCommand::Snapshot { respond_to: tx })
+            .await
+            .map_err(|_| anyhow::anyhow!("Chat actor stopped"))?;
+        rx.await.context("Chat actor dropped snapshot response")?
+    }
+
+    pub async fn apply_config(&self, config: ChatSettings) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(ChatCommand::ApplyConfig {
+                config,
+                respond_to: tx,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("Chat actor stopped"))?;
+        rx.await.context("Chat actor dropped apply_config response")?
+    }
+
+    pub fn update_youtube_status(
+        &self,
+        state: &str,
+        detail: impl Into<String>,
+        last_success_at_unix_ms: Option<u64>,
+        newly_received: Option<u64>,
+    ) {
+        let _ = self.sender.try_send(ChatCommand::UpdateYouTubeStatus {
+            state: state.to_string(),
+            detail: detail.into(),
+            last_success_at_unix_ms,
+            newly_received,
+        });
+    }
+
+    pub fn subscribe_changes(&self) -> watch::Receiver<u64> {
+        self.revision_rx.clone()
+    }
+
+    #[allow(dead_code)]
+    pub fn youtube_status(&self) -> Option<YouTubeIngestStatus> {
+        self.youtube_status_rx.borrow().clone()
     }
 }
 
@@ -703,6 +853,41 @@ mod tests {
             EnqueueOutcome::Accepted
         );
         assert_eq!(inbox.snapshot().await.unwrap().messages[0].text, "works");
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn chat_handle_actor_processes_commands() {
+        let path = database_path();
+        let handle = ChatHandle::spawn(&path, 5, Client::new()).await.unwrap();
+        let mut rev_rx = handle.subscribe_changes();
+
+        let outcome = handle
+            .enqueue(message("twitch", "actor-1", "hello actor"))
+            .await
+            .unwrap();
+        assert_eq!(outcome, EnqueueOutcome::Accepted);
+
+        rev_rx.changed().await.unwrap();
+        let snapshot = handle.snapshot().await.unwrap();
+        assert_eq!(snapshot.messages.len(), 1);
+        assert_eq!(snapshot.messages[0].text, "hello actor");
+
+        let ack = handle.acknowledge(snapshot.messages[0].id).await.unwrap();
+        assert!(ack);
+        let snapshot2 = handle.snapshot().await.unwrap();
+        assert_eq!(snapshot2.messages.len(), 0);
+
+        handle.update_youtube_status("polling", "Active and connected", Some(12345), Some(2));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let status = handle.youtube_status();
+        assert!(status.is_some());
+        let status = status.unwrap();
+        assert_eq!(status.state, "polling");
+        assert_eq!(status.detail, "Active and connected");
+        assert_eq!(status.last_success_at_unix_ms, Some(12345));
+        assert_eq!(status.messages_received, 2);
+
         std::fs::remove_file(path).unwrap();
     }
 }

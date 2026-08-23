@@ -1,8 +1,7 @@
-use crate::server::state::ProxyState;
+use crate::server::state::AppHandle;
 use crate::web::components::ui::card::{card, card_content, card_header, card_title};
 use crate::web::components::ui::form::{clearable_secret_field, form_field};
 use crate::web::components::ui::input::input;
-use std::sync::Arc;
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -11,8 +10,8 @@ use topcoat::{
 
 #[component]
 pub async fn chat_settings(cx: &Cx) -> Result {
-    let state: &Arc<ProxyState> = app_context(cx);
-    let chat = state.config.read().await.chat.clone();
+    let app: &AppHandle = app_context(cx);
+    let chat = app.config.get().chat.clone();
 
     view! {
         card(

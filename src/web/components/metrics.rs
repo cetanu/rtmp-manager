@@ -1,7 +1,6 @@
-use crate::server::state::ProxyState;
+use crate::server::state::AppHandle;
 use crate::web::components::ui::card::{card, card_content, card_header, card_title};
 use std::collections::HashMap;
-use std::sync::Arc;
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -20,15 +19,15 @@ fn format_bitrate(bits_per_second: u64) -> String {
 
 #[component]
 pub async fn metrics_page(cx: &Cx) -> Result {
-    let state: &Arc<ProxyState> = app_context(cx);
-    let ingest_bps = state.metrics.current_ingest_bps();
-    let current = state
+    let app: &AppHandle = app_context(cx);
+    let ingest_bps = app.metrics.current_ingest_bps();
+    let current = app
         .metrics
         .current_target_bitrates()
         .into_iter()
         .map(|sample| (sample.name.clone(), sample))
         .collect::<HashMap<_, _>>();
-    let targets = state.config.read().await.targets.clone();
+    let targets = app.config.get().targets.clone();
 
     view! {
         <section aria-labelledby="target-throughput-heading">

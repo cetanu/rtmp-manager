@@ -10,9 +10,9 @@ mod web;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use config::ConfigStore;
+use config::ConfigHandle;
 use metrics::Metrics;
-use server::{run_rtmp_server, state::ProxyState};
+use server::{run_rtmp_server, state::AppHandle};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -113,8 +113,7 @@ async fn main() -> Result<()> {
         .context("Failed to install embedded web assets")?;
 
     info!(path = ?cli.config, "Loading configuration");
-    let (config_store, config) = ConfigStore::open(&cli.config).await?;
-    config.validate()?;
+    let (config_handle, config) = ConfigHandle::open(&cli.config).await?;
 
     let metrics = Arc::new(Metrics::default());
     let http_client = reqwest::Client::builder()
@@ -135,20 +134,19 @@ async fn main() -> Result<()> {
     }
 
     let web_addr = config.server.api_listen;
+    let rtmp_listen = config.server.listen;
     let listen_port = config.server.listen.port();
-    let state =
-        Arc::new(ProxyState::new(metrics, config, http_client, listen_port, config_store).await?);
-    state.apply_chat_config().await?;
+
+    let app = AppHandle::new(metrics, config_handle, http_client, listen_port).await?;
 
     // Spawn Web Server
-    let web_state = Arc::clone(&state);
+    let web_app = app.clone();
     tokio::spawn(async move {
-        if let Err(e) = crate::web::run_web_server(web_state, web_addr).await {
+        if let Err(e) = crate::web::run_web_server(web_app, web_addr).await {
             warn!("Web interface server error: {:#}", e);
         }
     });
 
     // Run RTMP Server
-    let rtmp_listen = state.config.read().await.server.listen;
-    run_rtmp_server(rtmp_listen, state).await
+    run_rtmp_server(rtmp_listen, app).await
 }

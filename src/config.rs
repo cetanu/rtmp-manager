@@ -5,6 +5,8 @@ use serde_valid::Validate;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::sync::watch;
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Validate)]
 pub struct ServerSettings {
@@ -339,6 +341,23 @@ impl AppConfig {
                 .collect();
         }
 
+        let action = form.action.as_deref().unwrap_or_default();
+        if action == "add_target" {
+            config.targets.push(TargetConfig {
+                name: "New Target".to_string(),
+                url: "".to_string(),
+                stream_key: "".to_string(),
+                public_url: None,
+                enabled: false,
+            });
+        } else if action.starts_with("remove_target:")
+            && let Some(idx_str) = action.split(':').nth(1)
+            && let Ok(idx) = idx_str.parse::<usize>()
+            && idx < config.targets.len()
+        {
+            config.targets.remove(idx);
+        }
+
         Ok(config)
     }
 
@@ -477,9 +496,6 @@ struct StoredConfig {
 }
 
 /// Toasty-backed SQLite configuration storage.
-///
-/// A `.json` path maps to a `.sqlite3` database path; the JSON file is not used
-/// as storage.
 #[derive(Clone)]
 pub struct ConfigStore {
     path: PathBuf,
@@ -579,6 +595,96 @@ impl ConfigStore {
                 .await?;
         }
         Ok(())
+    }
+}
+
+/// Lightweight, cloneable handle managing live configuration broadcasts and persistent SQLite storage.
+#[derive(Clone)]
+pub struct ConfigHandle {
+    store: ConfigStore,
+    current: watch::Sender<Arc<AppConfig>>,
+}
+
+impl ConfigHandle {
+    pub async fn open<P: AsRef<Path>>(config_path: P) -> Result<(Self, Arc<AppConfig>)> {
+        let (store, config) = ConfigStore::open(config_path).await?;
+        config.validate()?;
+        let config_arc = Arc::new(config);
+        let (current, _) = watch::channel(Arc::clone(&config_arc));
+        Ok((Self { store, current }, config_arc))
+    }
+
+    /// Returns the current configuration snapshot with zero lock contention.
+    pub fn get(&self) -> Arc<AppConfig> {
+        Arc::clone(&self.current.borrow())
+    }
+
+    /// Subscribes to live configuration change events.
+    pub fn subscribe(&self) -> watch::Receiver<Arc<AppConfig>> {
+        self.current.subscribe()
+    }
+
+    /// Merges form updates, validates, persists to SQLite, and broadcasts the updated config.
+    /// Returns `(new_config, changed, chat_changed)`.
+    pub async fn save_form(&self, form: ConfigForm) -> Result<(Arc<AppConfig>, bool, bool)> {
+        let current_config = self.get();
+        let updated = current_config.merge_form(form)?;
+        if let Err(error) = updated.validate() {
+            bail!(error);
+        }
+
+        let changed = updated != *current_config;
+        let chat_changed = updated.chat != current_config.chat;
+
+        if changed {
+            self.store.save(&updated).await?;
+            let new_arc = Arc::new(updated);
+            self.current.send_replace(Arc::clone(&new_arc));
+            Ok((new_arc, true, chat_changed))
+        } else {
+            Ok((current_config, false, false))
+        }
+    }
+
+    /// Directly saves an updated configuration, persisting to SQLite and broadcasting to all subscribers.
+    pub async fn save(&self, updated: AppConfig) -> Result<(Arc<AppConfig>, bool, bool)> {
+        let current_config = self.get();
+        if let Err(error) = updated.validate() {
+            bail!(error);
+        }
+
+        let changed = updated != *current_config;
+        let chat_changed = updated.chat != current_config.chat;
+
+        if changed {
+            self.store.save(&updated).await?;
+            let new_arc = Arc::new(updated);
+            self.current.send_replace(Arc::clone(&new_arc));
+            Ok((new_arc, true, chat_changed))
+        } else {
+            Ok((current_config, false, false))
+        }
+    }
+
+    /// Parses imported JSON configuration, persists it, and broadcasts the new config.
+    pub async fn import(&self, body: &[u8]) -> Result<(Arc<AppConfig>, bool, bool)> {
+        let imported = AppConfig::parse_imported(body)?;
+        let current_config = self.get();
+        let changed = imported != *current_config;
+        let chat_changed = imported.chat != current_config.chat;
+
+        if changed {
+            self.store.save(&imported).await?;
+            let new_arc = Arc::new(imported);
+            self.current.send_replace(Arc::clone(&new_arc));
+            Ok((new_arc, true, chat_changed))
+        } else {
+            Ok((current_config, false, false))
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        self.store.path()
     }
 }
 
@@ -692,6 +798,31 @@ mod tests {
             Some("chat-token-long-enough")
         );
         assert_eq!(reloaded.chat.youtube_video_id.as_deref(), Some("video-id"));
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn config_handle_broadcasts_live_updates() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("rtmp-proxy-handle-{unique}"));
+        fs::create_dir(&directory).unwrap();
+        let database_path = directory.join("config.sqlite3");
+        let (handle, _) = ConfigHandle::open(&database_path).await.unwrap();
+        let mut rx = handle.subscribe();
+
+        let form: ConfigForm = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str("server%5Btest_stream_duration_secs%5D=42&action=save")
+            .unwrap();
+        handle.save_form(form).await.unwrap();
+
+        rx.changed().await.unwrap();
+        assert_eq!(rx.borrow().server.test_stream_duration_secs, 42);
+        assert_eq!(handle.get().server.test_stream_duration_secs, 42);
 
         fs::remove_dir_all(directory).unwrap();
     }

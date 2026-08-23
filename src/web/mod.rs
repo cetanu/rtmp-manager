@@ -1,6 +1,6 @@
 use crate::chat::{ChatInboxSnapshot, EnqueueOutcome, IncomingChatMessage};
-use crate::config::{AppConfig, ConfigForm, TargetConfig};
-use crate::server::state::ProxyState;
+use crate::config::ConfigForm;
+use crate::server::state::{AppHandle, StreamStatus};
 use crate::util::secure_token_matches;
 use futures_util::StreamExt;
 use serde::Deserialize;
@@ -50,14 +50,14 @@ pub(crate) const SECRET_FIELDS_SCRIPT: topcoat::asset::Asset =
     topcoat::asset::asset!("static/secret-fields.js");
 
 pub async fn run_web_server(
-    state: Arc<ProxyState>,
+    app_handle: AppHandle,
     addr: std::net::SocketAddr,
 ) -> anyhow::Result<()> {
-    let sampler_metrics = Arc::clone(&state.metrics);
+    let sampler_metrics = Arc::clone(&app_handle.metrics);
     let app = Router::builder()
         .discover()
         .assets(AssetBundle::load()?)
-        .app_context(state)
+        .app_context(app_handle)
         .build();
 
     tokio::spawn(async move {
@@ -173,9 +173,9 @@ struct PreviewFile(str);
 
 #[route(GET "/api/preview/{preview_file}")]
 async fn get_preview_file(cx: &Cx) -> Result<topcoat::router::Response> {
-    let state: &Arc<ProxyState> = app_context(cx);
+    let app: &AppHandle = app_context(cx);
     let name = topcoat::router::path_param::<PreviewFile>(cx);
-    let Some(path) = state.preview_file(name) else {
+    let Some(path) = app.stream.preview_file(name) else {
         return Err(not_found().into());
     };
     let bytes = match tokio::fs::read(path).await {
@@ -203,15 +203,15 @@ async fn get_preview_file(cx: &Cx) -> Result<topcoat::router::Response> {
 }
 
 #[route(GET "/api/stream/status")]
-async fn get_stream_status(cx: &Cx) -> Result<Json<crate::server::state::StreamStatus>> {
-    let state: &Arc<ProxyState> = app_context(cx);
-    Ok(Json(state.stream_status().await))
+async fn get_stream_status(cx: &Cx) -> Result<Json<StreamStatus>> {
+    let app: &AppHandle = app_context(cx);
+    Ok(Json(app.stream.status()))
 }
 
 #[route(GET "/api/metrics/history")]
 async fn get_metrics_history(cx: &Cx) -> Result<Json<Vec<crate::metrics::MetricsSample>>> {
-    let state: &Arc<ProxyState> = app_context(cx);
-    Ok(Json(state.metrics.history()))
+    let app: &AppHandle = app_context(cx);
+    Ok(Json(app.metrics.history()))
 }
 
 #[derive(Debug, Deserialize)]
@@ -235,7 +235,7 @@ fn bearer_token(cx: &Cx) -> Option<&str> {
 
 #[route(POST "/api/config")]
 async fn update_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat::router::Response> {
-    let state: &Arc<ProxyState> = app_context(cx);
+    let app: &AppHandle = app_context(cx);
 
     let form: ConfigForm = match serde_qs::Config::new()
         .use_form_encoding(true)
@@ -255,7 +255,6 @@ async fn update_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
         );
     }
 
-    let action = form.action.clone().unwrap_or_default();
     let return_to = match form.return_to.as_deref() {
         Some("/targets") => "/targets",
         _ => "/settings",
@@ -266,56 +265,26 @@ async fn update_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
         [(topcoat::router::header::LOCATION, return_to)],
     );
 
-    let mut config_write = state.config.write().await;
-    let mut updated = match config_write.merge_form(form) {
-        Ok(config) => config,
+    let (_, _changed, chat_changed) = match app.config.save_form(form).await {
+        Ok(res) => res,
         Err(error) => return Err(bad_request(error.to_string()).into()),
     };
 
-    if action == "add_target" {
-        updated.targets.push(TargetConfig {
-            name: "New Target".to_string(),
-            url: "".to_string(),
-            stream_key: "".to_string(),
-            public_url: None,
-            enabled: false,
-        });
-    } else if action.starts_with("remove_target:")
-        && let Some(idx_str) = action.split(':').nth(1)
-        && let Ok(idx) = idx_str.parse::<usize>()
-        && idx < updated.targets.len()
-    {
-        updated.targets.remove(idx);
-    }
-
-    if let Err(error) = updated.validate() {
-        return Err(bad_request(error.to_string()).into());
-    }
-
-    let changed = updated != *config_write;
-    let chat_changed = updated.chat != config_write.chat;
-    if changed {
-        if let Err(e) = state.config_store.save(&updated).await {
-            tracing::error!("Failed to save configuration to SQLite: {}", e);
-            return Err(internal_server_error(e).into());
-        }
-        *config_write = updated;
-    }
-    drop(config_write);
-    if chat_changed && let Err(error) = state.apply_chat_config().await {
+    if chat_changed && let Err(error) = app.apply_chat_config().await {
         tracing::error!("Failed to apply chat configuration: {error:#}");
         return Err(internal_server_error(error).into());
     }
+
     topcoat::router::IntoResponse::into_response(redirect, cx)
 }
 
 #[route(GET "/api/config")]
 async fn get_config(cx: &Cx) -> Result<topcoat::router::Response> {
-    let state: &Arc<ProxyState> = app_context(cx);
+    let app: &AppHandle = app_context(cx);
     topcoat::router::IntoResponse::into_response(
         (
             [(topcoat::router::header::CACHE_CONTROL, "no-store, private")],
-            Json(state.config.read().await.clone()),
+            Json(app.config.get().as_ref().clone()),
         ),
         cx,
     )
@@ -323,25 +292,14 @@ async fn get_config(cx: &Cx) -> Result<topcoat::router::Response> {
 
 #[route(POST "/api/config/import")]
 async fn import_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat::router::Response> {
-    let imported = match AppConfig::parse_imported(&body) {
-        Ok(config) => config,
+    let app: &AppHandle = app_context(cx);
+    let (_, _changed, chat_changed) = match app.config.import(&body).await {
+        Ok(res) => res,
         Err(error) => return Err(bad_request(error.to_string()).into()),
     };
 
-    let state: &Arc<ProxyState> = app_context(cx);
-    let mut config_write = state.config.write().await;
-    let changed = imported != *config_write;
-    let chat_changed = imported.chat != config_write.chat;
-    if changed {
-        if let Err(error) = state.config_store.save(&imported).await {
-            tracing::error!("Failed to import configuration into SQLite: {}", error);
-            return Err(internal_server_error(error).into());
-        }
-        *config_write = imported;
-    }
-    drop(config_write);
-    if chat_changed {
-        state.apply_chat_config().await?;
+    if chat_changed && let Err(error) = app.apply_chat_config().await {
+        return Err(internal_server_error(error).into());
     }
 
     topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
@@ -367,25 +325,15 @@ async fn import_config_file(
     }
     let config_bytes =
         config_bytes.ok_or_else(|| bad_request("The form did not contain a config_file upload"))?;
-    let imported = match AppConfig::parse_imported(&config_bytes) {
-        Ok(config) => config,
+
+    let app: &AppHandle = app_context(cx);
+    let (_, _changed, chat_changed) = match app.config.import(&config_bytes).await {
+        Ok(res) => res,
         Err(error) => return Err(bad_request(error.to_string()).into()),
     };
 
-    let state: &Arc<ProxyState> = app_context(cx);
-    let mut config_write = state.config.write().await;
-    let changed = imported != *config_write;
-    let chat_changed = imported.chat != config_write.chat;
-    if changed {
-        if let Err(error) = state.config_store.save(&imported).await {
-            tracing::error!("Failed to import configuration into SQLite: {}", error);
-            return Err(internal_server_error(error).into());
-        }
-        *config_write = imported;
-    }
-    drop(config_write);
-    if chat_changed {
-        state.apply_chat_config().await?;
+    if chat_changed && let Err(error) = app.apply_chat_config().await {
+        return Err(internal_server_error(error).into());
     }
 
     redirect_to(cx, "/export")
@@ -403,8 +351,8 @@ fn redirect_to(cx: &Cx, location: &'static str) -> Result<topcoat::router::Respo
 
 #[route(GET "/api/chat")]
 async fn get_chat_inbox(cx: &Cx) -> Result<topcoat::router::Response> {
-    let state: &Arc<ProxyState> = app_context(cx);
-    let snapshot = state.chat.snapshot().await?;
+    let app: &AppHandle = app_context(cx);
+    let snapshot = app.chat.snapshot().await?;
     topcoat::router::IntoResponse::into_response(
         (
             [(topcoat::router::header::CACHE_CONTROL, "no-store")],
@@ -419,8 +367,8 @@ async fn acknowledge_chat_message(
     cx: &Cx,
     Json(request): Json<AcknowledgeChatMessage>,
 ) -> Result<topcoat::router::Response> {
-    let state: &Arc<ProxyState> = app_context(cx);
-    if !state.chat.acknowledge(request.id).await? {
+    let app: &AppHandle = app_context(cx);
+    if !app.chat.acknowledge(request.id).await? {
         return topcoat::router::IntoResponse::into_response(
             (
                 topcoat::router::StatusCode::CONFLICT,
@@ -430,50 +378,47 @@ async fn acknowledge_chat_message(
         );
     }
 
-    topcoat::router::IntoResponse::into_response(Json(state.chat.snapshot().await?), cx)
+    topcoat::router::IntoResponse::into_response(Json(app.chat.snapshot().await?), cx)
 }
 
 #[route(GET "/api/events")]
 async fn server_events(
     cx: &Cx,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<SseEvent>> + use<>>> {
-    let state: &Arc<ProxyState> = app_context(cx);
-    let state = Arc::clone(state);
-    let chat_changes = state.chat.subscribe_changes();
-    let status_interval = tokio::time::interval(std::time::Duration::from_millis(250));
-    let last_status = state.stream_status().await;
+    let app: &AppHandle = app_context(cx);
+    let status_rx = app.stream.subscribe_status();
+    let chat_changes = app.chat.subscribe_changes();
+
     let initial_status = SseEvent::new()
         .event("stream_status")
-        .json_data(&last_status)?;
+        .json_data(&*status_rx.borrow())?;
     let initial_events = futures_util::stream::iter([
         Ok(initial_status),
         Ok(SseEvent::new().event("chat_changed").data("changed")),
     ]);
 
     let changes = futures_util::stream::unfold(
-        (state, chat_changes, status_interval, last_status),
-        |(state, mut chat_changes, mut status_interval, mut last_status)| async move {
-            loop {
-                tokio::select! {
-                    _ = status_interval.tick() => {
-                        let status = state.stream_status().await;
-                        if status != last_status {
-                            last_status = status;
-                            let event = SseEvent::new()
-                                .event("stream_status")
-                                .json_data(&status);
-                            return Some((event, (state, chat_changes, status_interval, last_status)));
-                        }
+        (status_rx, chat_changes),
+        |(mut status_rx, mut chat_changes)| async move {
+            tokio::select! {
+                changed = status_rx.changed() => {
+                    if changed.is_err() {
+                        return None;
                     }
-                    changed = chat_changes.changed() => {
-                        if changed.is_err() {
-                            return None;
-                        }
-                        return Some((
-                            Ok(SseEvent::new().event("chat_changed").data("changed")),
-                            (state, chat_changes, status_interval, last_status),
-                        ));
+                    let status = *status_rx.borrow();
+                    let event = SseEvent::new()
+                        .event("stream_status")
+                        .json_data(&status);
+                    Some((event, (status_rx, chat_changes)))
+                }
+                changed = chat_changes.changed() => {
+                    if changed.is_err() {
+                        return None;
                     }
+                    Some((
+                        Ok(SseEvent::new().event("chat_changed").data("changed")),
+                        (status_rx, chat_changes),
+                    ))
                 }
             }
         },
@@ -512,11 +457,10 @@ async fn ingest_chat_message(
     cx: &Cx,
     Json(message): Json<IncomingChatMessage>,
 ) -> Result<topcoat::router::Response> {
-    let state: &Arc<ProxyState> = app_context(cx);
-    let expected_token = state
+    let app: &AppHandle = app_context(cx);
+    let expected_token = app
         .config
-        .read()
-        .await
+        .get()
         .chat
         .ingest_token
         .clone()
@@ -534,7 +478,7 @@ async fn ingest_chat_message(
         return Err(unauthorized().into());
     }
 
-    let outcome = match state.chat.enqueue(message).await {
+    let outcome = match app.chat.enqueue(message).await {
         Ok(EnqueueOutcome::Accepted) => "accepted",
         Ok(EnqueueOutcome::Duplicate) => "duplicate",
         Ok(EnqueueOutcome::Dropped) => "dropped",
@@ -542,7 +486,7 @@ async fn ingest_chat_message(
     };
     let response = ChatIngestResponse {
         outcome,
-        inbox: state.chat.snapshot().await?,
+        inbox: app.chat.snapshot().await?,
     };
 
     topcoat::router::IntoResponse::into_response(

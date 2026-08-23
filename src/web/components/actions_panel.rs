@@ -1,7 +1,6 @@
 use crate::notifications::{NotificationDispatcher, NotificationTarget};
-use crate::server::state::ProxyState;
+use crate::server::state::AppHandle;
 use crate::web::components::ui::button::{ButtonVariant, button};
-use std::sync::Arc;
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -11,8 +10,8 @@ use topcoat::{
 
 #[procedure]
 async fn start_test_stream(cx: &Cx) -> Result<String> {
-    let state: &Arc<ProxyState> = app_context(cx);
-    let config = state.config.read().await;
+    let app: &AppHandle = app_context(cx);
+    let config = app.config.get();
     let duration_secs = config.server.test_stream_duration_secs;
     let targets = config
         .targets
@@ -20,20 +19,19 @@ async fn start_test_stream(cx: &Cx) -> Result<String> {
         .filter(|target| target.enabled)
         .cloned()
         .collect::<Vec<_>>();
-    drop(config);
 
     if targets.is_empty() {
         return Ok("Enable at least one target before starting a test stream".to_owned());
     }
 
-    state.run_test_stream(duration_secs, targets);
+    app.stream.run_test_stream(duration_secs, targets);
     Ok(String::new())
 }
 
 #[procedure]
 async fn send_test_webhooks(cx: &Cx) -> Result<String> {
-    let state: &Arc<ProxyState> = app_context(cx);
-    let config = state.config.read().await;
+    let app: &AppHandle = app_context(cx);
+    let config = app.config.get();
     let active_targets = config
         .targets
         .iter()
@@ -41,8 +39,7 @@ async fn send_test_webhooks(cx: &Cx) -> Result<String> {
         .map(NotificationTarget::from)
         .collect::<Vec<_>>();
     let dispatcher =
-        NotificationDispatcher::new(&config.notifications, state.http_client.clone());
-    drop(config);
+        NotificationDispatcher::new(&config.notifications, app.http_client.clone());
 
     tokio::spawn(async move {
         dispatcher.dispatch(&active_targets).await;

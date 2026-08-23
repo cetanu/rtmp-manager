@@ -1,8 +1,7 @@
-use crate::chat::{ChatService, IncomingChatMessage};
+use crate::chat::{ChatHandle, IncomingChatMessage};
 use anyhow::{Context, Result, bail};
 use reqwest::{Client, Response, StatusCode};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::time::Duration;
 
 const PUBLIC_BEARER_TOKEN: &str = "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
@@ -95,7 +94,7 @@ impl InnerPayload {
     }
 }
 
-pub async fn run(client: Client, chat: Arc<ChatService>, config: XChatConfig) {
+pub async fn run(client: Client, chat: ChatHandle, config: XChatConfig) {
     let mut session = None;
     let mut cursor = Some(String::new());
     let mut retry_delay = INITIAL_RETRY_DELAY;
@@ -257,7 +256,7 @@ async fn fetch_history(
 }
 
 async fn enqueue_messages(
-    chat: &Arc<ChatService>,
+    chat: &ChatHandle,
     messages: Vec<HistoryMessage>,
     cursor: Option<&str>,
 ) -> u64 {

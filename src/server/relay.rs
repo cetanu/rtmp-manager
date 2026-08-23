@@ -1,178 +1,36 @@
 use crate::config::TargetConfig;
 use crate::metrics::Metrics;
 use crate::util::redact_secrets;
-use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::{Mutex, watch};
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 pub struct RelayProcess {
-    cancel: watch::Sender<bool>,
-    task: JoinHandle<()>,
+    pub cancel: watch::Sender<bool>,
+    pub task: JoinHandle<()>,
 }
 
-/// Manages active FFmpeg RTMP relay processes, retry supervisors, and direct test streams.
-pub struct RelayManager {
-    active_relays: Mutex<HashMap<String, Vec<RelayProcess>>>,
+pub fn spawn_relay(
+    metrics: Arc<Metrics>,
+    source_url: String,
+    target: TargetConfig,
+) -> RelayProcess {
+    let (cancel, cancel_rx) = watch::channel(false);
+    let task = tokio::spawn(supervise_relay(metrics, source_url, target, cancel_rx));
+    RelayProcess { cancel, task }
 }
 
-impl Default for RelayManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl RelayManager {
-    pub fn new() -> Self {
-        Self {
-            active_relays: Mutex::new(HashMap::new()),
-        }
-    }
-
-    /// Spawns relay supervisors for the given targets and source stream URL.
-    pub fn spawn_relays(
-        &self,
-        metrics: &Arc<Metrics>,
-        source_url: &str,
-        targets: &[TargetConfig],
-    ) -> Vec<RelayProcess> {
-        targets
-            .iter()
-            .cloned()
-            .map(|target| {
-                let (cancel, cancel_rx) = watch::channel(false);
-                let task = tokio::spawn(supervise_relay(
-                    Arc::clone(metrics),
-                    source_url.to_string(),
-                    target,
-                    cancel_rx,
-                ));
-                RelayProcess { cancel, task }
-            })
-            .collect()
-    }
-
-    /// Stores active relay processes under a stream key.
-    pub async fn store_relays(&self, stream_key: String, relays: Vec<RelayProcess>) {
-        self.active_relays.lock().await.insert(stream_key, relays);
-    }
-
-    /// Stops and awaits all active relay processes for a stream key.
-    pub async fn stop_relays(&self, stream_key: &str) {
-        let relays = self.active_relays.lock().await.remove(stream_key);
-        if let Some(relays) = relays {
-            Self::cancel_relays(relays).await;
-        }
-    }
-
-    /// Cancels and awaits a list of relay processes.
-    pub async fn cancel_relays(relays: Vec<RelayProcess>) {
-        for relay in relays {
-            let _ = relay.cancel.send(true);
-            let _ = relay.task.await;
-        }
-    }
-
-    /// Runs a direct synthetic test stream to all enabled targets.
-    pub fn run_direct_test(duration_secs: u64, targets: Vec<TargetConfig>) {
-        tokio::spawn(async move {
-            tracing::info!(
-                duration_secs,
-                target_count = targets.len(),
-                "Starting direct test stream to enabled targets"
-            );
-            let mut tasks = tokio::task::JoinSet::new();
-            for target in targets {
-                tasks.spawn(async move {
-                    let destination = target_destination(&target);
-                    let video_source =
-                        format!("testsrc=duration={duration_secs}:size=1280x720:rate=30");
-                    let audio_source = format!("sine=frequency=1000:duration={duration_secs}");
-                    let output = tokio::process::Command::new("ffmpeg")
-                        .args([
-                            "-hide_banner",
-                            "-loglevel",
-                            "warning",
-                            "-re",
-                            "-f",
-                            "lavfi",
-                            "-i",
-                            &video_source,
-                            "-f",
-                            "lavfi",
-                            "-i",
-                            &audio_source,
-                            "-c:v",
-                            "libx264",
-                            "-preset",
-                            "veryfast",
-                            "-pix_fmt",
-                            "yuv420p",
-                            "-c:a",
-                            "aac",
-                            "-b:a",
-                            "128k",
-                            "-f",
-                            "flv",
-                            &destination,
-                        ])
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::piped())
-                        .output()
-                        .await;
-                    match output {
-                        Ok(output) if output.status.success() => {
-                            tracing::info!(
-                                name = %target.name,
-                                "Direct target test completed successfully"
-                            );
-                        }
-                        Ok(output) => {
-                            let detail = safe_ffmpeg_failure(
-                                &String::from_utf8_lossy(&output.stderr),
-                                &[target.stream_key.clone(), destination],
-                            );
-                            tracing::error!(
-                                name = %target.name,
-                                status = %output.status,
-                                %detail,
-                                "Direct target test failed"
-                            );
-                        }
-                        Err(error) => {
-                            tracing::error!(
-                                name = %target.name,
-                                %error,
-                                "Direct target test FFmpeg failed to start"
-                            );
-                        }
-                    }
-                });
-            }
-            while let Some(result) = tasks.join_next().await {
-                if let Err(error) = result {
-                    tracing::error!(%error, "Direct target test task failed");
-                }
-            }
-        });
+pub async fn cancel_relays(relays: Vec<RelayProcess>) {
+    for relay in relays {
+        let _ = relay.cancel.send(true);
+        let _ = relay.task.await;
     }
 }
 
-impl Drop for RelayManager {
-    fn drop(&mut self) {
-        for relays in self.active_relays.get_mut().values_mut() {
-            for relay in relays {
-                let _ = relay.cancel.send(true);
-                relay.task.abort();
-            }
-        }
-    }
-}
-
-fn target_destination(target: &TargetConfig) -> String {
+pub fn target_destination(target: &TargetConfig) -> String {
     if target.stream_key.is_empty() {
         target.url.clone()
     } else if target.url.ends_with('/') {
@@ -180,6 +38,89 @@ fn target_destination(target: &TargetConfig) -> String {
     } else {
         format!("{}/{}", target.url, target.stream_key)
     }
+}
+
+pub fn run_direct_test(duration_secs: u64, targets: Vec<TargetConfig>) {
+    tokio::spawn(async move {
+        tracing::info!(
+            duration_secs,
+            target_count = targets.len(),
+            "Starting direct test stream to enabled targets"
+        );
+        let mut tasks = tokio::task::JoinSet::new();
+        for target in targets {
+            tasks.spawn(async move {
+                let destination = target_destination(&target);
+                let video_source =
+                    format!("testsrc=duration={duration_secs}:size=1280x720:rate=30");
+                let audio_source = format!("sine=frequency=1000:duration={duration_secs}");
+                let output = tokio::process::Command::new("ffmpeg")
+                    .args([
+                        "-hide_banner",
+                        "-loglevel",
+                        "warning",
+                        "-re",
+                        "-f",
+                        "lavfi",
+                        "-i",
+                        &video_source,
+                        "-f",
+                        "lavfi",
+                        "-i",
+                        &audio_source,
+                        "-c:v",
+                        "libx264",
+                        "-preset",
+                        "veryfast",
+                        "-pix_fmt",
+                        "yuv420p",
+                        "-c:a",
+                        "aac",
+                        "-b:a",
+                        "128k",
+                        "-f",
+                        "flv",
+                        &destination,
+                    ])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::piped())
+                    .output()
+                    .await;
+                match output {
+                    Ok(output) if output.status.success() => {
+                        tracing::info!(
+                            name = %target.name,
+                            "Direct target test completed successfully"
+                        );
+                    }
+                    Ok(output) => {
+                        let detail = safe_ffmpeg_failure(
+                            &String::from_utf8_lossy(&output.stderr),
+                            &[target.stream_key.clone(), destination],
+                        );
+                        tracing::error!(
+                            name = %target.name,
+                            status = %output.status,
+                            %detail,
+                            "Direct target test failed"
+                        );
+                    }
+                    Err(error) => {
+                        tracing::error!(
+                            name = %target.name,
+                            %error,
+                            "Direct target test FFmpeg failed to start"
+                        );
+                    }
+                }
+            });
+        }
+        while let Some(result) = tasks.join_next().await {
+            if let Err(error) = result {
+                tracing::error!(%error, "Direct target test task failed");
+            }
+        }
+    });
 }
 
 async fn supervise_relay(

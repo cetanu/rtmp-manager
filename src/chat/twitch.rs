@@ -1,7 +1,6 @@
-use crate::chat::{ChatService, IncomingChatMessage};
+use crate::chat::{ChatHandle, IncomingChatMessage};
 use crate::util::now_unix_ms;
 use anyhow::{Context, Result};
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
@@ -9,7 +8,7 @@ use tokio::net::TcpStream;
 const TWITCH_IRC_ADDRESS: &str = "irc.chat.twitch.tv:6667";
 const RECONNECT_DELAY: Duration = Duration::from_secs(5);
 
-pub async fn run(chat: Arc<ChatService>, channel: String) {
+pub async fn run(chat: ChatHandle, channel: String) {
     loop {
         if let Err(error) = read_connection(&chat, &channel).await {
             tracing::warn!(
@@ -21,7 +20,7 @@ pub async fn run(chat: Arc<ChatService>, channel: String) {
     }
 }
 
-async fn read_connection(chat: &Arc<ChatService>, channel: &str) -> Result<()> {
+async fn read_connection(chat: &ChatHandle, channel: &str) -> Result<()> {
     let mut stream = TcpStream::connect(TWITCH_IRC_ADDRESS)
         .await
         .context("failed to connect to Twitch IRC")?;

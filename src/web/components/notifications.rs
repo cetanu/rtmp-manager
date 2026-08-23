@@ -1,8 +1,7 @@
-use crate::server::state::ProxyState;
+use crate::server::state::AppHandle;
 use crate::web::components::ui::card::{card, card_content, card_header, card_title};
 use crate::web::components::ui::form::{clearable_secret_field, form_field};
 use crate::web::components::ui::textarea::textarea;
-use std::sync::Arc;
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -11,8 +10,8 @@ use topcoat::{
 
 #[component]
 pub async fn notifications(cx: &Cx) -> Result {
-    let state: &Arc<ProxyState> = app_context(cx);
-    let config = state.config.read().await;
+    let app: &AppHandle = app_context(cx);
+    let config = app.config.get();
     view! {
         card(
             attrs: attributes! { class="h-full" },

@@ -1,4 +1,4 @@
-use crate::server::state::ProxyState;
+use crate::server::state::AppHandle;
 use crate::web::components::ui::button::{
     ButtonSize, ButtonVariant, button, button_link, button_variants,
 };
@@ -6,7 +6,6 @@ use crate::web::components::ui::card::{card, card_content};
 use crate::web::components::ui::form::{field_description, form_field};
 use crate::web::components::ui::input::input;
 use crate::web::components::ui::textarea::textarea;
-use std::sync::Arc;
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -65,8 +64,8 @@ pub async fn exported_config(cx: &Cx, open: bool) -> Result {
         return view! {};
     }
 
-    let state: &Arc<ProxyState> = app_context(cx);
-    let config_json = serde_json::to_string_pretty(&*state.config.read().await)?;
+    let app: &AppHandle = app_context(cx);
+    let config_json = serde_json::to_string_pretty(&*app.config.get())?;
     view! {
         <div class="mt-5">
             form_field(

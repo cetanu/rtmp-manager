@@ -1,8 +1,7 @@
 use crate::chat::ChatMessage;
-use crate::server::state::ProxyState;
+use crate::server::state::AppHandle;
 use crate::web::components::ui::button::{ButtonSize, ButtonVariant, button_variants};
 use crate::web::components::ui::card::{card, card_content, card_footer};
-use std::sync::Arc;
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -12,46 +11,38 @@ use topcoat::{
 
 #[procedure]
 async fn acknowledge_chat(cx: &Cx, displayed_id: String) -> Result<String> {
-    let state: &Arc<ProxyState> = app_context(cx);
+    let app: &AppHandle = app_context(cx);
     if let Ok(displayed_id) = displayed_id.parse() {
-        let _ = state.chat.acknowledge(displayed_id).await?;
+        let _ = app.chat.acknowledge(displayed_id).await?;
     }
-    Ok(first_message_id(&state.chat.snapshot().await?))
+    Ok(first_message_id(&app.chat.snapshot().await?))
 }
 
 #[procedure]
 async fn refresh_chat(cx: &Cx) -> Result<String> {
-    let state: &Arc<ProxyState> = app_context(cx);
-    Ok(first_message_id(&state.chat.snapshot().await?))
+    let app: &AppHandle = app_context(cx);
+    Ok(first_message_id(&app.chat.snapshot().await?))
 }
 
 #[procedure]
 async fn toggle_youtube_polling(cx: &Cx) -> Result<String> {
-    let state: &Arc<ProxyState> = app_context(cx);
-    let mut config_write = state.config.write().await;
-    let mut updated = config_write.clone();
+    let app: &AppHandle = app_context(cx);
+    let mut updated = (*app.config.get()).clone();
     updated.chat.youtube_polling_enabled = !updated.chat.youtube_polling_enabled;
-    state.config_store.save(&updated).await?;
     let enabled = updated.chat.youtube_polling_enabled;
-    *config_write = updated;
-    drop(config_write);
-    state.apply_chat_config().await?;
-    state.chat.notify_changed();
+    app.config.save(updated).await?;
+    app.apply_chat_config().await?;
     Ok(if enabled { "on" } else { "off" }.into())
 }
 
 #[procedure]
 async fn toggle_x_polling(cx: &Cx) -> Result<String> {
-    let state: &Arc<ProxyState> = app_context(cx);
-    let mut config_write = state.config.write().await;
-    let mut updated = config_write.clone();
+    let app: &AppHandle = app_context(cx);
+    let mut updated = (*app.config.get()).clone();
     updated.chat.x_polling_enabled = !updated.chat.x_polling_enabled;
-    state.config_store.save(&updated).await?;
     let enabled = updated.chat.x_polling_enabled;
-    *config_write = updated;
-    drop(config_write);
-    state.apply_chat_config().await?;
-    state.chat.notify_changed();
+    app.config.save(updated).await?;
+    app.apply_chat_config().await?;
     Ok(if enabled { "on" } else { "off" }.into())
 }
 
@@ -65,9 +56,9 @@ fn first_message_id(snapshot: &crate::chat::ChatInboxSnapshot) -> String {
 
 #[component]
 pub async fn chat_inbox(cx: &Cx) -> Result {
-    let state: &Arc<ProxyState> = app_context(cx);
-    let initial_id = first_message_id(&state.chat.snapshot().await?);
-    let chat = state.config.read().await.chat.clone();
+    let app: &AppHandle = app_context(cx);
+    let initial_id = first_message_id(&app.chat.snapshot().await?);
+    let chat = app.config.get().chat.clone();
     let youtube_configured = chat
         .youtube_api_key
         .as_ref()
@@ -181,8 +172,8 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
 #[shard]
 pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result {
     let _ = revision;
-    let state: &Arc<ProxyState> = app_context(cx);
-    let snapshot = state.chat.snapshot().await?;
+    let app: &AppHandle = app_context(cx);
+    let snapshot = app.chat.snapshot().await?;
 
     view! {
         card_content(

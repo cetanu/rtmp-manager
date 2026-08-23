@@ -1,11 +1,10 @@
 use crate::config::TargetConfig;
-use crate::server::state::ProxyState;
+use crate::server::state::AppHandle;
 use crate::web::components::ui::button::{ButtonSize, ButtonVariant, button};
 use crate::web::components::ui::card::{card, card_content, card_footer};
 use crate::web::components::ui::form::{form_field, secret_input, switch_field};
 use crate::web::components::ui::icon::trash_icon;
 use crate::web::components::ui::input::input;
-use std::sync::Arc;
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -14,8 +13,8 @@ use topcoat::{
 
 #[component]
 pub async fn targets(cx: &Cx) -> Result {
-    let state: &Arc<ProxyState> = app_context(cx);
-    let config = state.config.read().await;
+    let app: &AppHandle = app_context(cx);
+    let config = app.config.get();
     let targets = &config.targets;
 
     view! {

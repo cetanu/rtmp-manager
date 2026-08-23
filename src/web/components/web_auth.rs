@@ -1,8 +1,7 @@
-use crate::server::state::ProxyState;
+use crate::server::state::AppHandle;
 use crate::web::components::ui::card::{card, card_content, card_header, card_title};
 use crate::web::components::ui::form::{field_description, form_field, secret_input};
 use crate::web::components::ui::input::input;
-use std::sync::Arc;
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -11,8 +10,8 @@ use topcoat::{
 
 #[component]
 pub async fn web_auth(cx: &Cx) -> Result {
-    let state: &Arc<ProxyState> = app_context(cx);
-    let auth = state.config.read().await.web_auth.clone();
+    let app: &AppHandle = app_context(cx);
+    let auth = app.config.get().web_auth.clone();
     view! {
         card(
             attrs: attributes! { class="h-full" },

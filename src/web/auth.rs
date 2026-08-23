@@ -1,7 +1,6 @@
-use crate::server::state::ProxyState;
+use crate::server::state::AppHandle;
 use crate::util::constant_time_eq;
 use base64::{Engine, engine::general_purpose::STANDARD};
-use std::sync::Arc;
 use topcoat::{
     Result,
     context::{CxBuilder, app_context},
@@ -16,8 +15,8 @@ async fn basic_auth(cx: &mut CxBuilder, body: Body, next: Next<'_>) -> Result<Re
         return next.run(cx, body).await;
     }
 
-    let state: &Arc<ProxyState> = app_context(cx);
-    let auth = state.config.read().await.web_auth.clone();
+    let app: &AppHandle = app_context(cx);
+    let auth = app.config.get().web_auth.clone();
     if auth.username.is_empty() && auth.password.is_empty() {
         return next.run(cx, body).await;
     }

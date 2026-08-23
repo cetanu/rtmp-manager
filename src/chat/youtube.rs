@@ -1,9 +1,8 @@
-use crate::chat::{ChatService, IncomingChatMessage};
+use crate::chat::{ChatHandle, IncomingChatMessage};
 use crate::util::now_unix_ms;
 use anyhow::{Context, Result, bail};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::time::Duration;
 
 const YOUTUBE_CHAT_MESSAGES_URL: &str = "https://www.googleapis.com/youtube/v3/liveChat/messages";
@@ -110,10 +109,8 @@ struct SearchItemId {
     video_id: String,
 }
 
-pub async fn run(client: Client, chat: Arc<ChatService>, config: YouTubeChatConfig) {
+pub async fn run(client: Client, chat: ChatHandle, config: YouTubeChatConfig) {
     let (mut resolution_delay, maximum_resolution_delay) = match &config.target {
-        // search.list costs 100 quota units. Polling for an active channel more
-        // frequently than this can exhaust a default daily quota before going live.
         YouTubeChatTarget::Channel(_) => {
             (Duration::from_secs(30 * 60), Duration::from_secs(30 * 60))
         }
@@ -122,14 +119,12 @@ pub async fn run(client: Client, chat: Arc<ChatService>, config: YouTubeChatConf
         }
     };
     let live_chat_id = loop {
-        update_status(
-            &chat,
+        chat.update_youtube_status(
             "resolving",
             "Resolving the active YouTube live chat",
             None,
             None,
-        )
-        .await;
+        );
         match resolve_live_chat_id(&client, &config).await {
             Ok(live_chat_id) => break live_chat_id,
             Err(error) => {
@@ -138,7 +133,7 @@ pub async fn run(client: Client, chat: Arc<ChatService>, config: YouTubeChatConf
                     resolution_delay.as_secs()
                 );
                 tracing::warn!("{detail}");
-                update_status(&chat, "error", detail, None, None).await;
+                chat.update_youtube_status("error", detail, None, None);
                 tokio::time::sleep(resolution_delay).await;
                 resolution_delay = (resolution_delay * 2).min(maximum_resolution_delay);
             }
@@ -215,14 +210,12 @@ pub async fn run(client: Client, chat: Arc<ChatService>, config: YouTubeChatConf
                         poll_interval.as_secs_f32()
                     )
                 };
-                update_status(
-                    &chat,
+                chat.update_youtube_status(
                     "polling",
                     detail,
                     Some(now_unix_ms()),
                     Some(accepted),
-                )
-                .await;
+                );
                 tokio::time::sleep(poll_interval).await;
             }
             Err(PollFailure::Retry(error)) => {
@@ -231,14 +224,14 @@ pub async fn run(client: Client, chat: Arc<ChatService>, config: YouTubeChatConf
                     retry_delay.as_secs()
                 );
                 tracing::warn!("{detail}");
-                update_status(&chat, "error", detail, None, None).await;
+                chat.update_youtube_status("error", detail, None, None);
                 tokio::time::sleep(retry_delay).await;
                 retry_delay = (retry_delay * 2).min(Duration::from_secs(60));
             }
             Err(PollFailure::Stop(error)) => {
                 let detail = format!("YouTube chat ingest stopped: {error:#}");
                 tracing::error!("{detail}");
-                update_status(&chat, "stopped", detail, None, None).await;
+                chat.update_youtube_status("stopped", detail, None, None);
                 return;
             }
         }
@@ -372,25 +365,6 @@ async fn decode_youtube_response<T: for<'de> Deserialize<'de>>(
         .json()
         .await
         .context("Failed to decode the YouTube API response")
-}
-
-async fn update_status(
-    chat: &Arc<ChatService>,
-    ingest_state: &str,
-    detail: impl Into<String>,
-    last_success_at_unix_ms: Option<u64>,
-    newly_received: Option<u64>,
-) {
-    let mut status = chat.youtube_status.write().await;
-    let status = status.get_or_insert_with(YouTubeIngestStatus::default);
-    status.state = ingest_state.to_string();
-    status.detail = detail.into().chars().take(240).collect();
-    if let Some(last_success_at_unix_ms) = last_success_at_unix_ms {
-        status.last_success_at_unix_ms = Some(last_success_at_unix_ms);
-    }
-    if let Some(newly_received) = newly_received {
-        status.messages_received = status.messages_received.saturating_add(newly_received);
-    }
 }
 
 #[cfg(test)]

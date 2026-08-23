@@ -1,7 +1,6 @@
-use crate::server::state::ProxyState;
+use crate::server::state::AppHandle;
 use crate::web::components::publishing_controls::publishing_controls;
 use crate::web::components::ui::card::{card, card_content, card_header};
-use std::sync::Arc;
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -55,8 +54,8 @@ pub async fn stream_preview_player(child: View) -> Result {
 #[shard]
 pub async fn stream_preview_placeholder(cx: &Cx, revision: f64) -> Result {
     let _ = revision;
-    let state: &Arc<ProxyState> = app_context(cx);
-    let status = state.stream_status().await;
+    let app: &AppHandle = app_context(cx);
+    let status = app.stream.status();
     let message = status.state.to_string();
     view! {
         <div
