@@ -1,6 +1,5 @@
 use crate::server::state::ProxyState;
 use crate::web::components::ui::card::{card, card_content, card_header, card_title};
-use crate::web::components::ui::empty_state::empty_state;
 use std::collections::HashMap;
 use std::sync::Arc;
 use topcoat::{
@@ -84,7 +83,7 @@ pub async fn metrics_page(cx: &Cx) -> Result {
                 }
             </div>
             if targets.is_empty() {
-                empty_state("No targets configured. Add a target to begin collecting throughput metrics.")
+                "No targets configured. Add a target to begin collecting throughput metrics."
             }
         </section>
     }

@@ -1,7 +1,6 @@
 use crate::server::state::ProxyState;
 use crate::web::components::chat_message::chat_message;
 use crate::web::components::ui::card::card_content;
-use crate::web::components::ui::empty_state::empty_state;
 use std::sync::Arc;
 use topcoat::{
     Result,
@@ -19,15 +18,15 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result {
     view! {
         card_content(
             <div class="h-[min(22rem,calc(100dvh-10rem))] overflow-y-auto pr-1">
-                if snapshot.messages.is_empty() {
-                    empty_state("No chat messages waiting.")
-                } else {
                     <div class="flex flex-col gap-2">
+                if snapshot.messages.is_empty() {
+                    "No chat messages waiting."
+                } else {
                     for (index, message) in snapshot.messages.into_iter().enumerate() {
                         chat_message(message: message, highlighted: index == 0)
                     }
-                    </div>
                 }
+                    </div>
             </div>
             <div class="mb-4 flex justify-end gap-4 text-right">
                 <span class="text-sm font-medium">(format!("{} queued", snapshot.queued))</span>

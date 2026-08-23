@@ -8,8 +8,7 @@ use topcoat::{
 };
 
 use crate::web::components::ui::button::{ButtonVariant, button};
-use crate::web::components::ui::card::{card, card_content, card_footer, card_header, card_title};
-use crate::web::components::ui::empty_state::empty_state;
+use crate::web::components::ui::card::{card, card_content, card_footer};
 
 #[component]
 pub async fn targets(cx: &Cx) -> Result {
@@ -26,9 +25,7 @@ pub async fn targets(cx: &Cx) -> Result {
                     }
                 </div>
 
-                empty_state(attrs: attributes! { id="emptyTargets" hidden=(!targets.is_empty()) },
-                    "No targets configured."
-                )
+                "No targets configured."
             )
             card_footer(
                 button(

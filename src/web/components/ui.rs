@@ -1,6 +1,5 @@
 pub mod button;
 pub mod card;
-pub mod empty_state;
 pub mod form;
 pub mod icon;
 pub mod input;
