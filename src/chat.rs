@@ -1,13 +1,21 @@
+use crate::config::ChatSettings;
+use crate::util::{non_empty, now_unix_ms};
 use anyhow::{Context, Result};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_valid::Validate;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::{Mutex, RwLock, watch};
+use tokio::task::JoinHandle;
 use toasty::Executor;
 
 pub mod twitch;
 pub mod x;
 pub mod youtube;
+
+pub use youtube::{YouTubeChatConfig, YouTubeChatTarget, YouTubeIngestStatus};
 
 #[derive(Debug, Clone, Deserialize, Validate)]
 pub struct IncomingChatMessage {
@@ -33,7 +41,7 @@ pub struct IncomingChatMessage {
 }
 
 impl IncomingChatMessage {
-    fn normalized(mut self) -> Result<Self> {
+    pub fn normalized(mut self) -> Result<Self> {
         self.source = self.source.trim().to_ascii_lowercase();
         self.external_id = self.external_id.trim().to_string();
         self.author = self.author.trim().to_string();
@@ -46,13 +54,6 @@ impl IncomingChatMessage {
 
         Ok(self)
     }
-}
-
-fn non_empty(value: Option<String>) -> Option<String> {
-    value.and_then(|value| {
-        let trimmed = value.trim();
-        (!trimmed.is_empty()).then(|| trimmed.to_string())
-    })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -114,6 +115,7 @@ pub enum EnqueueOutcome {
     Dropped,
 }
 
+/// SQLite-backed persistent chat inbox with bounded queue capacity and deduplication.
 #[derive(Clone)]
 pub struct ChatInbox {
     capacity: usize,
@@ -303,6 +305,7 @@ async fn trim_seen(executor: &mut dyn Executor, capacity: usize) -> Result<()> {
     }
     Ok(())
 }
+
 async fn load_state(executor: &mut dyn Executor) -> Result<StoredChatState> {
     StoredChatState::filter(StoredChatState::fields().id().eq(1_u64))
         .first()
@@ -311,11 +314,177 @@ async fn load_state(executor: &mut dyn Executor) -> Result<StoredChatState> {
         .ok_or_else(|| anyhow::anyhow!("chat state row is missing"))
 }
 
-fn now_unix_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+/// Comprehensive chat service managing message storage, revision events, and background platform workers.
+pub struct ChatService {
+    inbox: Mutex<ChatInbox>,
+    revision: watch::Sender<u64>,
+    pub youtube_status: RwLock<Option<YouTubeIngestStatus>>,
+    twitch_task: Mutex<Option<JoinHandle<()>>>,
+    youtube_task: Mutex<Option<JoinHandle<()>>>,
+    x_task: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl ChatService {
+    pub async fn open(path: &Path, capacity: usize) -> Result<Arc<Self>> {
+        let inbox = ChatInbox::open(path, capacity).await?;
+        let (revision, _) = watch::channel(0);
+        Ok(Arc::new(Self {
+            inbox: Mutex::new(inbox),
+            revision,
+            youtube_status: RwLock::new(None),
+            twitch_task: Mutex::new(None),
+            youtube_task: Mutex::new(None),
+            x_task: Mutex::new(None),
+        }))
+    }
+
+    /// Enqueue a message into the inbox and notify subscribers if accepted or dropped.
+    pub async fn enqueue(&self, incoming: IncomingChatMessage) -> Result<EnqueueOutcome> {
+        let outcome = self.inbox.lock().await.enqueue(incoming).await?;
+        if matches!(outcome, EnqueueOutcome::Accepted | EnqueueOutcome::Dropped) {
+            self.notify_changed();
+        }
+        Ok(outcome)
+    }
+
+    /// Acknowledge a message by ID and notify subscribers if acknowledged.
+    pub async fn acknowledge(&self, expected_id: u64) -> Result<bool> {
+        let acknowledged = self.inbox.lock().await.acknowledge(expected_id).await?;
+        if acknowledged {
+            self.notify_changed();
+        }
+        Ok(acknowledged)
+    }
+
+    /// Retrieve a snapshot of the current inbox messages and metrics.
+    pub async fn snapshot(&self) -> Result<ChatInboxSnapshot> {
+        self.inbox.lock().await.snapshot().await
+    }
+
+    /// Notify subscribers of a chat state change.
+    pub fn notify_changed(&self) {
+        self.revision
+            .send_modify(|revision| *revision = revision.wrapping_add(1));
+    }
+
+    /// Subscribe to chat state change notifications.
+    pub fn subscribe_changes(&self) -> watch::Receiver<u64> {
+        self.revision.subscribe()
+    }
+
+    /// Reconfigures background ingestion tasks according to updated settings.
+    pub async fn apply_config(
+        self: &Arc<Self>,
+        http_client: &Client,
+        chat: &ChatSettings,
+    ) -> Result<()> {
+        self.inbox.lock().await.resize(chat.queue_capacity).await?;
+
+        if let Some(task) = self.twitch_task.lock().await.take() {
+            task.abort();
+        }
+        if let Some(task) = self.youtube_task.lock().await.take() {
+            task.abort();
+        }
+        if let Some(task) = self.x_task.lock().await.take() {
+            task.abort();
+        }
+        *self.youtube_status.write().await = None;
+
+        if let Some(channel) = chat
+            .twitch_channel
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| value.trim().trim_start_matches('#').to_ascii_lowercase())
+        {
+            let chat_svc = Arc::clone(self);
+            let task = tokio::spawn(twitch::run(chat_svc, channel.clone()));
+            *self.twitch_task.lock().await = Some(task);
+            tracing::info!(channel, "Twitch anonymous IRC ingest configured");
+        }
+
+        if chat.x_polling_enabled {
+            let media_key = chat
+                .x_media_key
+                .clone()
+                .filter(|value| !value.trim().is_empty());
+            match media_key {
+                Some(media_key) => {
+                    let chat_svc = Arc::clone(self);
+                    let task = tokio::spawn(x::run(
+                        http_client.clone(),
+                        chat_svc,
+                        x::XChatConfig { media_key },
+                    ));
+                    *self.x_task.lock().await = Some(task);
+                    tracing::info!("X live chat ingest configured");
+                }
+                None => {
+                    tracing::warn!("X live chat polling is enabled but no media key is configured");
+                }
+            }
+        }
+
+        let Some(api_key) = chat
+            .youtube_api_key
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+            .cloned()
+        else {
+            return Ok(());
+        };
+
+        let target = chat
+            .youtube_live_chat_id
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+            .cloned()
+            .map(YouTubeChatTarget::LiveChat)
+            .or_else(|| {
+                chat.youtube_video_id
+                    .as_ref()
+                    .filter(|value| !value.trim().is_empty())
+                    .cloned()
+                    .map(YouTubeChatTarget::Video)
+            })
+            .or_else(|| {
+                chat.youtube_channel_id
+                    .as_ref()
+                    .filter(|value| !value.trim().is_empty())
+                    .cloned()
+                    .map(YouTubeChatTarget::Channel)
+            });
+
+        let Some(target) = target else {
+            return Ok(());
+        };
+
+        if !chat.youtube_polling_enabled {
+            *self.youtube_status.write().await = Some(YouTubeIngestStatus {
+                state: "off".into(),
+                detail: "Polling is off. Turn it on when the YouTube stream is live.".into(),
+                ..YouTubeIngestStatus::default()
+            });
+            self.notify_changed();
+            tracing::info!("YouTube live chat polling is off");
+            return Ok(());
+        }
+
+        let chat_svc = Arc::clone(self);
+        let task = tokio::spawn(youtube::run(
+            http_client.clone(),
+            chat_svc,
+            YouTubeChatConfig {
+                api_key,
+                target,
+                min_poll_interval: Duration::from_secs(chat.youtube_min_poll_interval_secs),
+                adaptive_polling: chat.youtube_adaptive_polling,
+            },
+        ));
+        *self.youtube_task.lock().await = Some(task);
+        tracing::info!("YouTube live chat ingest configured");
+        Ok(())
+    }
 }
 
 #[cfg(test)]

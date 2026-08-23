@@ -1,4 +1,5 @@
 use crate::server::state::ProxyState;
+use crate::util::constant_time_eq;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::sync::Arc;
 use topcoat::{
@@ -49,19 +50,6 @@ fn submitted_credentials(cx: &topcoat::context::Cx) -> Option<(String, String)> 
     let decoded = String::from_utf8(decoded).ok()?;
     let (username, password) = decoded.split_once(':')?;
     Some((username.to_string(), password.to_string()))
-}
-
-fn constant_time_eq(expected: &[u8], submitted: &[u8]) -> bool {
-    if expected.len() != submitted.len() {
-        return false;
-    }
-    expected
-        .iter()
-        .zip(submitted)
-        .fold(0_u8, |difference, (left, right)| {
-            difference | (left ^ right)
-        })
-        == 0
 }
 
 #[cfg(test)]

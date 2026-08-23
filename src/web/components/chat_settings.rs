@@ -1,8 +1,7 @@
 use crate::server::state::ProxyState;
-use crate::web::components::chat_ingest_fields::chat_ingest_fields;
 use crate::web::components::ui::card::{card, card_content, card_header, card_title};
-use crate::web::components::x_chat_fields::x_chat_fields;
-use crate::web::components::youtube_chat_fields::youtube_chat_fields;
+use crate::web::components::ui::form::{clearable_secret_field, form_field};
+use crate::web::components::ui::input::input;
 use std::sync::Arc;
 use topcoat::{
     Result,
@@ -14,6 +13,7 @@ use topcoat::{
 pub async fn chat_settings(cx: &Cx) -> Result {
     let state: &Arc<ProxyState> = app_context(cx);
     let chat = state.config.read().await.chat.clone();
+
     view! {
         card(
             attrs: attributes! { class="h-full" },
@@ -22,9 +22,69 @@ pub async fn chat_settings(cx: &Cx) -> Result {
             )
             card_content(
                 <div class="flex flex-col gap-6">
-                    chat_ingest_fields(chat: &chat)
-                    youtube_chat_fields(chat: &chat)
-                    x_chat_fields(chat: &chat)
+                    <div class="grid gap-6 md:grid-cols-2">
+                        form_field(
+                            control_id: "twitch_channel",
+                            label_text: "Twitch channel",
+                            attrs: attributes! { class="md:col-span-2" },
+                            input(attrs: attributes! {
+                                id="twitch_channel"
+                                name="chat[twitch_channel]"
+                                value=(chat.twitch_channel.clone().unwrap_or_default())
+                            })
+                        )
+                    </div>
+
+                    <div class="flex flex-col gap-6">
+                        clearable_secret_field(
+                            control_id: "youtube_api_key",
+                            name: "chat[youtube_api_key]",
+                            label_text: "YouTube API key",
+                            empty_placeholder: "Not configured",
+                            value: chat.youtube_api_key.clone().unwrap_or_default()
+                        )
+                        <div class="grid gap-6 md:grid-cols-3">
+                            form_field(
+                                control_id: "youtube_live_chat_id",
+                                label_text: "YouTube live chat ID",
+                                input(attrs: attributes! {
+                                    id="youtube_live_chat_id"
+                                    name="chat[youtube_live_chat_id]"
+                                    value=(chat.youtube_live_chat_id.clone().unwrap_or_default())
+                                })
+                            )
+                            form_field(
+                                control_id: "youtube_video_id",
+                                label_text: "YouTube video ID",
+                                input(attrs: attributes! {
+                                    id="youtube_video_id"
+                                    name="chat[youtube_video_id]"
+                                    value=(chat.youtube_video_id.clone().unwrap_or_default())
+                                })
+                            )
+                            form_field(
+                                control_id: "youtube_channel_id",
+                                label_text: "YouTube channel ID",
+                                input(attrs: attributes! {
+                                    id="youtube_channel_id"
+                                    name="chat[youtube_channel_id]"
+                                    value=(chat.youtube_channel_id.clone().unwrap_or_default())
+                                })
+                            )
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col gap-4">
+                        form_field(
+                            control_id: "x_media_key",
+                            label_text: "X broadcast/media key",
+                            input(attrs: attributes! {
+                                id="x_media_key"
+                                name="chat[x_media_key]"
+                                value=(chat.x_media_key.clone().unwrap_or_default())
+                            })
+                        )
+                    </div>
                 </div>
             )
         )

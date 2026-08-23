@@ -1,9 +1,10 @@
-use crate::chat::{EnqueueOutcome, IncomingChatMessage};
-use crate::server::state::ProxyState;
+use crate::chat::{ChatService, IncomingChatMessage};
+use crate::util::now_unix_ms;
 use anyhow::{Context, Result, bail};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 const YOUTUBE_CHAT_MESSAGES_URL: &str = "https://www.googleapis.com/youtube/v3/liveChat/messages";
 const YOUTUBE_VIDEOS_URL: &str = "https://www.googleapis.com/youtube/v3/videos";
@@ -109,7 +110,7 @@ struct SearchItemId {
     video_id: String,
 }
 
-pub async fn run(state: Arc<ProxyState>, config: YouTubeChatConfig) {
+pub async fn run(client: Client, chat: Arc<ChatService>, config: YouTubeChatConfig) {
     let (mut resolution_delay, maximum_resolution_delay) = match &config.target {
         // search.list costs 100 quota units. Polling for an active channel more
         // frequently than this can exhaust a default daily quota before going live.
@@ -122,14 +123,14 @@ pub async fn run(state: Arc<ProxyState>, config: YouTubeChatConfig) {
     };
     let live_chat_id = loop {
         update_status(
-            &state,
+            &chat,
             "resolving",
             "Resolving the active YouTube live chat",
             None,
             None,
         )
         .await;
-        match resolve_live_chat_id(&state, &config).await {
+        match resolve_live_chat_id(&client, &config).await {
             Ok(live_chat_id) => break live_chat_id,
             Err(error) => {
                 let detail = format!(
@@ -137,7 +138,7 @@ pub async fn run(state: Arc<ProxyState>, config: YouTubeChatConfig) {
                     resolution_delay.as_secs()
                 );
                 tracing::warn!("{detail}");
-                update_status(&state, "error", detail, None, None).await;
+                update_status(&chat, "error", detail, None, None).await;
                 tokio::time::sleep(resolution_delay).await;
                 resolution_delay = (resolution_delay * 2).min(maximum_resolution_delay);
             }
@@ -150,7 +151,7 @@ pub async fn run(state: Arc<ProxyState>, config: YouTubeChatConfig) {
 
     loop {
         match fetch_page(
-            &state,
+            &client,
             &config.api_key,
             &live_chat_id,
             page_token.as_deref(),
@@ -162,34 +163,31 @@ pub async fn run(state: Arc<ProxyState>, config: YouTubeChatConfig) {
                 page_token = page.next_page_token.clone();
                 let mut accepted = 0_u64;
 
-                {
-                    let mut inbox = state.chat_inbox.lock().await;
-                    for item in page.items {
-                        if !item.snippet.has_display_content
-                            || item.snippet.display_message.trim().is_empty()
-                        {
-                            continue;
-                        }
+                for item in page.items {
+                    if !item.snippet.has_display_content
+                        || item.snippet.display_message.trim().is_empty()
+                    {
+                        continue;
+                    }
 
-                        let message = IncomingChatMessage {
-                            source: "youtube".into(),
-                            external_id: item.id,
-                            author: item.author_details.display_name,
-                            text: item.snippet.display_message,
-                            avatar_url: item.author_details.profile_image_url,
-                            sent_at: item.snippet.published_at,
-                        };
-                        match inbox.enqueue(message).await {
-                            Ok(EnqueueOutcome::Accepted) => accepted += 1,
-                            Ok(EnqueueOutcome::Duplicate | EnqueueOutcome::Dropped) => {}
-                            Err(error) => {
-                                tracing::warn!("Discarding invalid YouTube chat message: {error}")
-                            }
+                    let message = IncomingChatMessage {
+                        source: "youtube".into(),
+                        external_id: item.id,
+                        author: item.author_details.display_name,
+                        text: item.snippet.display_message,
+                        avatar_url: item.author_details.profile_image_url,
+                        sent_at: item.snippet.published_at,
+                    };
+                    match chat.enqueue(message).await {
+                        Ok(crate::chat::EnqueueOutcome::Accepted) => accepted += 1,
+                        Ok(
+                            crate::chat::EnqueueOutcome::Duplicate
+                            | crate::chat::EnqueueOutcome::Dropped,
+                        ) => {}
+                        Err(error) => {
+                            tracing::warn!("Discarding invalid YouTube chat message: {error}")
                         }
                     }
-                }
-                if accepted > 0 {
-                    state.notify_chat_changed();
                 }
 
                 idle_polls = if accepted == 0 {
@@ -218,7 +216,7 @@ pub async fn run(state: Arc<ProxyState>, config: YouTubeChatConfig) {
                     )
                 };
                 update_status(
-                    &state,
+                    &chat,
                     "polling",
                     detail,
                     Some(now_unix_ms()),
@@ -233,40 +231,39 @@ pub async fn run(state: Arc<ProxyState>, config: YouTubeChatConfig) {
                     retry_delay.as_secs()
                 );
                 tracing::warn!("{detail}");
-                update_status(&state, "error", detail, None, None).await;
+                update_status(&chat, "error", detail, None, None).await;
                 tokio::time::sleep(retry_delay).await;
                 retry_delay = (retry_delay * 2).min(Duration::from_secs(60));
             }
             Err(PollFailure::Stop(error)) => {
                 let detail = format!("YouTube chat ingest stopped: {error:#}");
                 tracing::error!("{detail}");
-                update_status(&state, "stopped", detail, None, None).await;
+                update_status(&chat, "stopped", detail, None, None).await;
                 return;
             }
         }
     }
 }
 
-async fn resolve_live_chat_id(state: &ProxyState, config: &YouTubeChatConfig) -> Result<String> {
+async fn resolve_live_chat_id(client: &Client, config: &YouTubeChatConfig) -> Result<String> {
     match &config.target {
         YouTubeChatTarget::LiveChat(live_chat_id) => Ok(live_chat_id.clone()),
         YouTubeChatTarget::Video(video_id) => {
-            live_chat_id_from_video(state, &config.api_key, video_id).await
+            live_chat_id_from_video(client, &config.api_key, video_id).await
         }
         YouTubeChatTarget::Channel(channel_id) => {
-            let video_id = active_video_from_channel(state, &config.api_key, channel_id).await?;
-            live_chat_id_from_video(state, &config.api_key, &video_id).await
+            let video_id = active_video_from_channel(client, &config.api_key, channel_id).await?;
+            live_chat_id_from_video(client, &config.api_key, &video_id).await
         }
     }
 }
 
 async fn live_chat_id_from_video(
-    state: &ProxyState,
+    client: &Client,
     api_key: &str,
     video_id: &str,
 ) -> Result<String> {
-    let response = state
-        .http_client
+    let response = client
         .get(YOUTUBE_VIDEOS_URL)
         .query(&[
             ("id", video_id),
@@ -286,12 +283,11 @@ async fn live_chat_id_from_video(
 }
 
 async fn active_video_from_channel(
-    state: &ProxyState,
+    client: &Client,
     api_key: &str,
     channel_id: &str,
 ) -> Result<String> {
-    let response = state
-        .http_client
+    let response = client
         .get(YOUTUBE_SEARCH_URL)
         .query(&[
             ("part", "snippet"),
@@ -313,12 +309,12 @@ async fn active_video_from_channel(
 }
 
 async fn fetch_page(
-    state: &ProxyState,
+    client: &Client,
     api_key: &str,
     live_chat_id: &str,
     page_token: Option<&str>,
 ) -> std::result::Result<LiveChatResponse, PollFailure> {
-    let mut request = state.http_client.get(YOUTUBE_CHAT_MESSAGES_URL).query(&[
+    let mut request = client.get(YOUTUBE_CHAT_MESSAGES_URL).query(&[
         ("liveChatId", live_chat_id),
         ("part", "id,snippet,authorDetails"),
         ("maxResults", "200"),
@@ -379,13 +375,13 @@ async fn decode_youtube_response<T: for<'de> Deserialize<'de>>(
 }
 
 async fn update_status(
-    state: &ProxyState,
+    chat: &Arc<ChatService>,
     ingest_state: &str,
     detail: impl Into<String>,
     last_success_at_unix_ms: Option<u64>,
     newly_received: Option<u64>,
 ) {
-    let mut status = state.youtube_status.write().await;
+    let mut status = chat.youtube_status.write().await;
     let status = status.get_or_insert_with(YouTubeIngestStatus::default);
     status.state = ingest_state.to_string();
     status.detail = detail.into().chars().take(240).collect();
@@ -395,13 +391,6 @@ async fn update_status(
     if let Some(newly_received) = newly_received {
         status.messages_received = status.messages_received.saturating_add(newly_received);
     }
-}
-
-fn now_unix_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
 }
 
 #[cfg(test)]

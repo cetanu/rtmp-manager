@@ -5,6 +5,7 @@ mod log_buffer;
 mod metrics;
 mod notifications;
 mod server;
+mod util;
 mod web;
 
 use anyhow::{Context, Result};

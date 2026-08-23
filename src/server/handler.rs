@@ -1,4 +1,5 @@
 use super::state::ProxyState;
+use crate::util::secure_token_matches;
 use rtmp_rs::media::flv::FlvTag;
 use rtmp_rs::protocol::message::{ConnectParams, PublishParams};
 use rtmp_rs::session::SessionContext;
@@ -39,7 +40,7 @@ impl RtmpHandler for ProxyHandler {
             .server
             .ingest_stream_key
             .clone();
-        if !stream_key_matches(&expected_stream_key, &stream_key) {
+        if !secure_token_matches(&expected_stream_key, &stream_key) {
             error!(session_id = %ctx.session_id, "Rejected RTMP publish with invalid stream key");
             return AuthResult::Reject("Invalid stream key".into());
         }
@@ -59,7 +60,6 @@ impl RtmpHandler for ProxyHandler {
 
     async fn on_unpublish(&self, ctx: &StreamContext) {
         info!("Stream stopped publishing");
-
         self.state.end_stream(&ctx.stream_key).await;
     }
 
@@ -68,28 +68,15 @@ impl RtmpHandler for ProxyHandler {
     }
 }
 
-fn stream_key_matches(expected: &str, submitted: &str) -> bool {
-    if expected.is_empty() || expected.len() != submitted.len() {
-        return false;
-    }
-    expected
-        .bytes()
-        .zip(submitted.bytes())
-        .fold(0_u8, |difference, (left, right)| {
-            difference | (left ^ right)
-        })
-        == 0
-}
-
 #[cfg(test)]
 mod tests {
-    use super::stream_key_matches;
+    use super::*;
 
     #[test]
     fn ingest_requires_an_exact_nonempty_stream_key() {
-        assert!(stream_key_matches("private-key", "private-key"));
-        assert!(!stream_key_matches("private-key", "wrong-key"));
-        assert!(!stream_key_matches("private-key", "private-key-extra"));
-        assert!(!stream_key_matches("", ""));
+        assert!(secure_token_matches("private-key", "private-key"));
+        assert!(!secure_token_matches("private-key", "wrong-key"));
+        assert!(!secure_token_matches("private-key", "private-key-extra"));
+        assert!(!secure_token_matches("", ""));
     }
 }

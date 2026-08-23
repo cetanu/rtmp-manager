@@ -1,5 +1,4 @@
-use crate::chat::{EnqueueOutcome, IncomingChatMessage};
-use crate::server::state::ProxyState;
+use crate::chat::{ChatService, IncomingChatMessage};
 use anyhow::{Context, Result, bail};
 use reqwest::{Client, Response, StatusCode};
 use serde::{Deserialize, Serialize};
@@ -96,14 +95,14 @@ impl InnerPayload {
     }
 }
 
-pub async fn run(state: Arc<ProxyState>, config: XChatConfig) {
+pub async fn run(client: Client, chat: Arc<ChatService>, config: XChatConfig) {
     let mut session = None;
     let mut cursor = Some(String::new());
     let mut retry_delay = INITIAL_RETRY_DELAY;
 
     loop {
         if session.is_none() {
-            match bootstrap_chat(&state.http_client, &config.media_key).await {
+            match bootstrap_chat(&client, &config.media_key).await {
                 Ok(new_session) => {
                     tracing::info!("X live chat session bootstrapped");
                     session = Some(new_session);
@@ -123,15 +122,12 @@ pub async fn run(state: Arc<ProxyState>, config: XChatConfig) {
         }
 
         let current_session = session.as_ref().expect("X session was just initialized");
-        match fetch_history(&state, current_session, cursor.as_deref()).await {
+        match fetch_history(&client, current_session, cursor.as_deref()).await {
             Ok(history) => {
                 retry_delay = INITIAL_RETRY_DELAY;
                 let received =
-                    enqueue_messages(&state, history.messages, history.cursor.as_deref()).await;
+                    enqueue_messages(&chat, history.messages, history.cursor.as_deref()).await;
                 cursor = history.cursor;
-                if received > 0 {
-                    state.notify_chat_changed();
-                }
                 tracing::debug!(received, "X live chat poll completed");
                 tokio::time::sleep(POLL_INTERVAL).await;
             }
@@ -218,7 +214,7 @@ async fn decode_response<T: for<'de> Deserialize<'de>>(
 }
 
 async fn fetch_history(
-    state: &ProxyState,
+    client: &Client,
     session: &ChatSession,
     cursor: Option<&str>,
 ) -> std::result::Result<HistoryResponse, PollFailure> {
@@ -231,8 +227,7 @@ async fn fetch_history(
         access_token: &session.access_token,
         cursor,
     };
-    let response = state
-        .http_client
+    let response = client
         .post(url)
         .json(&request)
         .send()
@@ -262,12 +257,11 @@ async fn fetch_history(
 }
 
 async fn enqueue_messages(
-    state: &ProxyState,
+    chat: &Arc<ChatService>,
     messages: Vec<HistoryMessage>,
     cursor: Option<&str>,
 ) -> u64 {
     let mut accepted = 0;
-    let mut inbox = state.chat_inbox.lock().await;
     for (index, message) in messages.into_iter().enumerate() {
         let Ok(payload) = serde_json::from_str::<InnerPayload>(&message.payload) else {
             tracing::debug!("Ignoring X live chat message with an invalid payload");
@@ -290,9 +284,9 @@ async fn enqueue_messages(
             avatar_url: None,
             sent_at: None,
         };
-        match inbox.enqueue(message).await {
-            Ok(EnqueueOutcome::Accepted) => accepted += 1,
-            Ok(EnqueueOutcome::Duplicate | EnqueueOutcome::Dropped) => {}
+        match chat.enqueue(message).await {
+            Ok(crate::chat::EnqueueOutcome::Accepted) => accepted += 1,
+            Ok(crate::chat::EnqueueOutcome::Duplicate | crate::chat::EnqueueOutcome::Dropped) => {}
             Err(error) => tracing::warn!("Discarding invalid X live chat message: {error}"),
         }
     }

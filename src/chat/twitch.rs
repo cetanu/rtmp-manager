@@ -1,17 +1,17 @@
-use crate::chat::{EnqueueOutcome, IncomingChatMessage};
-use crate::server::state::ProxyState;
+use crate::chat::{ChatService, IncomingChatMessage};
+use crate::util::now_unix_ms;
 use anyhow::{Context, Result};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
 const TWITCH_IRC_ADDRESS: &str = "irc.chat.twitch.tv:6667";
 const RECONNECT_DELAY: Duration = Duration::from_secs(5);
 
-pub async fn run(state: Arc<ProxyState>, channel: String) {
+pub async fn run(chat: Arc<ChatService>, channel: String) {
     loop {
-        if let Err(error) = read_connection(&state, &channel).await {
+        if let Err(error) = read_connection(&chat, &channel).await {
             tracing::warn!(
                 channel,
                 "Twitch IRC connection ended: {error:#}. Reconnecting in 5 seconds"
@@ -21,7 +21,7 @@ pub async fn run(state: Arc<ProxyState>, channel: String) {
     }
 }
 
-async fn read_connection(state: &Arc<ProxyState>, channel: &str) -> Result<()> {
+async fn read_connection(chat: &Arc<ChatService>, channel: &str) -> Result<()> {
     let mut stream = TcpStream::connect(TWITCH_IRC_ADDRESS)
         .await
         .context("failed to connect to Twitch IRC")?;
@@ -80,12 +80,8 @@ async fn read_connection(state: &Arc<ProxyState>, channel: &str) -> Result<()> {
             avatar_url: None,
             sent_at: None,
         };
-        match state.chat_inbox.lock().await.enqueue(message).await {
-            Ok(EnqueueOutcome::Accepted | EnqueueOutcome::Dropped) => {
-                state.notify_chat_changed();
-            }
-            Ok(EnqueueOutcome::Duplicate) => {}
-            Err(error) => tracing::warn!("Discarding invalid Twitch IRC message: {error}"),
+        if let Err(error) = chat.enqueue(message).await {
+            tracing::warn!("Discarding invalid Twitch IRC message: {error}");
         }
     }
 }
@@ -150,13 +146,6 @@ fn decode_tag(value: &str) -> String {
         }
     }
     decoded
-}
-
-fn now_unix_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
 }
 
 #[cfg(test)]

@@ -1,0 +1,390 @@
+use crate::config::TargetConfig;
+use crate::metrics::Metrics;
+use crate::util::redact_secrets;
+use std::collections::HashMap;
+use std::process::Stdio;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::{Mutex, watch};
+use tokio::task::JoinHandle;
+
+pub struct RelayProcess {
+    cancel: watch::Sender<bool>,
+    task: JoinHandle<()>,
+}
+
+/// Manages active FFmpeg RTMP relay processes, retry supervisors, and direct test streams.
+pub struct RelayManager {
+    active_relays: Mutex<HashMap<String, Vec<RelayProcess>>>,
+}
+
+impl Default for RelayManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RelayManager {
+    pub fn new() -> Self {
+        Self {
+            active_relays: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Spawns relay supervisors for the given targets and source stream URL.
+    pub fn spawn_relays(
+        &self,
+        metrics: &Arc<Metrics>,
+        source_url: &str,
+        targets: &[TargetConfig],
+    ) -> Vec<RelayProcess> {
+        targets
+            .iter()
+            .cloned()
+            .map(|target| {
+                let (cancel, cancel_rx) = watch::channel(false);
+                let task = tokio::spawn(supervise_relay(
+                    Arc::clone(metrics),
+                    source_url.to_string(),
+                    target,
+                    cancel_rx,
+                ));
+                RelayProcess { cancel, task }
+            })
+            .collect()
+    }
+
+    /// Stores active relay processes under a stream key.
+    pub async fn store_relays(&self, stream_key: String, relays: Vec<RelayProcess>) {
+        self.active_relays.lock().await.insert(stream_key, relays);
+    }
+
+    /// Stops and awaits all active relay processes for a stream key.
+    pub async fn stop_relays(&self, stream_key: &str) {
+        let relays = self.active_relays.lock().await.remove(stream_key);
+        if let Some(relays) = relays {
+            Self::cancel_relays(relays).await;
+        }
+    }
+
+    /// Cancels and awaits a list of relay processes.
+    pub async fn cancel_relays(relays: Vec<RelayProcess>) {
+        for relay in relays {
+            let _ = relay.cancel.send(true);
+            let _ = relay.task.await;
+        }
+    }
+
+    /// Runs a direct synthetic test stream to all enabled targets.
+    pub fn run_direct_test(duration_secs: u64, targets: Vec<TargetConfig>) {
+        tokio::spawn(async move {
+            tracing::info!(
+                duration_secs,
+                target_count = targets.len(),
+                "Starting direct test stream to enabled targets"
+            );
+            let mut tasks = tokio::task::JoinSet::new();
+            for target in targets {
+                tasks.spawn(async move {
+                    let destination = target_destination(&target);
+                    let video_source =
+                        format!("testsrc=duration={duration_secs}:size=1280x720:rate=30");
+                    let audio_source = format!("sine=frequency=1000:duration={duration_secs}");
+                    let output = tokio::process::Command::new("ffmpeg")
+                        .args([
+                            "-hide_banner",
+                            "-loglevel",
+                            "warning",
+                            "-re",
+                            "-f",
+                            "lavfi",
+                            "-i",
+                            &video_source,
+                            "-f",
+                            "lavfi",
+                            "-i",
+                            &audio_source,
+                            "-c:v",
+                            "libx264",
+                            "-preset",
+                            "veryfast",
+                            "-pix_fmt",
+                            "yuv420p",
+                            "-c:a",
+                            "aac",
+                            "-b:a",
+                            "128k",
+                            "-f",
+                            "flv",
+                            &destination,
+                        ])
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::piped())
+                        .output()
+                        .await;
+                    match output {
+                        Ok(output) if output.status.success() => {
+                            tracing::info!(
+                                name = %target.name,
+                                "Direct target test completed successfully"
+                            );
+                        }
+                        Ok(output) => {
+                            let detail = safe_ffmpeg_failure(
+                                &String::from_utf8_lossy(&output.stderr),
+                                &[target.stream_key.clone(), destination],
+                            );
+                            tracing::error!(
+                                name = %target.name,
+                                status = %output.status,
+                                %detail,
+                                "Direct target test failed"
+                            );
+                        }
+                        Err(error) => {
+                            tracing::error!(
+                                name = %target.name,
+                                %error,
+                                "Direct target test FFmpeg failed to start"
+                            );
+                        }
+                    }
+                });
+            }
+            while let Some(result) = tasks.join_next().await {
+                if let Err(error) = result {
+                    tracing::error!(%error, "Direct target test task failed");
+                }
+            }
+        });
+    }
+}
+
+impl Drop for RelayManager {
+    fn drop(&mut self) {
+        for relays in self.active_relays.get_mut().values_mut() {
+            for relay in relays {
+                let _ = relay.cancel.send(true);
+                relay.task.abort();
+            }
+        }
+    }
+}
+
+fn target_destination(target: &TargetConfig) -> String {
+    if target.stream_key.is_empty() {
+        target.url.clone()
+    } else if target.url.ends_with('/') {
+        format!("{}{}", target.url, target.stream_key)
+    } else {
+        format!("{}/{}", target.url, target.stream_key)
+    }
+}
+
+async fn supervise_relay(
+    metrics: Arc<Metrics>,
+    source_url: String,
+    target: TargetConfig,
+    mut cancel: watch::Receiver<bool>,
+) {
+    let bitrate = metrics.register_target(target.name.clone());
+    let destination = target_destination(&target);
+    let secrets = [
+        source_url.clone(),
+        destination.clone(),
+        target.stream_key.clone(),
+    ];
+    let mut retry_seconds = 1_u64;
+    let mut attempt = 0_u64;
+
+    loop {
+        if *cancel.borrow() {
+            break;
+        }
+        attempt += 1;
+        let started_at = tokio::time::Instant::now();
+        let child = tokio::process::Command::new("ffmpeg")
+            .args([
+                "-loglevel",
+                "warning",
+                "-stats_period",
+                "1",
+                "-progress",
+                "pipe:1",
+                "-i",
+                &source_url,
+                "-c",
+                "copy",
+                "-f",
+                "flv",
+                &destination,
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn();
+
+        let mut child = match child {
+            Ok(child) => child,
+            Err(error) => {
+                tracing::error!(name = %target.name, attempt, %error, "Failed to start target relay FFmpeg");
+                if wait_for_retry(&mut cancel, retry_seconds).await {
+                    break;
+                }
+                retry_seconds = (retry_seconds * 2).min(30);
+                continue;
+            }
+        };
+        tracing::info!(name = %target.name, attempt, "Stream target relay process started");
+
+        let stdout_task = child.stdout.take().map(|stdout| {
+            let bitrate = Arc::clone(&bitrate);
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stdout).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if let Some(value) = line.strip_prefix("bitrate=")
+                        && let Some(bps) = parse_ffmpeg_bitrate(value)
+                    {
+                        bitrate.update_from_ffmpeg(bps);
+                    }
+                }
+            })
+        });
+        let stderr_task = child.stderr.take().map(|stderr| {
+            let target_name = target.name.clone();
+            let secrets = secrets.clone();
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let detail = redact_secrets(&line, &secrets);
+                    if !detail.trim().is_empty() {
+                        tracing::warn!(name = %target_name, %detail, "Relay FFmpeg diagnostic");
+                    }
+                }
+            })
+        });
+
+        let exit = tokio::select! {
+            changed = cancel.changed() => {
+                let _ = child.kill().await;
+                let _ = changed;
+                None
+            }
+            result = child.wait() => Some(result),
+        };
+        bitrate.update_from_ffmpeg(0);
+        if let Some(task) = stdout_task {
+            let _ = task.await;
+        }
+        if let Some(task) = stderr_task {
+            let _ = task.await;
+        }
+
+        let Some(exit) = exit else {
+            break;
+        };
+        match exit {
+            Ok(status) => {
+                tracing::error!(name = %target.name, %status, "Stream target relay disconnected")
+            }
+            Err(error) => {
+                tracing::error!(name = %target.name, %error, "Failed while waiting for target relay")
+            }
+        }
+        if started_at.elapsed() >= Duration::from_secs(30) {
+            retry_seconds = 1;
+        }
+        tracing::warn!(name = %target.name, retry_seconds, "Target relay will reconnect");
+        if wait_for_retry(&mut cancel, retry_seconds).await {
+            break;
+        }
+        retry_seconds = (retry_seconds * 2).min(30);
+    }
+
+    metrics.unregister_target(&target.name);
+    tracing::info!(name = %target.name, "Stream target relay supervisor stopped");
+}
+
+async fn wait_for_retry(cancel: &mut watch::Receiver<bool>, seconds: u64) -> bool {
+    tokio::select! {
+        _ = tokio::time::sleep(Duration::from_secs(seconds)) => false,
+        _ = cancel.changed() => true,
+    }
+}
+
+pub fn parse_ffmpeg_bitrate(value: &str) -> Option<u64> {
+    let value = value.trim();
+    let number = value.strip_suffix("kbits/s")?.trim().parse::<f64>().ok()?;
+    number
+        .is_finite()
+        .then_some((number.max(0.0) * 1_000.0) as u64)
+}
+
+pub fn safe_ffmpeg_failure(stderr: &str, secrets: &[String]) -> String {
+    let detail = stderr.to_ascii_lowercase();
+    for (needle, message) in [
+        ("connection refused", "Connection refused by target"),
+        ("connection timed out", "Connection to target timed out"),
+        ("network is unreachable", "Target network is unreachable"),
+        (
+            "name or service not known",
+            "Target hostname could not be resolved",
+        ),
+        ("authentication", "Target rejected authentication"),
+        ("broken pipe", "Target closed the connection"),
+        ("server error", "Target returned a server error"),
+        ("unknown encoder", "Required FFmpeg encoder is unavailable"),
+    ] {
+        if detail.contains(needle) {
+            return message.to_owned();
+        }
+    }
+    let sanitized = redact_secrets(stderr, secrets)
+        .chars()
+        .filter(|character| !character.is_control() || matches!(character, '\n' | '\t'))
+        .collect::<String>();
+    let sanitized = sanitized.trim();
+    if sanitized.is_empty() {
+        return "FFmpeg exited without diagnostic output".to_owned();
+    }
+    let desired_start = sanitized.len().saturating_sub(2_000);
+    let start = sanitized
+        .char_indices()
+        .find(|(index, _)| *index >= desired_start)
+        .map_or(0, |(index, _)| index);
+    sanitized[start..].to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_ffmpeg_progress_bitrate() {
+        assert_eq!(parse_ffmpeg_bitrate(" 2450.5kbits/s"), Some(2_450_500));
+        assert_eq!(parse_ffmpeg_bitrate("N/A"), None);
+    }
+
+    #[test]
+    fn ffmpeg_failure_summary_does_not_echo_diagnostics() {
+        let stderr = "rtmp://example.test/app/private-key: Connection refused";
+        let secrets = vec!["private-key".to_owned()];
+        assert_eq!(
+            safe_ffmpeg_failure(stderr, &secrets),
+            "Connection refused by target"
+        );
+        assert!(!safe_ffmpeg_failure(stderr, &secrets).contains("private-key"));
+    }
+
+    #[test]
+    fn unknown_ffmpeg_failure_keeps_safe_diagnostic_text() {
+        let stderr =
+            "rtmp://example.test/app/private-key: Invalid data found when processing input";
+        let detail = safe_ffmpeg_failure(stderr, &["private-key".to_owned()]);
+        assert_eq!(
+            detail,
+            "[RTMP_URL_REDACTED] Invalid data found when processing input"
+        );
+    }
+}

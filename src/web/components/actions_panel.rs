@@ -1,3 +1,4 @@
+use crate::notifications::{NotificationDispatcher, NotificationTarget};
 use crate::server::state::ProxyState;
 use crate::web::components::ui::button::{ButtonVariant, button};
 use std::sync::Arc;
@@ -20,98 +21,13 @@ async fn start_test_stream(cx: &Cx) -> Result<String> {
         .cloned()
         .collect::<Vec<_>>();
     drop(config);
+
     if targets.is_empty() {
         return Ok("Enable at least one target before starting a test stream".to_owned());
     }
 
-    tokio::spawn(async move {
-        tracing::info!(
-            duration_secs,
-            target_count = targets.len(),
-            "Starting direct test stream to enabled targets"
-        );
-        let mut tasks = tokio::task::JoinSet::new();
-        for target in targets {
-            tasks.spawn(async move {
-                let destination = if target.stream_key.is_empty() {
-                    target.url.clone()
-                } else if target.url.ends_with('/') {
-                    format!("{}{}", target.url, target.stream_key)
-                } else {
-                    format!("{}/{}", target.url, target.stream_key)
-                };
-                let video_source = format!("testsrc=duration={duration_secs}:size=1280x720:rate=30");
-                let audio_source = format!("sine=frequency=1000:duration={duration_secs}");
-                let output = tokio::process::Command::new("ffmpeg")
-                    .args([
-                        "-hide_banner", "-loglevel", "warning", "-re", "-f", "lavfi", "-i",
-                        &video_source, "-f", "lavfi", "-i", &audio_source, "-c:v", "libx264",
-                        "-preset", "veryfast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a",
-                        "128k", "-f", "flv", &destination,
-                    ])
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::piped())
-                    .output()
-                    .await;
-                match output {
-                    Ok(output) if output.status.success() => {
-                        tracing::info!(name = %target.name, "Direct target test completed successfully");
-                    }
-                    Ok(output) => {
-                        let detail = safe_ffmpeg_failure(
-                            &String::from_utf8_lossy(&output.stderr),
-                            &[target.stream_key.clone(), destination],
-                        );
-                        tracing::error!(name = %target.name, status = %output.status, %detail, "Direct target test failed");
-                    }
-                    Err(error) => {
-                        tracing::error!(name = %target.name, %error, "Direct target test FFmpeg failed to start");
-                    }
-                }
-            });
-        }
-        while let Some(result) = tasks.join_next().await {
-            if let Err(error) = result {
-                tracing::error!(%error, "Direct target test task failed");
-            }
-        }
-    });
+    state.run_test_stream(duration_secs, targets);
     Ok(String::new())
-}
-
-fn safe_ffmpeg_failure(stderr: &str, secrets: &[String]) -> String {
-    let detail = stderr.to_ascii_lowercase();
-    for (needle, message) in [
-        ("connection refused", "Connection refused by target"),
-        ("connection timed out", "Connection to target timed out"),
-        ("network is unreachable", "Target network is unreachable"),
-        (
-            "name or service not known",
-            "Target hostname could not be resolved",
-        ),
-        ("authentication", "Target rejected authentication"),
-        ("broken pipe", "Target closed the connection"),
-        ("server error", "Target returned a server error"),
-        ("unknown encoder", "Required FFmpeg encoder is unavailable"),
-    ] {
-        if detail.contains(needle) {
-            return message.to_owned();
-        }
-    }
-    let sanitized = crate::server::state::redact_secrets(stderr, secrets)
-        .chars()
-        .filter(|character| !character.is_control() || matches!(character, '\n' | '\t'))
-        .collect::<String>();
-    let sanitized = sanitized.trim();
-    if sanitized.is_empty() {
-        return "FFmpeg exited without diagnostic output".to_owned();
-    }
-    let desired_start = sanitized.len().saturating_sub(2_000);
-    let start = sanitized
-        .char_indices()
-        .find(|(index, _)| *index >= desired_start)
-        .map_or(0, |(index, _)| index);
-    sanitized[start..].to_owned()
 }
 
 #[procedure]
@@ -122,13 +38,12 @@ async fn send_test_webhooks(cx: &Cx) -> Result<String> {
         .targets
         .iter()
         .filter(|target| target.enabled)
-        .map(crate::notifications::NotificationTarget::from)
+        .map(NotificationTarget::from)
         .collect::<Vec<_>>();
-    let dispatcher = crate::notifications::NotificationDispatcher::new(
-        &config.notifications,
-        state.http_client.clone(),
-    );
+    let dispatcher =
+        NotificationDispatcher::new(&config.notifications, state.http_client.clone());
     drop(config);
+
     tokio::spawn(async move {
         dispatcher.dispatch(&active_targets).await;
     });
@@ -195,32 +110,5 @@ pub async fn actions_panel() -> Result {
                 )
             </div>
         </div>
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::safe_ffmpeg_failure;
-
-    #[test]
-    fn ffmpeg_failure_summary_does_not_echo_diagnostics() {
-        let stderr = "rtmp://example.test/app/private-key: Connection refused";
-        let secrets = ["private-key".to_owned()];
-        assert_eq!(
-            safe_ffmpeg_failure(stderr, &secrets),
-            "Connection refused by target"
-        );
-        assert!(!safe_ffmpeg_failure(stderr, &secrets).contains("private-key"));
-    }
-
-    #[test]
-    fn unknown_ffmpeg_failure_keeps_safe_diagnostic_text() {
-        let stderr =
-            "rtmp://example.test/app/private-key: Invalid data found when processing input";
-        let detail = safe_ffmpeg_failure(stderr, &["private-key".to_owned()]);
-        assert_eq!(
-            detail,
-            "[RTMP_URL_REDACTED] Invalid data found when processing input"
-        );
     }
 }
