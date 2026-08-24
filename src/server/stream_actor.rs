@@ -106,16 +106,15 @@ impl StreamActor {
                 Ok(Some(status)) => {
                     tracing::error!(%status, "HLS preview process stopped unexpectedly");
                     stream.preview_failed = true;
-                    self.update_status();
                 }
                 Err(error) => {
                     tracing::error!(%error, "Failed to inspect HLS preview process");
                     stream.preview_failed = true;
-                    self.update_status();
                 }
                 _ => {}
             }
         }
+        self.update_status();
     }
 
     fn compute_status(&self) -> StreamStatus {
@@ -131,7 +130,9 @@ impl StreamActor {
 
     fn update_status(&mut self) {
         let status = self.compute_status();
-        self.status_tx.send_replace(status);
+        if *self.status_tx.borrow() != status {
+            self.status_tx.send_replace(status);
+        }
     }
 
     async fn handle_stage_stream(&mut self, stream_key: String) -> Result<()> {

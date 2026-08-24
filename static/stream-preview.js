@@ -1,9 +1,8 @@
 (() => {
   // Browser media and hls.js APIs are outside Topcoat's runtime vocabulary.
   const video = document.getElementById("stream-preview-video");
-  const errorMessage = document.getElementById("stream-preview-error");
   const statusRefresh = document.getElementById("stream-status-refresh");
-  if (!video || !errorMessage) return;
+  if (!video) return;
 
   let player = null;
   let previewAttached = false;
@@ -46,8 +45,7 @@
       });
       previewAttached = true;
     } else {
-      errorMessage.textContent = "This browser does not support HLS preview playback.";
-      errorMessage.hidden = false;
+      console.error("This browser does not support HLS preview playback.");
     }
   }
 

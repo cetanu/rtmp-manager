@@ -7,24 +7,14 @@ use topcoat::{
 };
 
 #[procedure]
-async fn publish_stream(cx: &Cx) -> Result<String> {
+async fn toggle_publishing(cx: &Cx, is_live: bool) -> Result<String> {
     let app: &AppHandle = app_context(cx);
-    Ok(app
-        .stream
-        .publish_staged_stream()
-        .await
-        .err()
-        .map(|error| error.to_string())
-        .unwrap_or_default())
-}
-
-#[procedure]
-async fn stop_stream(cx: &Cx) -> Result<String> {
-    let app: &AppHandle = app_context(cx);
-    Ok(app
-        .stream
-        .stop_publishing()
-        .await
+    let result = if is_live {
+        app.stream.stop_publishing().await
+    } else {
+        app.stream.publish_staged_stream().await
+    };
+    Ok(result
         .err()
         .map(|error| error.to_string())
         .unwrap_or_default())
@@ -57,11 +47,7 @@ pub async fn publishing_controls(cx: &Cx, revision: f64) -> Result {
                 :disabled=$(if pending.get() { true } else { !can_toggle.get() })
                 @click=$(async |_event: Event| {
                     pending.set(true);
-                    let error = if live.get() {
-                        stop_stream().await
-                    } else {
-                        publish_stream().await
-                    };
+                    let error = toggle_publishing(live.get()).await;
                     if error.is_empty() {
                         live.set(!live.get());
                     }
