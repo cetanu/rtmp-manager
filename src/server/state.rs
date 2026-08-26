@@ -59,4 +59,20 @@ impl AppHandle {
         let chat_settings = self.config.get().chat.clone();
         self.chat.apply_config(chat_settings).await
     }
+
+    pub async fn set_youtube_polling(&self, enabled: bool) -> Result<()> {
+        let (config, changed, _) = self.config.set_youtube_polling(enabled).await?;
+        if changed {
+            self.chat.set_youtube_polling(config.chat.clone()).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn set_x_polling(&self, enabled: bool) -> Result<()> {
+        let (config, changed, _) = self.config.set_x_polling(enabled).await?;
+        if changed {
+            self.chat.set_x_polling(config.chat.clone()).await?;
+        }
+        Ok(())
+    }
 }

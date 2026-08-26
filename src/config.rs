@@ -6,7 +6,7 @@ use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::watch;
+use tokio::sync::{Mutex, watch};
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Validate)]
 pub struct ServerSettings {
@@ -603,6 +603,7 @@ impl ConfigStore {
 pub struct ConfigHandle {
     store: ConfigStore,
     current: watch::Sender<Arc<AppConfig>>,
+    update_lock: Arc<Mutex<()>>,
 }
 
 impl ConfigHandle {
@@ -611,7 +612,14 @@ impl ConfigHandle {
         config.validate()?;
         let config_arc = Arc::new(config);
         let (current, _) = watch::channel(Arc::clone(&config_arc));
-        Ok((Self { store, current }, config_arc))
+        Ok((
+            Self {
+                store,
+                current,
+                update_lock: Arc::new(Mutex::new(())),
+            },
+            config_arc,
+        ))
     }
 
     /// Returns the current configuration snapshot with zero lock contention.
@@ -627,28 +635,36 @@ impl ConfigHandle {
     /// Merges form updates, validates, persists to SQLite, and broadcasts the updated config.
     /// Returns `(new_config, changed, chat_changed)`.
     pub async fn save_form(&self, form: ConfigForm) -> Result<(Arc<AppConfig>, bool, bool)> {
+        let _guard = self.update_lock.lock().await;
         let current_config = self.get();
         let updated = current_config.merge_form(form)?;
-        if let Err(error) = updated.validate() {
-            bail!(error);
-        }
-
-        let changed = updated != *current_config;
-        let chat_changed = updated.chat != current_config.chat;
-
-        if changed {
-            self.store.save(&updated).await?;
-            let new_arc = Arc::new(updated);
-            self.current.send_replace(Arc::clone(&new_arc));
-            Ok((new_arc, true, chat_changed))
-        } else {
-            Ok((current_config, false, false))
-        }
+        self.save_updated(current_config, updated).await
     }
 
-    /// Directly saves an updated configuration, persisting to SQLite and broadcasting to all subscribers.
-    pub async fn save(&self, updated: AppConfig) -> Result<(Arc<AppConfig>, bool, bool)> {
+    pub async fn set_youtube_polling(
+        &self,
+        enabled: bool,
+    ) -> Result<(Arc<AppConfig>, bool, bool)> {
+        let _guard = self.update_lock.lock().await;
         let current_config = self.get();
+        let mut updated = (*current_config).clone();
+        updated.chat.youtube_polling_enabled = enabled;
+        self.save_updated(current_config, updated).await
+    }
+
+    pub async fn set_x_polling(&self, enabled: bool) -> Result<(Arc<AppConfig>, bool, bool)> {
+        let _guard = self.update_lock.lock().await;
+        let current_config = self.get();
+        let mut updated = (*current_config).clone();
+        updated.chat.x_polling_enabled = enabled;
+        self.save_updated(current_config, updated).await
+    }
+
+    async fn save_updated(
+        &self,
+        current_config: Arc<AppConfig>,
+        updated: AppConfig,
+    ) -> Result<(Arc<AppConfig>, bool, bool)> {
         if let Err(error) = updated.validate() {
             bail!(error);
         }
@@ -668,19 +684,10 @@ impl ConfigHandle {
 
     /// Parses imported JSON configuration, persists it, and broadcasts the new config.
     pub async fn import(&self, body: &[u8]) -> Result<(Arc<AppConfig>, bool, bool)> {
+        let _guard = self.update_lock.lock().await;
         let imported = AppConfig::parse_imported(body)?;
         let current_config = self.get();
-        let changed = imported != *current_config;
-        let chat_changed = imported.chat != current_config.chat;
-
-        if changed {
-            self.store.save(&imported).await?;
-            let new_arc = Arc::new(imported);
-            self.current.send_replace(Arc::clone(&new_arc));
-            Ok((new_arc, true, chat_changed))
-        } else {
-            Ok((current_config, false, false))
-        }
+        self.save_updated(current_config, imported).await
     }
 
     pub fn path(&self) -> &Path {
@@ -823,6 +830,35 @@ mod tests {
         rx.changed().await.unwrap();
         assert_eq!(rx.borrow().server.test_stream_duration_secs, 42);
         assert_eq!(handle.get().server.test_stream_duration_secs, 42);
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn concurrent_polling_updates_do_not_overwrite_each_other() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("rtmp-proxy-polling-{unique}"));
+        fs::create_dir(&directory).unwrap();
+        let database_path = directory.join("config.sqlite3");
+        let (handle, _) = ConfigHandle::open(&database_path).await.unwrap();
+
+        let youtube = {
+            let handle = handle.clone();
+            tokio::spawn(async move { handle.set_youtube_polling(true).await.unwrap() })
+        };
+        let x = {
+            let handle = handle.clone();
+            tokio::spawn(async move { handle.set_x_polling(true).await.unwrap() })
+        };
+        youtube.await.unwrap();
+        x.await.unwrap();
+
+        let config = handle.get();
+        assert!(config.chat.youtube_polling_enabled);
+        assert!(config.chat.x_polling_enabled);
 
         fs::remove_dir_all(directory).unwrap();
     }

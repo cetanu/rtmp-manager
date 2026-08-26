@@ -25,25 +25,25 @@ async fn refresh_chat(cx: &Cx) -> Result<String> {
 }
 
 #[procedure]
-async fn toggle_youtube_polling(cx: &Cx) -> Result<String> {
+async fn set_youtube_polling(cx: &Cx, enabled: bool) -> Result<String> {
     let app: &AppHandle = app_context(cx);
-    let mut updated = (*app.config.get()).clone();
-    updated.chat.youtube_polling_enabled = !updated.chat.youtube_polling_enabled;
-    let enabled = updated.chat.youtube_polling_enabled;
-    app.config.save(updated).await?;
-    app.apply_chat_config().await?;
-    Ok(if enabled { "on" } else { "off" }.into())
+    Ok(app
+        .set_youtube_polling(enabled)
+        .await
+        .err()
+        .map(|error| error.to_string())
+        .unwrap_or_default())
 }
 
 #[procedure]
-async fn toggle_x_polling(cx: &Cx) -> Result<String> {
+async fn set_x_polling(cx: &Cx, enabled: bool) -> Result<String> {
     let app: &AppHandle = app_context(cx);
-    let mut updated = (*app.config.get()).clone();
-    updated.chat.x_polling_enabled = !updated.chat.x_polling_enabled;
-    let enabled = updated.chat.x_polling_enabled;
-    app.config.save(updated).await?;
-    app.apply_chat_config().await?;
-    Ok(if enabled { "on" } else { "off" }.into())
+    Ok(app
+        .set_x_polling(enabled)
+        .await
+        .err()
+        .map(|error| error.to_string())
+        .unwrap_or_default())
 }
 
 fn first_message_id(snapshot: &crate::chat::ChatInboxSnapshot) -> String {
@@ -84,6 +84,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
         signal youtube_toggle_pending = false;
         signal x_polling_enabled = chat.x_polling_enabled;
         signal x_toggle_pending = false;
+        signal polling_error = String::new();
 
         card(
             attrs: attributes! { class="mb-8" },
@@ -92,51 +93,62 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
                 attrs: attributes! { class="justify-between" },
                 <div class="flex items-center gap-4">
                     if youtube_configured {
-                        <label class="flex cursor-pointer items-center gap-2 text-xs font-medium text-muted-foreground has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50">
-                            <span class="relative inline-flex shrink-0 has-[:disabled]:opacity-50">
-                                <input
-                                    type="checkbox"
+                        <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                                <button
+                                    type="button"
                                     role="switch"
                                     aria-label="Toggle YouTube polling"
-                                    class="peer h-4.5 w-8 shrink-0 appearance-none rounded-full bg-foreground/20 shadow-xs transition-colors outline-none checked:bg-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none"
-                                    :checked=$(youtube_polling_enabled.get())
+                                    class="group relative inline-flex h-4.5 w-8 shrink-0 rounded-full bg-foreground/20 shadow-xs transition-colors outline-none data-[checked]:bg-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50"
+                                    :aria-checked=$(if youtube_polling_enabled.get() { "true" } else { "false" })
+                                    :data-checked=$(youtube_polling_enabled.get())
                                     :disabled=$(youtube_toggle_pending.get())
                                     @click=$(async |_event| {
+                                        let enabled = !youtube_polling_enabled.get();
+                                        youtube_polling_enabled.set(enabled);
                                         youtube_toggle_pending.set(true);
-                                        let state = toggle_youtube_polling().await;
-                                        youtube_polling_enabled.set(state == "on");
-                                        revision.set(revision.get() + 1.0);
+                                        let error = set_youtube_polling(enabled).await;
+                                        if !error.is_empty() {
+                                            youtube_polling_enabled.set(!enabled);
+                                        }
+                                        polling_error.set(error);
                                         youtube_toggle_pending.set(false);
                                     })
-                                />
-                                <span class="pointer-events-none absolute top-1/2 left-0.5 size-3.5 -translate-y-1/2 rounded-full bg-background shadow-xs transition-transform peer-checked:translate-x-3.5"></span>
-                            </span>
-                            "YouTube polling"
-                        </label>
+                                >
+                                    <span class="pointer-events-none absolute top-1/2 left-0.5 size-3.5 -translate-y-1/2 rounded-full bg-background shadow-xs transition-transform group-data-[checked]:translate-x-3.5"></span>
+                                </button>
+                            <span>"YouTube polling"</span>
+                        </div>
                     }
                     if x_configured {
-                        <label class="flex cursor-pointer items-center gap-2 text-xs font-medium text-muted-foreground has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50">
-                            <span class="relative inline-flex shrink-0 has-[:disabled]:opacity-50">
-                                <input
-                                    type="checkbox"
+                        <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                                <button
+                                    type="button"
                                     role="switch"
                                     aria-label="Toggle X polling"
-                                    class="peer h-4.5 w-8 shrink-0 appearance-none rounded-full bg-foreground/20 shadow-xs transition-colors outline-none checked:bg-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none"
-                                    :checked=$(x_polling_enabled.get())
+                                    class="group relative inline-flex h-4.5 w-8 shrink-0 rounded-full bg-foreground/20 shadow-xs transition-colors outline-none data-[checked]:bg-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50"
+                                    :aria-checked=$(if x_polling_enabled.get() { "true" } else { "false" })
+                                    :data-checked=$(x_polling_enabled.get())
                                     :disabled=$(x_toggle_pending.get())
                                     @click=$(async |_event| {
+                                        let enabled = !x_polling_enabled.get();
+                                        x_polling_enabled.set(enabled);
                                         x_toggle_pending.set(true);
-                                        let state = toggle_x_polling().await;
-                                        x_polling_enabled.set(state == "on");
-                                        revision.set(revision.get() + 1.0);
+                                        let error = set_x_polling(enabled).await;
+                                        if !error.is_empty() {
+                                            x_polling_enabled.set(!enabled);
+                                        }
+                                        polling_error.set(error);
                                         x_toggle_pending.set(false);
                                     })
-                                />
-                                <span class="pointer-events-none absolute top-1/2 left-0.5 size-3.5 -translate-y-1/2 rounded-full bg-background shadow-xs transition-transform peer-checked:translate-x-3.5"></span>
-                            </span>
-                            "X polling"
-                        </label>
+                                >
+                                    <span class="pointer-events-none absolute top-1/2 left-0.5 size-3.5 -translate-y-1/2 rounded-full bg-background shadow-xs transition-transform group-data-[checked]:translate-x-3.5"></span>
+                                </button>
+                            <span>"X polling"</span>
+                        </div>
                     }
+                    <p :hidden=$(polling_error.get().is_empty()) class="text-xs text-destructive">
+                        $(polling_error.get())
+                    </p>
                 </div>
                 <div class="ml-auto flex items-center gap-2">
                     <button
