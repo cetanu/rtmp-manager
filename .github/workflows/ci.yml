@@ -156,7 +156,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.release.outputs.tag || github.event.inputs.release_tag }}
-        run: gh release edit "$RELEASE_TAG" --draft=false
+          REPOSITORY: ${{ github.repository }}
+        run: gh release edit "$RELEASE_TAG" --repo "$REPOSITORY" --draft=false
 
   reconcile-deployment:
     name: Trigger deployment reconciliation
