@@ -1,10 +1,11 @@
 [package]
 name = "rtmp-proxy"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 rust-version = "1.95"
 authors = ["Vasilios Syrakis <syrakis@pm.me>"]
 description = "Self-hosted RTMP multiplexer and management dashboard"
+repository = "https://github.com/cetanu/rtmp-manager"
 
 [dependencies]
 tokio = { version = "1.38", features = ["full"] }
