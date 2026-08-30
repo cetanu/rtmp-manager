@@ -21,6 +21,7 @@ pub async fn app_navigation(active_page: &'static str) -> Result {
             <div class="mx-auto flex max-w-7xl items-center gap-2 px-3 py-2 sm:px-4">
                 <a href="/preview" data-app-link="preview" class="shrink-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     <span class="text-sm font-semibold leading-tight">"RTMP"<span class="hidden sm:inline">" Manager"</span></span>
+                    <span class="ml-1 text-xs font-medium text-muted-foreground">(concat!("v", env!("CARGO_PKG_VERSION")))</span>
                 </a>
                 <nav aria-label="Primary navigation" class="-mx-1 flex flex-1 gap-1 overflow-x-auto px-1">
                     <a
