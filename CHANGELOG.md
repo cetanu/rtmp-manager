@@ -6,3 +6,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.3.2](https://github.com/cetanu/rtmp-manager/releases/tag/v0.3.2) - 2026-08-30
+
+### Added
+
+- rework YouTube chat polling
+
+### Fixed
+
+- *(deps)* update h2 security patch
+- *(ci)* run cargo audit without lock flag
+- fix chat polling toggle buttons
+- fix publishing/hls preview
+- fix test stream button
+- fix caddy config
+- fix paths
+
+### Other
+
+- align package version with release tag
+- automate releases with release-plz
+- more refactor. destruction of the shitty arc mutex spam
+- refactor
+- remove "empty_state" box
+- bump
+- the great deslopification
+- Release v0.1.19
+- Redesign chat inbox queue
+- remove caddy
+- support X live chat
+- Add YouTube chat polling toggle
+- tokio toasty and serde valid instead of raw sqlite
+- lints and cleanup
+- better diagnostics from ffmpeg errors
+- hide keys from logs, test streams bypass publish lifecycle
+- update config
+- lints
+- allow viewing and editing secrets but hide by default
+- metrics page with charts
+- add logs page
+- split up salt states
+- split up web app into pages
+- manage ffmpeg install
+- optimize binary size
+- add websockets for chat and preview
+- upgrade toolchain
+- lock down the stream key
+- add stream preview before publishing to targets
+- ensure bundle assets are included and installed
+- add environment pillar dummy
+- trigger deployments after release upload
+- add json config
+- add encrypted Git pillar contract
+- initial rtmp-manager application
