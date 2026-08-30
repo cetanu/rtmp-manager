@@ -1887,6 +1887,7 @@ dependencies = [
  "clap",
  "futures-util",
  "hmac",
+ "regex",
  "reqwest",
  "rtmp-rs",
  "serde",

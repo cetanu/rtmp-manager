@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use serde_valid::Validate;
 use std::path::Path;
 use std::time::Duration;
+use toasty::Executor;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
-use toasty::Executor;
 
 pub mod twitch;
 pub mod x;
@@ -431,7 +431,11 @@ impl ChatActor {
         self.revision_tx.send_replace(self.revision);
     }
 
-    async fn handle_apply_config(&mut self, chat: &ChatSettings, handle: &ChatHandle) -> Result<()> {
+    async fn handle_apply_config(
+        &mut self,
+        chat: &ChatSettings,
+        handle: &ChatHandle,
+    ) -> Result<()> {
         self.inbox.resize(chat.queue_capacity).await?;
 
         if let Some(task) = self.twitch_task.take() {
@@ -492,15 +496,6 @@ impl ChatActor {
         self.youtube_status = None;
         self.youtube_status_tx.send_replace(None);
 
-        let Some(api_key) = chat
-            .youtube_api_key
-            .as_ref()
-            .filter(|value| !value.trim().is_empty())
-            .cloned()
-        else {
-            return;
-        };
-
         let target = chat
             .youtube_live_chat_id
             .as_ref()
@@ -544,7 +539,6 @@ impl ChatActor {
             self.http_client.clone(),
             handle_clone,
             YouTubeChatConfig {
-                api_key,
                 target,
                 min_poll_interval: Duration::from_secs(chat.youtube_min_poll_interval_secs),
                 adaptive_polling: chat.youtube_adaptive_polling,
@@ -618,7 +612,8 @@ impl ChatHandle {
             })
             .await
             .map_err(|_| anyhow::anyhow!("Chat actor stopped"))?;
-        rx.await.context("Chat actor dropped acknowledge response")?
+        rx.await
+            .context("Chat actor dropped acknowledge response")?
     }
 
     pub async fn snapshot(&self) -> Result<ChatInboxSnapshot> {
@@ -639,7 +634,8 @@ impl ChatHandle {
             })
             .await
             .map_err(|_| anyhow::anyhow!("Chat actor stopped"))?;
-        rx.await.context("Chat actor dropped apply_config response")?
+        rx.await
+            .context("Chat actor dropped apply_config response")?
     }
 
     pub async fn set_youtube_polling(&self, config: ChatSettings) -> Result<()> {
@@ -664,7 +660,8 @@ impl ChatHandle {
             })
             .await
             .map_err(|_| anyhow::anyhow!("Chat actor stopped"))?;
-        rx.await.context("Chat actor dropped set_x_polling response")
+        rx.await
+            .context("Chat actor dropped set_x_polling response")
     }
 
     pub fn update_youtube_status(

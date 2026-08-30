@@ -38,8 +38,7 @@ async fn send_test_webhooks(cx: &Cx) -> Result<String> {
         .filter(|target| target.enabled)
         .map(NotificationTarget::from)
         .collect::<Vec<_>>();
-    let dispatcher =
-        NotificationDispatcher::new(&config.notifications, app.http_client.clone());
+    let dispatcher = NotificationDispatcher::new(&config.notifications, app.http_client.clone());
 
     tokio::spawn(async move {
         dispatcher.dispatch(&active_targets).await;

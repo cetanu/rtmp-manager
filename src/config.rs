@@ -226,15 +226,6 @@ impl AppConfig {
         if youtube_selectors > 1 {
             bail!("Configure only one of YouTube live chat ID, video ID, or channel ID");
         }
-        if youtube_selectors > 0
-            && self
-                .chat
-                .youtube_api_key
-                .as_ref()
-                .is_none_or(|key| key.trim().is_empty())
-        {
-            bail!("A YouTube API key is required when a YouTube chat selector is configured");
-        }
         for target in &self.targets {
             if target.enabled {
                 let url = target.url.trim();
@@ -259,7 +250,11 @@ impl AppConfig {
         if let Some(server) = form.server {
             config.server = ServerSettings {
                 listen: parse_address(server.listen, config.server.listen, "RTMP listen")?,
-                api_listen: parse_address(server.api_listen, config.server.api_listen, "API listen")?,
+                api_listen: parse_address(
+                    server.api_listen,
+                    config.server.api_listen,
+                    "API listen",
+                )?,
                 test_stream_duration_secs: server
                     .test_stream_duration_secs
                     .unwrap_or(config.server.test_stream_duration_secs),
@@ -641,10 +636,7 @@ impl ConfigHandle {
         self.save_updated(current_config, updated).await
     }
 
-    pub async fn set_youtube_polling(
-        &self,
-        enabled: bool,
-    ) -> Result<(Arc<AppConfig>, bool, bool)> {
+    pub async fn set_youtube_polling(&self, enabled: bool) -> Result<(Arc<AppConfig>, bool, bool)> {
         let _guard = self.update_lock.lock().await;
         let current_config = self.get();
         let mut updated = (*current_config).clone();

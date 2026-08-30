@@ -38,7 +38,7 @@ pub async fn chat_settings(cx: &Cx) -> Result {
                         clearable_secret_field(
                             control_id: "youtube_api_key",
                             name: "chat[youtube_api_key]",
-                            label_text: "YouTube API key",
+                            label_text: "YouTube API key (optional)",
                             empty_placeholder: "Not configured",
                             value: chat.youtube_api_key.clone().unwrap_or_default()
                         )
@@ -63,7 +63,7 @@ pub async fn chat_settings(cx: &Cx) -> Result {
                             )
                             form_field(
                                 control_id: "youtube_channel_id",
-                                label_text: "YouTube channel ID",
+                                label_text: "YouTube channel handle or ID",
                                 input(attrs: attributes! {
                                     id="youtube_channel_id"
                                     name="chat[youtube_channel_id]"

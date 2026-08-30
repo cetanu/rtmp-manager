@@ -375,10 +375,13 @@ impl StreamHandle {
     }
 
     pub async fn end_stream(&self, stream_key: &str) {
-        let _ = self.sender.send(StreamCommand::EndStream {
-            stream_key: stream_key.to_string(),
-            respond_to: None,
-        }).await;
+        let _ = self
+            .sender
+            .send(StreamCommand::EndStream {
+                stream_key: stream_key.to_string(),
+                respond_to: None,
+            })
+            .await;
     }
 
     pub fn run_test_stream(&self, duration_secs: u64, targets: Vec<TargetConfig>) {

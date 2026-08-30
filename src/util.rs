@@ -100,7 +100,10 @@ mod tests {
     #[test]
     fn non_empty_filters_blank_strings() {
         assert_eq!(non_empty(Some("  ".to_string())), None);
-        assert_eq!(non_empty(Some("hello".to_string())), Some("hello".to_string()));
+        assert_eq!(
+            non_empty(Some("hello".to_string())),
+            Some("hello".to_string())
+        );
         assert_eq!(non_empty(None), None);
     }
 }

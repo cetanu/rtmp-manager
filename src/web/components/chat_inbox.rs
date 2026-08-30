@@ -59,17 +59,13 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
     let app: &AppHandle = app_context(cx);
     let initial_id = first_message_id(&app.chat.snapshot().await?);
     let chat = app.config.get().chat.clone();
-    let youtube_configured = chat
-        .youtube_api_key
-        .as_ref()
-        .is_some_and(|value| !value.trim().is_empty())
-        && [
-            chat.youtube_live_chat_id,
-            chat.youtube_video_id,
-            chat.youtube_channel_id,
-        ]
-        .into_iter()
-        .any(|value| value.is_some_and(|value| !value.trim().is_empty()));
+    let youtube_configured = [
+        &chat.youtube_live_chat_id,
+        &chat.youtube_video_id,
+        &chat.youtube_channel_id,
+    ]
+    .into_iter()
+    .any(|value| value.as_ref().is_some_and(|value| !value.trim().is_empty()));
     let x_configured = chat
         .x_media_key
         .as_ref()
