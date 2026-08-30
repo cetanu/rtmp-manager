@@ -1,0 +1,210 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing draft release tag to build, publish, and deploy
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions: {}
+
+jobs:
+  commitlint:
+    name: Lint commit messages
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check pull-request commits
+        if: github.event_name == 'pull_request'
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check pushed commits
+        if: github.event_name == 'push'
+        uses: webiny/action-conventional-commits@v1.3.0
+
+  audit:
+    name: Audit dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@cargo-audit
+      - run: cargo audit --locked
+
+  check:
+    name: Check, lint, and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-targets --all-features --locked
+
+  release:
+    name: Create draft release
+    needs: [commitlint, audit, check]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - id: release-plz
+        uses: release-plz/action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Get released tag
+        id: release
+        env:
+          RELEASES: ${{ steps.release-plz.outputs.releases }}
+        run: |
+          tag="$(jq -r '.[0].tag // empty' <<< "$RELEASES")"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  release-pr:
+    name: Prepare release pull request
+    needs: [commitlint, audit, check]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  upload-binary:
+    name: Upload Linux binary
+    needs: release
+    if: always() && (needs.release.outputs.tag != '' || github.event.inputs.release_tag != '')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.release.outputs.tag || github.event.inputs.release_tag }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install --yes musl-tools
+      - name: Build static release binary
+        run: cargo build --locked --release --target x86_64-unknown-linux-musl --bin rtmp-proxy
+      - name: Package release asset
+        run: |
+          cp target/x86_64-unknown-linux-musl/release/rtmp-proxy rtmp-proxy
+          sha256sum rtmp-proxy > rtmp-proxy.sha256
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.release.outputs.tag || github.event.inputs.release_tag }}
+        run: gh release upload "$RELEASE_TAG" rtmp-proxy rtmp-proxy.sha256 --clobber
+
+  publish-release:
+    name: Publish GitHub release
+    needs: [release, upload-binary]
+    if: always() && needs.upload-binary.result == 'success' && (needs.release.outputs.tag != '' || github.event.inputs.release_tag != '')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.release.outputs.tag || github.event.inputs.release_tag }}
+        run: gh release edit "$RELEASE_TAG" --draft=false
+
+  reconcile-deployment:
+    name: Trigger deployment reconciliation
+    needs: [release, publish-release]
+    if: always() && needs.publish-release.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify deployment service
+        env:
+          DEPLOYMENT_WEBHOOK_URL: ${{ secrets.DEPLOYMENT_WEBHOOK_URL }}
+          DEPLOYMENT_WEBHOOK_SECRET: ${{ secrets.DEPLOYMENT_WEBHOOK_SECRET }}
+          RELEASE_TAG: ${{ needs.release.outputs.tag || github.event.inputs.release_tag }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import hmac
+          import json
+          import os
+          import urllib.request
+
+          payload = json.dumps(
+              {
+                  "action": "published",
+                  "release": {"tag_name": os.environ["RELEASE_TAG"]},
+                  "repository": {"id": int(os.environ["REPOSITORY_ID"])},
+              },
+              separators=(",", ":"),
+          ).encode()
+          signature = hmac.new(
+              os.environ["DEPLOYMENT_WEBHOOK_SECRET"].encode(),
+              payload,
+              hashlib.sha256,
+          ).hexdigest()
+          request = urllib.request.Request(
+              os.environ["DEPLOYMENT_WEBHOOK_URL"],
+              data=payload,
+              headers={
+                  "Content-Type": "application/json",
+                  "User-Agent": "rtmp-manager-release-workflow",
+                  "X-GitHub-Event": "release",
+                  "X-Hub-Signature-256": f"sha256={signature}",
+              },
+              method="POST",
+          )
+          with urllib.request.urlopen(request, timeout=15) as response:
+              if response.status != 202:
+                  raise RuntimeError(
+                      f"deployment webhook returned HTTP {response.status}, expected 202"
+                  )
+          PY

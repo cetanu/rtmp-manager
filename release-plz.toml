@@ -1,0 +1,9 @@
+[workspace]
+# The release PR is the single source of truth for the package version and tag.
+git_tag_enable = true
+
+# A release is only public after its binary and checksum are attached.
+git_release_draft = true
+
+# This application is distributed through GitHub releases, not crates.io.
+publish = false
