@@ -45,7 +45,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: taiki-e/install-action@cargo-audit
-      - run: cargo audit --locked
+      - run: cargo audit
 
   check:
     name: Check, lint, and test
