@@ -1,7 +1,7 @@
 use crate::config::ConfigForm;
 use crate::server::state::{AppHandle, StreamStatus};
 use futures_util::StreamExt;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use topcoat::asset::{AssetBundle, RouterBuilderAssetExt};
@@ -16,7 +16,7 @@ use topcoat::{
             sse::{Event as SseEvent, KeepAlive, Sse},
         },
         error::{bad_request, internal_server_error, not_found},
-        page, route,
+        page, parse_query_params, route,
     },
     view::{component, view},
 };
@@ -459,4 +459,34 @@ async fn receive_webhook(
         .webhooks
         .send(crate::server::state::WebhookEvent { headers, body });
     topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
+}
+
+#[derive(Deserialize)]
+struct WebhookCrcQuery {
+    crc_token: String,
+}
+
+#[derive(Serialize)]
+struct WebhookCrcResponse {
+    response_token: String,
+}
+
+#[route(GET "/api/webhook")]
+async fn verify_webhook_crc(cx: &Cx) -> Result<topcoat::router::Response> {
+    let query: WebhookCrcQuery =
+        parse_query_params(cx).map_err(|_| bad_request("Missing crc_token"))?;
+    if query.crc_token.is_empty() {
+        return Err(bad_request("Missing crc_token").into());
+    }
+    let app: &AppHandle = app_context(cx);
+    let config = app.config.get();
+    let secret = config
+        .chat
+        .x_api_secret
+        .as_deref()
+        .filter(|secret| !secret.is_empty())
+        .ok_or_else(|| bad_request("X API secret key is not configured"))?;
+    let response_token =
+        crate::chat::x::response_token(&query.crc_token, secret).map_err(internal_server_error)?;
+    topcoat::router::IntoResponse::into_response(Json(WebhookCrcResponse { response_token }), cx)
 }

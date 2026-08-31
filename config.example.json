@@ -19,8 +19,11 @@
     "youtube_min_poll_interval_secs": 5,
     "youtube_adaptive_polling": true,
     "youtube_polling_enabled": false,
-    "x_media_key": "",
-    "x_polling_enabled": false,
+    "x_api_key": "",
+    "x_api_secret": "",
+    "x_client_id": "",
+    "x_client_secret": "",
+    "x_webhook_enabled": false,
     "kick_webhook_enabled": false
   },
   "notifications": {

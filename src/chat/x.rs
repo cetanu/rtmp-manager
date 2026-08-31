@@ -1,341 +1,191 @@
 use crate::chat::{ChatHandle, IncomingChatMessage};
+use crate::config::{AppConfig, ChatSettings};
+use crate::server::state::WebhookEvent;
 use anyhow::{Context, Result, bail};
-use reqwest::{Client, Response, StatusCode};
-use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use base64::{Engine, engine::general_purpose::STANDARD};
+use hmac::{Hmac, Mac};
+use serde::Deserialize;
+use sha2::Sha256;
+use std::sync::Arc;
+use tokio::sync::{broadcast, watch};
 
-const PUBLIC_BEARER_TOKEN: &str = "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
-const GUEST_ACTIVATE_URL: &str = "https://api.twitter.com/1.1/guest/activate.json";
-const BROADCAST_STATUS_URL: &str = "https://twitter.com/i/api/1.1/live_video_stream/status/";
-const ACCESS_CHAT_URL: &str = "https://proxsee.pscp.tv/api/v2/accessChatPublic";
-const HISTORY_PATH: &str = "/chatapi/v1/history";
-const POLL_INTERVAL: Duration = Duration::from_secs(3);
-const INITIAL_RETRY_DELAY: Duration = Duration::from_secs(2);
-const MAX_RETRY_DELAY: Duration = Duration::from_secs(60);
+type HmacSha256 = Hmac<Sha256>;
 
-#[derive(Debug, Clone)]
-pub struct XChatConfig {
-    pub media_key: String,
+#[derive(Debug, Deserialize)]
+struct XEvent {
+    data: XEventData,
 }
 
 #[derive(Debug, Deserialize)]
-struct GuestTokenResponse {
-    guest_token: String,
+struct XEventData {
+    event_uuid: String,
+    event_type: String,
+    payload: XChatPayload,
 }
 
 #[derive(Debug, Deserialize)]
-struct BroadcastStatusResponse {
-    #[serde(rename = "chatToken")]
-    chat_token: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct AccessChatRequest<'a> {
-    chat_token: &'a str,
+struct XChatPayload {
+    message_id: String,
+    message: String,
+    author: XAuthor,
 }
 
 #[derive(Debug, Deserialize)]
-struct AccessChatResponse {
-    access_token: String,
-    endpoint: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-struct ChatSession {
-    access_token: String,
-    endpoint_url: String,
-}
-
-#[derive(Debug, Serialize)]
-struct HistoryRequest<'a> {
-    access_token: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cursor: Option<&'a str>,
+struct XAuthor {
+    data: XAuthorData,
 }
 
 #[derive(Debug, Deserialize)]
-struct HistoryResponse {
-    #[serde(default)]
-    messages: Vec<HistoryMessage>,
-    #[serde(default)]
-    cursor: Option<String>,
+struct XAuthorData {
+    username: String,
+    profile_image_url: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct HistoryMessage {
-    payload: String,
+pub fn response_token(crc_token: &str, consumer_secret: &str) -> Result<String> {
+    let mut mac = HmacSha256::new_from_slice(consumer_secret.as_bytes())
+        .context("X API secret key is invalid")?;
+    mac.update(crc_token.as_bytes());
+    Ok(format!(
+        "sha256={}",
+        STANDARD.encode(mac.finalize().into_bytes())
+    ))
 }
 
-#[derive(Debug, Deserialize)]
-struct InnerPayload {
-    #[serde(default)]
-    kind: u8,
-    #[serde(default)]
-    body: String,
-    #[serde(default)]
-    id: Option<String>,
-    #[serde(default)]
-    username: Option<String>,
-    #[serde(default)]
-    user_name: Option<String>,
-    #[serde(default)]
-    screen_name: Option<String>,
+pub fn verify_webhook(body: &[u8], signature: &str, consumer_secret: &str) -> Result<()> {
+    let encoded = signature
+        .strip_prefix("sha256=")
+        .context("X webhook signature must start with sha256=")?;
+    let signature = STANDARD
+        .decode(encoded)
+        .context("X webhook signature is not valid base64")?;
+    let mut mac = HmacSha256::new_from_slice(consumer_secret.as_bytes())
+        .context("X API secret key is invalid")?;
+    mac.update(body);
+    mac.verify_slice(&signature)
+        .map_err(|_| anyhow::anyhow!("X webhook signature verification failed"))
 }
 
-impl InnerPayload {
-    fn author(&self) -> String {
-        self.username
-            .as_deref()
-            .or(self.user_name.as_deref())
-            .or(self.screen_name.as_deref())
-            .filter(|author| !author.trim().is_empty())
-            .unwrap_or("X viewer")
-            .to_owned()
+pub fn parse_chat_event(body: &[u8]) -> Result<Option<IncomingChatMessage>> {
+    let event: XEvent = serde_json::from_slice(body).context("Invalid X activity event")?;
+    if event.data.event_type != "broadcast.chat" {
+        return Ok(None);
     }
+    if event.data.event_uuid.trim().is_empty()
+        || event.data.payload.message_id.trim().is_empty()
+        || event.data.payload.message.trim().is_empty()
+    {
+        bail!("X broadcast.chat event is missing an event UUID, message ID, or message");
+    }
+    Ok(Some(IncomingChatMessage {
+        source: "x".into(),
+        external_id: event.data.payload.message_id,
+        author: event.data.payload.author.data.username,
+        text: event.data.payload.message,
+        avatar_url: event.data.payload.author.data.profile_image_url,
+        sent_at: None,
+    }))
 }
 
-pub async fn run(client: Client, chat: ChatHandle, config: XChatConfig) {
-    let mut session = None;
-    let mut cursor = Some(String::new());
-    let mut retry_delay = INITIAL_RETRY_DELAY;
+fn process_event(
+    config: &ChatSettings,
+    event: &WebhookEvent,
+) -> Result<Option<IncomingChatMessage>> {
+    if !config.x_webhook_enabled {
+        return Ok(None);
+    }
+    let secret = config
+        .x_api_secret
+        .as_deref()
+        .filter(|secret| !secret.is_empty())
+        .context("X webhook is enabled without an API secret key")?;
+    let signature = event
+        .header("x-twitter-webhooks-signature")
+        .context("X webhook is missing its signature")?;
+    verify_webhook(&event.body, signature, secret)?;
+    parse_chat_event(&event.body)
+}
 
+pub async fn run(
+    mut webhooks: broadcast::Receiver<WebhookEvent>,
+    config: watch::Receiver<Arc<AppConfig>>,
+    chat: ChatHandle,
+) {
     loop {
-        if session.is_none() {
-            match bootstrap_chat(&client, &config.media_key).await {
-                Ok(new_session) => {
-                    tracing::info!("X live chat session bootstrapped");
-                    session = Some(new_session);
-                    cursor = Some(String::new());
-                    retry_delay = INITIAL_RETRY_DELAY;
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        "X live chat bootstrap failed: {error:#}. Retrying in {} seconds",
-                        retry_delay.as_secs()
-                    );
-                    tokio::time::sleep(retry_delay).await;
-                    retry_delay = (retry_delay * 2).min(MAX_RETRY_DELAY);
-                    continue;
+        match webhooks.recv().await {
+            Ok(event) => {
+                let settings = config.borrow().chat.clone();
+                match process_event(&settings, &event) {
+                    Ok(Some(message)) => {
+                        if let Err(error) = chat.enqueue(message).await {
+                            tracing::warn!("Discarding X chat event: {error:#}");
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => tracing::warn!("Rejected X webhook: {error:#}"),
                 }
             }
-        }
-
-        let current_session = session.as_ref().expect("X session was just initialized");
-        match fetch_history(&client, current_session, cursor.as_deref()).await {
-            Ok(history) => {
-                retry_delay = INITIAL_RETRY_DELAY;
-                let received =
-                    enqueue_messages(&chat, history.messages, history.cursor.as_deref()).await;
-                cursor = history.cursor;
-                tracing::debug!(received, "X live chat poll completed");
-                tokio::time::sleep(POLL_INTERVAL).await;
+            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                tracing::warn!(skipped, "X webhook subscriber lagged behind");
             }
-            Err(PollFailure::Retry(error)) => {
-                tracing::warn!(
-                    "X live chat poll failed: {error:#}. Retrying in {} seconds",
-                    retry_delay.as_secs()
-                );
-                tokio::time::sleep(retry_delay).await;
-                retry_delay = (retry_delay * 2).min(MAX_RETRY_DELAY);
-            }
-            Err(PollFailure::Rebootstrap(error)) => {
-                tracing::warn!("X live chat session expired: {error:#}. Re-authenticating");
-                session = None;
-                cursor = Some(String::new());
-                retry_delay = INITIAL_RETRY_DELAY;
-            }
+            Err(broadcast::error::RecvError::Closed) => return,
         }
     }
-}
-
-async fn bootstrap_chat(client: &Client, media_key: &str) -> Result<ChatSession> {
-    let guest_response = client
-        .post(GUEST_ACTIVATE_URL)
-        .header("Authorization", PUBLIC_BEARER_TOKEN)
-        .send()
-        .await
-        .context("Failed to activate an X guest session")?;
-    let guest: GuestTokenResponse = decode_response(guest_response, "X guest activation").await?;
-
-    let status_url = format!("{BROADCAST_STATUS_URL}{media_key}");
-    let status_response = client
-        .get(status_url)
-        .header("Authorization", PUBLIC_BEARER_TOKEN)
-        .header("x-guest-token", guest.guest_token)
-        .send()
-        .await
-        .context("Failed to query the X broadcast status")?;
-    let status: BroadcastStatusResponse =
-        decode_response(status_response, "X broadcast status").await?;
-    let chat_token = status
-        .chat_token
-        .filter(|token| !token.trim().is_empty())
-        .context("The X broadcast does not expose a chat token")?;
-
-    let access_response = client
-        .post(ACCESS_CHAT_URL)
-        .json(&AccessChatRequest {
-            chat_token: &chat_token,
-        })
-        .send()
-        .await
-        .context("Failed to exchange the X chat token")?;
-    let access: AccessChatResponse =
-        decode_response(access_response, "Periscope chat access").await?;
-    let endpoint_url = access
-        .endpoint
-        .filter(|endpoint| !endpoint.trim().is_empty())
-        .unwrap_or_else(|| "https://proxsee.pscp.tv".into());
-
-    Ok(ChatSession {
-        access_token: access.access_token,
-        endpoint_url,
-    })
-}
-
-async fn decode_response<T: for<'de> Deserialize<'de>>(
-    response: Response,
-    operation: &str,
-) -> Result<T> {
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        bail!(
-            "{operation} returned {}: {}",
-            status,
-            body.chars().take(500).collect::<String>()
-        );
-    }
-    response
-        .json()
-        .await
-        .with_context(|| format!("Failed to decode the {operation} response"))
-}
-
-async fn fetch_history(
-    client: &Client,
-    session: &ChatSession,
-    cursor: Option<&str>,
-) -> std::result::Result<HistoryResponse, PollFailure> {
-    let url = format!(
-        "{}{}",
-        session.endpoint_url.trim_end_matches('/'),
-        HISTORY_PATH
-    );
-    let request = HistoryRequest {
-        access_token: &session.access_token,
-        cursor,
-    };
-    let response = client
-        .post(url)
-        .json(&request)
-        .send()
-        .await
-        .context("Failed to call the X live chat history API")
-        .map_err(PollFailure::Retry)?;
-    let status = response.status();
-    if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
-        return Err(PollFailure::Rebootstrap(anyhow::anyhow!(
-            "X live chat history API returned {status}"
-        )));
-    }
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(PollFailure::Retry(anyhow::anyhow!(
-            "X live chat history API returned {}: {}",
-            status,
-            body.chars().take(500).collect::<String>()
-        )));
-    }
-
-    response
-        .json()
-        .await
-        .context("Failed to decode the X live chat API response")
-        .map_err(PollFailure::Retry)
-}
-
-async fn enqueue_messages(
-    chat: &ChatHandle,
-    messages: Vec<HistoryMessage>,
-    cursor: Option<&str>,
-) -> u64 {
-    let mut accepted = 0;
-    for (index, message) in messages.into_iter().enumerate() {
-        let Ok(payload) = serde_json::from_str::<InnerPayload>(&message.payload) else {
-            tracing::debug!("Ignoring X live chat message with an invalid payload");
-            continue;
-        };
-        if payload.kind != 1 || payload.body.trim().is_empty() {
-            continue;
-        }
-
-        let author = payload.author();
-        let external_id = payload
-            .id
-            .clone()
-            .unwrap_or_else(|| format!("history-{}-{index}", cursor.unwrap_or("initial")));
-        let message = IncomingChatMessage {
-            source: "x".into(),
-            external_id,
-            author,
-            text: payload.body,
-            avatar_url: None,
-            sent_at: None,
-        };
-        match chat.enqueue(message).await {
-            Ok(crate::chat::EnqueueOutcome::Accepted) => accepted += 1,
-            Ok(crate::chat::EnqueueOutcome::Duplicate | crate::chat::EnqueueOutcome::Dropped) => {}
-            Err(error) => tracing::warn!("Discarding invalid X live chat message: {error}"),
-        }
-    }
-    accepted
-}
-
-#[derive(Debug)]
-enum PollFailure {
-    Retry(anyhow::Error),
-    Rebootstrap(anyhow::Error),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
-    #[test]
-    fn decodes_bootstrap_responses() {
-        let guest: GuestTokenResponse =
-            serde_json::from_str(r#"{"guest_token":"guest-token"}"#).unwrap();
-        let status: BroadcastStatusResponse =
-            serde_json::from_str(r#"{"chatToken":"chat-token"}"#).unwrap();
-        let access: AccessChatResponse = serde_json::from_str(
-            r#"{"access_token":"access-token","endpoint":"https://chat.example"}"#,
-        )
-        .unwrap();
+    const BODY: &[u8] = br#"{"data":{"event_uuid":"event-123","event_type":"broadcast.chat","payload":{"message_id":"message-456","message":"Hello X","author":{"data":{"username":"viewer","profile_image_url":"https://example.test/avatar.jpg"}}}}}"#;
 
-        assert_eq!(guest.guest_token, "guest-token");
-        assert_eq!(status.chat_token.as_deref(), Some("chat-token"));
-        assert_eq!(access.access_token, "access-token");
-        assert_eq!(access.endpoint.as_deref(), Some("https://chat.example"));
+    fn signed_event(secret: &str) -> WebhookEvent {
+        let mut headers = HashMap::new();
+        headers.insert(
+            "x-twitter-webhooks-signature".into(),
+            response_token(std::str::from_utf8(BODY).unwrap(), secret).unwrap(),
+        );
+        WebhookEvent {
+            headers,
+            body: BODY.to_vec().into(),
+        }
     }
 
     #[test]
-    fn decodes_history_and_stringified_chat_payload() {
-        let response: HistoryResponse = serde_json::from_str(
-            r#"{
-                "cursor": "next-cursor",
-                "messages": [{
-                    "payload": "{\"kind\":1,\"id\":\"message-id\",\"username\":\"viewer\",\"body\":\"Hello chat\"}"
-                }]
-            }"#,
-        )
-        .unwrap();
+    fn calculates_crc_response() {
+        assert_eq!(
+            response_token("hello", "secret").unwrap(),
+            "sha256=iKqz7ejTrflNJquQ07r9SiCDBww7zOnAFO4EpEOEfAs="
+        );
+    }
 
-        let payload: InnerPayload = serde_json::from_str(&response.messages[0].payload).unwrap();
-        assert_eq!(response.cursor.as_deref(), Some("next-cursor"));
-        assert_eq!(payload.kind, 1);
-        assert_eq!(payload.id.as_deref(), Some("message-id"));
-        assert_eq!(payload.author(), "viewer");
-        assert_eq!(payload.body, "Hello chat");
+    #[test]
+    fn accepts_valid_signature_and_rejects_invalid_signature() {
+        let event = signed_event("secret");
+        let signature = event.header("x-twitter-webhooks-signature").unwrap();
+        assert!(verify_webhook(&event.body, signature, "secret").is_ok());
+        assert!(verify_webhook(&event.body, signature, "wrong").is_err());
+    }
+
+    #[test]
+    fn parses_broadcast_chat_event() {
+        let message = parse_chat_event(BODY).unwrap().unwrap();
+        assert_eq!(message.source, "x");
+        assert_eq!(message.external_id, "message-456");
+        assert_eq!(message.author, "viewer");
+        assert_eq!(message.text, "Hello X");
+        assert_eq!(
+            message.avatar_url.as_deref(),
+            Some("https://example.test/avatar.jpg")
+        );
+    }
+
+    #[test]
+    fn disabled_webhook_ignores_events() {
+        assert!(
+            process_event(&ChatSettings::default(), &signed_event("secret"))
+                .unwrap()
+                .is_none()
+        );
     }
 }

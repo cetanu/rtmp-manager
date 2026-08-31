@@ -73,6 +73,11 @@ impl AppHandle {
             handle.config.subscribe(),
             handle.chat.clone(),
         ));
+        tokio::spawn(crate::chat::x::run(
+            handle.webhooks.subscribe(),
+            handle.config.subscribe(),
+            handle.chat.clone(),
+        ));
 
         handle.apply_chat_config().await?;
 
@@ -93,11 +98,8 @@ impl AppHandle {
         Ok(())
     }
 
-    pub async fn set_x_polling(&self, enabled: bool) -> Result<()> {
-        let (config, changed, _) = self.config.set_x_polling(enabled).await?;
-        if changed {
-            self.chat.set_x_polling(config.chat.clone()).await?;
-        }
+    pub async fn set_x_webhook(&self, enabled: bool) -> Result<()> {
+        self.config.set_x_webhook(enabled).await?;
         Ok(())
     }
 

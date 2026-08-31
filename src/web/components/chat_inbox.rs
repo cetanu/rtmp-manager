@@ -36,10 +36,10 @@ async fn set_youtube_polling(cx: &Cx, enabled: bool) -> Result<String> {
 }
 
 #[procedure]
-async fn set_x_polling(cx: &Cx, enabled: bool) -> Result<String> {
+async fn set_x_webhook(cx: &Cx, enabled: bool) -> Result<String> {
     let app: &AppHandle = app_context(cx);
     Ok(app
-        .set_x_polling(enabled)
+        .set_x_webhook(enabled)
         .await
         .err()
         .map(|error| error.to_string())
@@ -77,10 +77,6 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
     ]
     .into_iter()
     .any(|value| value.as_ref().is_some_and(|value| !value.trim().is_empty()));
-    let x_configured = chat
-        .x_media_key
-        .as_ref()
-        .is_some_and(|value| !value.trim().is_empty());
     let outline_button = button_variants(ButtonVariant::Outline, ButtonSize::Md);
     let primary_button = button_variants(ButtonVariant::Primary, ButtonSize::Md);
 
@@ -89,7 +85,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
         signal revision = 0.0;
         signal youtube_polling_enabled = chat.youtube_polling_enabled;
         signal youtube_toggle_pending = false;
-        signal x_polling_enabled = chat.x_polling_enabled;
+        signal x_webhook_enabled = chat.x_webhook_enabled;
         signal x_toggle_pending = false;
         signal kick_webhook_enabled = chat.kick_webhook_enabled;
         signal kick_toggle_pending = false;
@@ -128,23 +124,22 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
                             <span>"YouTube polling"</span>
                         </div>
                     }
-                    if x_configured {
-                        <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                    <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
                                 <button
                                     type="button"
                                     role="switch"
-                                    aria-label="Toggle X polling"
+                                    aria-label="Toggle X webhook"
                                     class="group relative inline-flex h-4.5 w-8 shrink-0 rounded-full bg-foreground/20 shadow-xs transition-colors outline-none data-[checked]:bg-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50"
-                                    :aria-checked=$(if x_polling_enabled.get() { "true" } else { "false" })
-                                    :data-checked=$(x_polling_enabled.get())
+                                    :aria-checked=$(if x_webhook_enabled.get() { "true" } else { "false" })
+                                    :data-checked=$(x_webhook_enabled.get())
                                     :disabled=$(x_toggle_pending.get())
                                     @click=$(async |_event| {
-                                        let enabled = !x_polling_enabled.get();
-                                        x_polling_enabled.set(enabled);
+                                        let enabled = !x_webhook_enabled.get();
+                                        x_webhook_enabled.set(enabled);
                                         x_toggle_pending.set(true);
-                                        let error = set_x_polling(enabled).await;
+                                        let error = set_x_webhook(enabled).await;
                                         if !error.is_empty() {
-                                            x_polling_enabled.set(!enabled);
+                                            x_webhook_enabled.set(!enabled);
                                         }
                                         polling_error.set(error);
                                         x_toggle_pending.set(false);
@@ -154,7 +149,6 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
                                 </button>
                             <span>"X polling"</span>
                         </div>
-                    }
                     <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
                         <button
                             type="button"
@@ -178,7 +172,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
                         >
                             <span class="pointer-events-none absolute top-1/2 left-0.5 size-3.5 -translate-y-1/2 rounded-full bg-background shadow-xs transition-transform group-data-[checked]:translate-x-3.5"></span>
                         </button>
-                        <span>"Kick chat"</span>
+                        <span>"Kick polling"</span>
                     </div>
                     <p :hidden=$(polling_error.get().is_empty()) class="text-xs text-destructive">
                         $(polling_error.get())

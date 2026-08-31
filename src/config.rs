@@ -118,9 +118,15 @@ pub struct ChatSettings {
     #[serde(default)]
     pub youtube_polling_enabled: bool,
     #[serde(default)]
-    pub x_media_key: Option<String>,
+    pub x_api_key: Option<String>,
     #[serde(default)]
-    pub x_polling_enabled: bool,
+    pub x_api_secret: Option<String>,
+    #[serde(default)]
+    pub x_client_id: Option<String>,
+    #[serde(default)]
+    pub x_client_secret: Option<String>,
+    #[serde(default)]
+    pub x_webhook_enabled: bool,
     #[serde(default)]
     pub kick_webhook_enabled: bool,
 }
@@ -149,8 +155,11 @@ impl Default for ChatSettings {
             youtube_min_poll_interval_secs: default_youtube_min_poll_interval_secs(),
             youtube_adaptive_polling: true,
             youtube_polling_enabled: false,
-            x_media_key: None,
-            x_polling_enabled: false,
+            x_api_key: None,
+            x_api_secret: None,
+            x_client_id: None,
+            x_client_secret: None,
+            x_webhook_enabled: false,
             kick_webhook_enabled: false,
         }
     }
@@ -299,8 +308,27 @@ impl AppConfig {
                     .unwrap_or(config.chat.youtube_min_poll_interval_secs),
                 youtube_adaptive_polling: chat.youtube_adaptive_polling,
                 youtube_polling_enabled: config.chat.youtube_polling_enabled,
-                x_media_key: non_empty(chat.x_media_key),
-                x_polling_enabled: chat.x_polling_enabled,
+                x_api_key: updated_secret(
+                    chat.x_api_key,
+                    chat.clear_x_api_key,
+                    config.chat.x_api_key,
+                ),
+                x_api_secret: updated_secret(
+                    chat.x_api_secret,
+                    chat.clear_x_api_secret,
+                    config.chat.x_api_secret,
+                ),
+                x_client_id: updated_secret(
+                    chat.x_client_id,
+                    chat.clear_x_client_id,
+                    config.chat.x_client_id,
+                ),
+                x_client_secret: updated_secret(
+                    chat.x_client_secret,
+                    chat.clear_x_client_secret,
+                    config.chat.x_client_secret,
+                ),
+                x_webhook_enabled: config.chat.x_webhook_enabled,
                 kick_webhook_enabled: config.chat.kick_webhook_enabled,
             };
         }
@@ -430,9 +458,18 @@ pub struct ChatForm {
     pub youtube_min_poll_interval_secs: Option<u64>,
     #[serde(default)]
     pub youtube_adaptive_polling: bool,
-    pub x_media_key: Option<String>,
+    pub x_api_key: Option<String>,
     #[serde(default)]
-    pub x_polling_enabled: bool,
+    pub clear_x_api_key: bool,
+    pub x_api_secret: Option<String>,
+    #[serde(default)]
+    pub clear_x_api_secret: bool,
+    pub x_client_id: Option<String>,
+    #[serde(default)]
+    pub clear_x_client_id: bool,
+    pub x_client_secret: Option<String>,
+    #[serde(default)]
+    pub clear_x_client_secret: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -629,11 +666,11 @@ impl ConfigHandle {
         self.save_updated(current_config, updated).await
     }
 
-    pub async fn set_x_polling(&self, enabled: bool) -> Result<(Arc<AppConfig>, bool, bool)> {
+    pub async fn set_x_webhook(&self, enabled: bool) -> Result<(Arc<AppConfig>, bool, bool)> {
         let _guard = self.update_lock.lock().await;
         let current_config = self.get();
         let mut updated = (*current_config).clone();
-        updated.chat.x_polling_enabled = enabled;
+        updated.chat.x_webhook_enabled = enabled;
         self.save_updated(current_config, updated).await
     }
 
@@ -713,6 +750,10 @@ mod tests {
                 twitch_channel: Some("streamer".into()),
                 youtube_api_key: Some("youtube-api-key".into()),
                 youtube_polling_enabled: true,
+                x_api_key: Some("x-api-key".into()),
+                x_api_secret: Some("x-api-secret".into()),
+                x_client_id: Some("x-client-id".into()),
+                x_client_secret: Some("x-client-secret".into()),
                 ..ChatSettings::default()
             },
         }
@@ -804,7 +845,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn concurrent_polling_updates_do_not_overwrite_each_other() {
+    async fn concurrent_ingest_updates_do_not_overwrite_each_other() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -820,7 +861,7 @@ mod tests {
         };
         let x = {
             let handle = handle.clone();
-            tokio::spawn(async move { handle.set_x_polling(true).await.unwrap() })
+            tokio::spawn(async move { handle.set_x_webhook(true).await.unwrap() })
         };
         let kick = {
             let handle = handle.clone();
@@ -832,7 +873,7 @@ mod tests {
 
         let config = handle.get();
         assert!(config.chat.youtube_polling_enabled);
-        assert!(config.chat.x_polling_enabled);
+        assert!(config.chat.x_webhook_enabled);
         assert!(config.chat.kick_webhook_enabled);
 
         fs::remove_dir_all(directory).unwrap();
@@ -965,6 +1006,25 @@ mod tests {
     }
 
     #[test]
+    fn explicit_clear_removes_x_credentials() {
+        let form: ConfigForm = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str(
+                "chat%5Bclear_x_api_key%5D=true&\
+                 chat%5Bclear_x_api_secret%5D=true&\
+                 chat%5Bclear_x_client_id%5D=true&\
+                 chat%5Bclear_x_client_secret%5D=true&action=save",
+            )
+            .unwrap();
+        let updated = populated_config().merge_form(form).unwrap();
+
+        assert!(updated.chat.x_api_key.is_none());
+        assert!(updated.chat.x_api_secret.is_none());
+        assert!(updated.chat.x_client_id.is_none());
+        assert!(updated.chat.x_client_secret.is_none());
+    }
+
+    #[test]
     fn blank_web_and_chat_secrets_preserve_existing_credentials() {
         let form: ConfigForm = serde_qs::Config::new()
             .use_form_encoding(true)
@@ -982,6 +1042,7 @@ mod tests {
             updated.chat.youtube_api_key.as_deref(),
             Some("youtube-api-key")
         );
+        assert_eq!(updated.chat.x_api_secret.as_deref(), Some("x-api-secret"));
         assert_eq!(updated.chat.queue_capacity, 250);
     }
 

@@ -73,16 +73,11 @@ pub async fn chat_settings(cx: &Cx) -> Result {
                         </div>
                     </div>
 
-                    <div class="flex flex-col gap-4">
-                        form_field(
-                            control_id: "x_media_key",
-                            label_text: "X broadcast/media key",
-                            input(attrs: attributes! {
-                                id="x_media_key"
-                                name="chat[x_media_key]"
-                                value=(chat.x_media_key.clone().unwrap_or_default())
-                            })
-                        )
+                    <div class="grid gap-6 md:grid-cols-2">
+                        clearable_secret_field(control_id: "x_api_key", name: "chat[x_api_key]", label_text: "X API key", empty_placeholder: "Not configured", value: chat.x_api_key.clone().unwrap_or_default())
+                        clearable_secret_field(control_id: "x_api_secret", name: "chat[x_api_secret]", label_text: "X API secret key / consumer secret", empty_placeholder: "Required for webhook verification", value: chat.x_api_secret.clone().unwrap_or_default())
+                        clearable_secret_field(control_id: "x_client_id", name: "chat[x_client_id]", label_text: "X OAuth client ID", empty_placeholder: "Not configured", value: chat.x_client_id.clone().unwrap_or_default())
+                        clearable_secret_field(control_id: "x_client_secret", name: "chat[x_client_secret]", label_text: "X OAuth client secret", empty_placeholder: "Not configured", value: chat.x_client_secret.clone().unwrap_or_default())
                     </div>
                 </div>
             )

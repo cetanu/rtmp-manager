@@ -333,10 +333,6 @@ enum ChatCommand {
         config: ChatSettings,
         respond_to: oneshot::Sender<()>,
     },
-    SetXPolling {
-        config: ChatSettings,
-        respond_to: oneshot::Sender<()>,
-    },
     UpdateYouTubeStatus {
         state: String,
         detail: String,
@@ -350,7 +346,6 @@ struct ChatActor {
     inbox: ChatInbox,
     twitch_task: Option<JoinHandle<()>>,
     youtube_task: Option<JoinHandle<()>>,
-    x_task: Option<JoinHandle<()>>,
     youtube_status: Option<YouTubeIngestStatus>,
     revision: u64,
     revision_tx: watch::Sender<u64>,
@@ -393,10 +388,6 @@ impl ChatActor {
                 }
                 ChatCommand::SetYouTubePolling { config, respond_to } => {
                     self.configure_youtube(&config, &handle);
-                    let _ = respond_to.send(());
-                }
-                ChatCommand::SetXPolling { config, respond_to } => {
-                    self.configure_x(&config, &handle);
                     let _ = respond_to.send(());
                 }
                 ChatCommand::UpdateYouTubeStatus {
@@ -455,39 +446,8 @@ impl ChatActor {
             tracing::info!(channel, "Twitch anonymous IRC ingest configured");
         }
 
-        self.configure_x(chat, handle);
         self.configure_youtube(chat, handle);
         Ok(())
-    }
-
-    fn configure_x(&mut self, chat: &ChatSettings, handle: &ChatHandle) {
-        if let Some(task) = self.x_task.take() {
-            task.abort();
-        }
-
-        if chat.x_polling_enabled {
-            let media_key = chat
-                .x_media_key
-                .clone()
-                .filter(|value| !value.trim().is_empty());
-            match media_key {
-                Some(media_key) => {
-                    let handle_clone = handle.clone();
-                    let task = tokio::spawn(x::run(
-                        self.http_client.clone(),
-                        handle_clone,
-                        x::XChatConfig { media_key },
-                    ));
-                    self.x_task = Some(task);
-                    tracing::info!("X live chat ingest configured");
-                }
-                None => {
-                    tracing::warn!("X live chat polling is enabled but no media key is configured");
-                }
-            }
-        } else {
-            tracing::info!("X live chat polling is off");
-        }
     }
 
     fn configure_youtube(&mut self, chat: &ChatSettings, handle: &ChatHandle) {
@@ -576,7 +536,6 @@ impl ChatHandle {
             inbox,
             twitch_task: None,
             youtube_task: None,
-            x_task: None,
             youtube_status: None,
             revision: 0,
             revision_tx,
@@ -650,19 +609,6 @@ impl ChatHandle {
             .map_err(|_| anyhow::anyhow!("Chat actor stopped"))?;
         rx.await
             .context("Chat actor dropped set_youtube_polling response")
-    }
-
-    pub async fn set_x_polling(&self, config: ChatSettings) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(ChatCommand::SetXPolling {
-                config,
-                respond_to: tx,
-            })
-            .await
-            .map_err(|_| anyhow::anyhow!("Chat actor stopped"))?;
-        rx.await
-            .context("Chat actor dropped set_x_polling response")
     }
 
     pub fn update_youtube_status(
@@ -949,7 +895,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn polling_controls_only_restart_the_selected_worker() {
+    async fn youtube_control_does_not_restart_twitch() {
         let actor_path = database_path();
         let handle_path = database_path();
         let inbox = ChatInbox::open(&actor_path, 5).await.unwrap();
@@ -962,7 +908,6 @@ mod tests {
             inbox,
             twitch_task: None,
             youtube_task: None,
-            x_task: None,
             youtube_status: None,
             revision: 0,
             revision_tx,
@@ -976,24 +921,10 @@ mod tests {
         let youtube_task = tokio::spawn(std::future::pending());
         let youtube_abort = youtube_task.abort_handle();
         actor.youtube_task = Some(youtube_task);
-        let x_task = tokio::spawn(std::future::pending());
-        let x_abort = x_task.abort_handle();
-        actor.x_task = Some(x_task);
-
-        actor.configure_x(&ChatSettings::default(), &handle);
-        tokio::task::yield_now().await;
-        assert!(!twitch_abort.is_finished());
-        assert!(!youtube_abort.is_finished());
-        assert!(x_abort.is_finished());
-
-        let x_task = tokio::spawn(std::future::pending());
-        let x_abort = x_task.abort_handle();
-        actor.x_task = Some(x_task);
         actor.configure_youtube(&ChatSettings::default(), &handle);
         tokio::task::yield_now().await;
         assert!(!twitch_abort.is_finished());
         assert!(youtube_abort.is_finished());
-        assert!(!x_abort.is_finished());
 
         drop(actor);
         std::fs::remove_file(actor_path).unwrap();
