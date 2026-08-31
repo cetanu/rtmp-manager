@@ -121,6 +121,8 @@ pub struct ChatSettings {
     pub x_media_key: Option<String>,
     #[serde(default)]
     pub x_polling_enabled: bool,
+    #[serde(default)]
+    pub kick_webhook_enabled: bool,
 }
 
 fn default_chat_queue_capacity() -> usize {
@@ -149,6 +151,7 @@ impl Default for ChatSettings {
             youtube_polling_enabled: false,
             x_media_key: None,
             x_polling_enabled: false,
+            kick_webhook_enabled: false,
         }
     }
 }
@@ -298,6 +301,7 @@ impl AppConfig {
                 youtube_polling_enabled: config.chat.youtube_polling_enabled,
                 x_media_key: non_empty(chat.x_media_key),
                 x_polling_enabled: chat.x_polling_enabled,
+                kick_webhook_enabled: config.chat.kick_webhook_enabled,
             };
         }
         if let Some(target_fields) = form.targets {
@@ -633,6 +637,14 @@ impl ConfigHandle {
         self.save_updated(current_config, updated).await
     }
 
+    pub async fn set_kick_webhook(&self, enabled: bool) -> Result<(Arc<AppConfig>, bool, bool)> {
+        let _guard = self.update_lock.lock().await;
+        let current_config = self.get();
+        let mut updated = (*current_config).clone();
+        updated.chat.kick_webhook_enabled = enabled;
+        self.save_updated(current_config, updated).await
+    }
+
     async fn save_updated(
         &self,
         current_config: Arc<AppConfig>,
@@ -810,12 +822,18 @@ mod tests {
             let handle = handle.clone();
             tokio::spawn(async move { handle.set_x_polling(true).await.unwrap() })
         };
+        let kick = {
+            let handle = handle.clone();
+            tokio::spawn(async move { handle.set_kick_webhook(true).await.unwrap() })
+        };
         youtube.await.unwrap();
         x.await.unwrap();
+        kick.await.unwrap();
 
         let config = handle.get();
         assert!(config.chat.youtube_polling_enabled);
         assert!(config.chat.x_polling_enabled);
+        assert!(config.chat.kick_webhook_enabled);
 
         fs::remove_dir_all(directory).unwrap();
     }

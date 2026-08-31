@@ -20,7 +20,8 @@
     "youtube_adaptive_polling": true,
     "youtube_polling_enabled": false,
     "x_media_key": "",
-    "x_polling_enabled": false
+    "x_polling_enabled": false,
+    "kick_webhook_enabled": false
   },
   "notifications": {
     "discord_webhook": "https://discord.com/api/webhooks/YOUR_DISCORD_WEBHOOK_URL",

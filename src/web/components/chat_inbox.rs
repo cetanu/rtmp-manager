@@ -46,6 +46,17 @@ async fn set_x_polling(cx: &Cx, enabled: bool) -> Result<String> {
         .unwrap_or_default())
 }
 
+#[procedure]
+async fn set_kick_webhook(cx: &Cx, enabled: bool) -> Result<String> {
+    let app: &AppHandle = app_context(cx);
+    Ok(app
+        .set_kick_webhook(enabled)
+        .await
+        .err()
+        .map(|error| error.to_string())
+        .unwrap_or_default())
+}
+
 fn first_message_id(snapshot: &crate::chat::ChatInboxSnapshot) -> String {
     snapshot
         .messages
@@ -80,6 +91,8 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
         signal youtube_toggle_pending = false;
         signal x_polling_enabled = chat.x_polling_enabled;
         signal x_toggle_pending = false;
+        signal kick_webhook_enabled = chat.kick_webhook_enabled;
+        signal kick_toggle_pending = false;
         signal polling_error = String::new();
 
         card(
@@ -142,6 +155,31 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
                             <span>"X polling"</span>
                         </div>
                     }
+                    <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                        <button
+                            type="button"
+                            role="switch"
+                            aria-label="Toggle Kick chat"
+                            class="group relative inline-flex h-4.5 w-8 shrink-0 rounded-full bg-foreground/20 shadow-xs transition-colors outline-none data-[checked]:bg-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50"
+                            :aria-checked=$(if kick_webhook_enabled.get() { "true" } else { "false" })
+                            :data-checked=$(kick_webhook_enabled.get())
+                            :disabled=$(kick_toggle_pending.get())
+                            @click=$(async |_event| {
+                                let enabled = !kick_webhook_enabled.get();
+                                kick_webhook_enabled.set(enabled);
+                                kick_toggle_pending.set(true);
+                                let error = set_kick_webhook(enabled).await;
+                                if !error.is_empty() {
+                                    kick_webhook_enabled.set(!enabled);
+                                }
+                                polling_error.set(error);
+                                kick_toggle_pending.set(false);
+                            })
+                        >
+                            <span class="pointer-events-none absolute top-1/2 left-0.5 size-3.5 -translate-y-1/2 rounded-full bg-background shadow-xs transition-transform group-data-[checked]:translate-x-3.5"></span>
+                        </button>
+                        <span>"Kick chat"</span>
+                    </div>
                     <p :hidden=$(polling_error.get().is_empty()) class="text-xs text-destructive">
                         $(polling_error.get())
                     </p>

@@ -70,6 +70,7 @@ impl AppHandle {
 
         tokio::spawn(crate::chat::kick::run(
             handle.webhooks.subscribe(),
+            handle.config.subscribe(),
             handle.chat.clone(),
         ));
 
@@ -97,6 +98,11 @@ impl AppHandle {
         if changed {
             self.chat.set_x_polling(config.chat.clone()).await?;
         }
+        Ok(())
+    }
+
+    pub async fn set_kick_webhook(&self, enabled: bool) -> Result<()> {
+        self.config.set_kick_webhook(enabled).await?;
         Ok(())
     }
 }

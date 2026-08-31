@@ -1,12 +1,14 @@
 use crate::chat::ChatHandle;
 use crate::chat::IncomingChatMessage;
+use crate::config::AppConfig;
 use crate::server::state::WebhookEvent;
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use rsa::{RsaPublicKey, pkcs1v15::VerifyingKey, pkcs8::DecodePublicKey, signature::Verifier};
 use serde::Deserialize;
 use sha2::Sha256;
-use tokio::sync::broadcast;
+use std::sync::Arc;
+use tokio::sync::{broadcast, watch};
 
 const KICK_PUBLIC_KEY: &str = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq/+l1WnlRrGSolDMA+A8\n6rAhMbQGmQ2SapVcGM3zq8ANXjnhDWocMqfWcTd95btDydITa10kDvHzw9WQOqp2\nMZI7ZyrfzJuz5nhTPCiJwTwnEtWft7nV14BYRDHvlfqPUaZ+1KR4OCaO/wWIk/rQ\nL/TjY0M70gse8rlBkbo2a8rKhu69RQTRsoaf4DVhDPEeSeI5jVrRDGAMGL3cGuyY\n6CLKGdjVEM78g3JfYOvDU/RvfqD7L89TZ3iN94jrmWdGz34JNlEI5hqK8dd7C5EF\nBEbZ5jgB8s8ReQV8H+MkuffjdAj3ajDDX3DOJMIut1lBrUVD1AaSrGCKHooWoL2e\ntwIDAQAB\n-----END PUBLIC KEY-----";
 
@@ -58,10 +60,17 @@ pub fn parse_chat_event(body: &[u8]) -> Result<IncomingChatMessage> {
     })
 }
 
-pub async fn run(mut webhooks: broadcast::Receiver<WebhookEvent>, chat: ChatHandle) {
+pub async fn run(
+    mut webhooks: broadcast::Receiver<WebhookEvent>,
+    config: watch::Receiver<Arc<AppConfig>>,
+    chat: ChatHandle,
+) {
     loop {
         match webhooks.recv().await {
             Ok(event) => {
+                if !config.borrow().chat.kick_webhook_enabled {
+                    continue;
+                }
                 if event.header("kick-event-type") != Some("chat.message.sent")
                     || event.header("kick-event-version") != Some("1")
                 {
