@@ -455,9 +455,12 @@ async fn receive_webhook(
                 .map(|value| (name.as_str().to_ascii_lowercase(), value.to_owned()))
         })
         .collect();
-    let _ = app
+    let body_bytes = body.len();
+    let subscribers = app
         .webhooks
-        .send(crate::server::state::WebhookEvent { headers, body });
+        .send(crate::server::state::WebhookEvent { headers, body })
+        .unwrap_or(0);
+    tracing::info!(body_bytes, subscribers, "Webhook received");
     topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
 }
 

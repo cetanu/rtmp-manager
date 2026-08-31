@@ -99,12 +99,18 @@ impl AppHandle {
     }
 
     pub async fn set_x_webhook(&self, enabled: bool) -> Result<()> {
-        self.config.set_x_webhook(enabled).await?;
+        let (_, changed, _) = self.config.set_x_webhook(enabled).await?;
+        if changed {
+            tracing::info!(enabled, "X webhook ingestion changed");
+        }
         Ok(())
     }
 
     pub async fn set_kick_webhook(&self, enabled: bool) -> Result<()> {
-        self.config.set_kick_webhook(enabled).await?;
+        let (_, changed, _) = self.config.set_kick_webhook(enabled).await?;
+        if changed {
+            tracing::info!(enabled, "Kick webhook ingestion changed");
+        }
         Ok(())
     }
 }
