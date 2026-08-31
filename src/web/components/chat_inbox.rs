@@ -147,7 +147,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
                                 >
                                     <span class="pointer-events-none absolute top-1/2 left-0.5 size-3.5 -translate-y-1/2 rounded-full bg-background shadow-xs transition-transform group-data-[checked]:translate-x-3.5"></span>
                                 </button>
-                            <span>"X polling"</span>
+                            <span>"X chat"</span>
                         </div>
                     <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
                         <button
@@ -172,7 +172,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
                         >
                             <span class="pointer-events-none absolute top-1/2 left-0.5 size-3.5 -translate-y-1/2 rounded-full bg-background shadow-xs transition-transform group-data-[checked]:translate-x-3.5"></span>
                         </button>
-                        <span>"Kick polling"</span>
+                        <span>"Kick chat"</span>
                     </div>
                     <p :hidden=$(polling_error.get().is_empty()) class="text-xs text-destructive">
                         $(polling_error.get())
