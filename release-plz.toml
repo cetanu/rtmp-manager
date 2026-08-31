@@ -7,3 +7,6 @@ git_release_draft = true
 
 # This application is distributed through GitHub releases, not crates.io.
 publish = false
+
+# Determine unpublished versions from Git tags instead of the crates.io registry.
+git_only = true
