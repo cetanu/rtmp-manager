@@ -24,6 +24,9 @@
     "x_client_id": "",
     "x_client_secret": "",
     "x_webhook_enabled": false,
+    "kick_client_id": "",
+    "kick_client_secret": "",
+    "kick_broadcaster_user_id": null,
     "kick_webhook_enabled": false
   },
   "notifications": {
