@@ -47,6 +47,11 @@ struct KickSubscription {
     version: u64,
 }
 
+#[derive(Deserialize)]
+struct KickChannel {
+    broadcaster_user_id: u64,
+}
+
 #[derive(Serialize)]
 struct CreateSubscriptions {
     broadcaster_user_id: u64,
@@ -67,6 +72,7 @@ struct CreatedSubscription {
 }
 
 const KICK_TOKEN_URL: &str = "https://id.kick.com/oauth/token";
+const KICK_CHANNELS_URL: &str = "https://api.kick.com/public/v1/channels";
 const KICK_SUBSCRIPTIONS_URL: &str = "https://api.kick.com/public/v1/events/subscriptions";
 
 pub fn verify_webhook(
@@ -133,11 +139,10 @@ pub async fn set_chat_subscription(
 ) -> Result<()> {
     let client_id = required_setting(&config.kick_client_id, "Kick client ID")?;
     let client_secret = required_setting(&config.kick_client_secret, "Kick client secret")?;
-    let broadcaster_user_id = config
-        .kick_broadcaster_user_id
-        .filter(|id| *id > 0)
-        .context("Kick broadcaster user ID is not configured")?;
+    let channel = required_setting(&config.kick_channel, "Kick channel")?;
     let access_token = app_access_token(http_client, client_id, client_secret).await?;
+    let broadcaster_user_id =
+        resolve_broadcaster_user_id(http_client, &access_token, channel).await?;
     let subscriptions = list_subscriptions(http_client, &access_token, broadcaster_user_id).await?;
     let chat_subscriptions: Vec<_> = subscriptions
         .into_iter()
@@ -156,6 +161,31 @@ pub async fn set_chat_subscription(
         delete_subscriptions(http_client, &access_token, &chat_subscriptions).await?;
     }
     Ok(())
+}
+
+async fn resolve_broadcaster_user_id(
+    http_client: &Client,
+    access_token: &str,
+    channel: &str,
+) -> Result<u64> {
+    let response = http_client
+        .get(KICK_CHANNELS_URL)
+        .bearer_auth(access_token)
+        .query(&[("slug", channel)])
+        .send()
+        .await
+        .with_context(|| format!("Failed to look up Kick channel '{channel}'"))?;
+    let response = require_success(response, "look up the Kick channel").await?;
+    let response: KickApiResponse<Vec<KickChannel>> = response
+        .json()
+        .await
+        .context("Kick returned an invalid channel lookup response")?;
+    response
+        .data
+        .into_iter()
+        .next()
+        .map(|channel| channel.broadcaster_user_id)
+        .with_context(|| format!("Kick channel '{channel}' was not found"))
 }
 
 fn required_setting<'a>(value: &'a Option<String>, name: &str) -> Result<&'a str> {
@@ -329,5 +359,15 @@ mod tests {
                 "events": [{"name": "chat.message.sent", "version": 1}]
             })
         );
+    }
+
+    #[test]
+    fn parses_broadcaster_id_from_channel_lookup() {
+        let response: KickApiResponse<Vec<KickChannel>> = serde_json::from_value(
+            serde_json::json!({"data": [{"broadcaster_user_id": 123456789}]}),
+        )
+        .unwrap();
+
+        assert_eq!(response.data[0].broadcaster_user_id, 123456789);
     }
 }

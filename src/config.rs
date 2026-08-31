@@ -132,7 +132,7 @@ pub struct ChatSettings {
     #[serde(default)]
     pub kick_client_secret: Option<String>,
     #[serde(default)]
-    pub kick_broadcaster_user_id: Option<u64>,
+    pub kick_channel: Option<String>,
     #[serde(default)]
     pub kick_webhook_enabled: bool,
 }
@@ -168,7 +168,7 @@ impl Default for ChatSettings {
             x_webhook_enabled: false,
             kick_client_id: None,
             kick_client_secret: None,
-            kick_broadcaster_user_id: None,
+            kick_channel: None,
             kick_webhook_enabled: false,
         }
     }
@@ -247,9 +247,22 @@ impl AppConfig {
                     .kick_client_secret
                     .as_ref()
                     .is_none_or(|value| value.trim().is_empty())
-                || self.chat.kick_broadcaster_user_id.is_none_or(|id| id == 0))
+                || self
+                    .chat
+                    .kick_channel
+                    .as_ref()
+                    .is_none_or(|value| value.trim().is_empty()))
         {
-            bail!("Kick webhooks require a client ID, client secret, and broadcaster user ID");
+            bail!("Kick webhooks require a client ID, client secret, and channel");
+        }
+        if self.chat.kick_channel.as_ref().is_some_and(|channel| {
+            channel.is_empty()
+                || channel.len() > 25
+                || !channel
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || "_-".contains(character))
+        }) {
+            bail!("Kick channel must be 1-25 ASCII letters, numbers, hyphens, or underscores");
         }
         for target in &self.targets {
             if target.enabled {
@@ -359,7 +372,8 @@ impl AppConfig {
                     chat.clear_kick_client_secret,
                     config.chat.kick_client_secret,
                 ),
-                kick_broadcaster_user_id: chat.kick_broadcaster_user_id,
+                kick_channel: non_empty(chat.kick_channel)
+                    .map(|channel| channel.trim().to_ascii_lowercase()),
                 kick_webhook_enabled: config.chat.kick_webhook_enabled,
             };
         }
@@ -505,7 +519,7 @@ pub struct ChatForm {
     pub kick_client_secret: Option<String>,
     #[serde(default)]
     pub clear_kick_client_secret: bool,
-    pub kick_broadcaster_user_id: Option<u64>,
+    pub kick_channel: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -792,7 +806,7 @@ mod tests {
                 x_client_secret: Some("x-client-secret".into()),
                 kick_client_id: Some("kick-client-id".into()),
                 kick_client_secret: Some("kick-client-secret".into()),
-                kick_broadcaster_user_id: Some(123),
+                kick_channel: Some("streamer".into()),
                 ..ChatSettings::default()
             },
         }
@@ -898,7 +912,7 @@ mod tests {
             .deserialize_str(
                 "chat%5Bkick_client_id%5D=client-id&\
                  chat%5Bkick_client_secret%5D=client-secret&\
-                 chat%5Bkick_broadcaster_user_id%5D=123&action=save",
+                 chat%5Bkick_channel%5D=streamer&action=save",
             )
             .unwrap();
         handle.save_form(form).await.unwrap();
@@ -1084,7 +1098,7 @@ mod tests {
     }
 
     #[test]
-    fn enabled_kick_webhooks_require_app_credentials_and_broadcaster() {
+    fn enabled_kick_webhooks_require_app_credentials_and_channel() {
         let mut config = AppConfig::default();
         config.chat.kick_webhook_enabled = true;
         assert!(
@@ -1097,8 +1111,19 @@ mod tests {
 
         config.chat.kick_client_id = Some("client-id".into());
         config.chat.kick_client_secret = Some("client-secret".into());
-        config.chat.kick_broadcaster_user_id = Some(123);
+        config.chat.kick_channel = Some("streamer".into());
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn kick_channel_is_normalized_from_the_settings_form() {
+        let form: ConfigForm = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str("chat%5Bkick_channel%5D=Streamer_Name&action=save")
+            .unwrap();
+        let updated = populated_config().merge_form(form).unwrap();
+
+        assert_eq!(updated.chat.kick_channel.as_deref(), Some("streamer_name"));
     }
 
     #[test]

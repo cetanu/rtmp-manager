@@ -98,15 +98,14 @@ pub async fn chat_settings(cx: &Cx) -> Result {
                             value: chat.kick_client_secret.clone().unwrap_or_default()
                         )
                         form_field(
-                            control_id: "kick_broadcaster_user_id",
-                            label_text: "Kick broadcaster user ID",
+                            control_id: "kick_channel",
+                            label_text: "Kick channel",
                             attrs: attributes! { class="md:col-span-2" },
                             input(attrs: attributes! {
-                                id="kick_broadcaster_user_id"
-                                name="chat[kick_broadcaster_user_id]"
-                                type="number"
-                                min="1"
-                                value=(chat.kick_broadcaster_user_id.map(|id| id.to_string()).unwrap_or_default())
+                                id="kick_channel"
+                                name="chat[kick_channel]"
+                                placeholder="Channel name from kick.com/channel-name"
+                                value=(chat.kick_channel.clone().unwrap_or_default())
                             })
                         )
                     </div>
