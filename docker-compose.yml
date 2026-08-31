@@ -1,0 +1,18 @@
+services:
+  rtmp-manager:
+    build:
+      context: .
+    image: ghcr.io/cetanu/rtmp-manager:develop
+    restart: unless-stopped
+    environment:
+      CONFIG_PATH: /data/config.json
+      RUST_LOG: ${RUST_LOG:-rtmp_proxy=info,rtmp_rs=off}
+    ports:
+      - "${RTMP_PORT:-1935}:1935"
+      - "${HTTP_PORT:-3000}:3000"
+    volumes:
+      - rtmp-manager-data:/data
+
+volumes:
+  rtmp-manager-data:
+
