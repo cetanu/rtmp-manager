@@ -10,6 +10,7 @@ use toasty::Executor;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
+pub mod kick;
 pub mod twitch;
 pub mod x;
 pub mod youtube;

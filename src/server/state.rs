@@ -4,7 +4,23 @@ use crate::metrics::Metrics;
 use crate::server::stream_actor::StreamHandle;
 use anyhow::Result;
 use reqwest::Client;
+use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::broadcast;
+
+#[derive(Debug, Clone)]
+pub struct WebhookEvent {
+    pub headers: HashMap<String, String>,
+    pub body: topcoat::router::Bytes,
+}
+
+impl WebhookEvent {
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .get(&name.to_ascii_lowercase())
+            .map(String::as_str)
+    }
+}
 
 pub use crate::server::preview::{StreamState, StreamStatus};
 
@@ -16,6 +32,7 @@ pub struct AppHandle {
     pub config: ConfigHandle,
     pub metrics: Arc<Metrics>,
     pub http_client: Client,
+    pub webhooks: broadcast::Sender<WebhookEvent>,
 }
 
 impl AppHandle {
@@ -40,6 +57,7 @@ impl AppHandle {
             config_handle.subscribe(),
         )
         .await?;
+        let (webhooks, _) = broadcast::channel(64);
 
         let handle = Self {
             stream,
@@ -47,7 +65,13 @@ impl AppHandle {
             config: config_handle,
             metrics,
             http_client,
+            webhooks,
         };
+
+        tokio::spawn(crate::chat::kick::run(
+            handle.webhooks.subscribe(),
+            handle.chat.clone(),
+        ));
 
         handle.apply_chat_config().await?;
 

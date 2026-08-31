@@ -494,3 +494,28 @@ async fn ingest_chat_message(
         cx,
     )
 }
+
+#[route(POST "/api/webhook")]
+async fn receive_webhook(
+    cx: &Cx,
+    body: topcoat::router::Bytes,
+) -> Result<topcoat::router::Response> {
+    const MAX_WEBHOOK_SIZE: usize = 128 * 1024;
+    if body.len() > MAX_WEBHOOK_SIZE {
+        return Err(bad_request("Webhook body exceeds 128 KiB").into());
+    }
+    let app: &AppHandle = app_context(cx);
+    let headers = topcoat::router::headers(cx)
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_ascii_lowercase(), value.to_owned()))
+        })
+        .collect();
+    let _ = app
+        .webhooks
+        .send(crate::server::state::WebhookEvent { headers, body });
+    topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
+}

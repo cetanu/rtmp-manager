@@ -36,3 +36,12 @@ repository secrets:
   path (for example, `https://deploy.example.com/hooks/github`)
 - `DEPLOYMENT_WEBHOOK_SECRET`: exactly the value configured as
   `webhookSecret` in the infrastructure Pulumi stack
+
+## Kick chat webhook
+
+Webhooks are received at `POST /api/webhook` and broadcast internally to
+platform integrations. The Kick integration subscribes to that broadcast and
+only accepts signed `chat.message.sent` events. When configuring a Kick
+developer app, set this as its HTTPS webhook URL and subscribe the authorized
+channel to `chat.message.sent`. The app registration and OAuth credentials are
+not stored in this repository.
