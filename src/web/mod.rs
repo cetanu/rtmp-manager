@@ -23,6 +23,7 @@ use topcoat::{
 
 pub mod auth;
 pub mod components;
+mod setup;
 use components::{
     app_navigation::app_navigation, chat_inbox::chat_inbox, config_transfer::config_transfer,
     configuration_form::configuration_form, log_viewer::log_viewer, metrics::metrics_page,
@@ -122,7 +123,11 @@ async fn app_page(active_page: &'static str) -> Result {
 }
 
 #[page("/")]
-async fn home() -> Result {
+async fn home(cx: &Cx) -> Result {
+    let app: &AppHandle = app_context(cx);
+    if !app.config.get().initialized {
+        return Err(topcoat::router::error::redirect("/setup").into());
+    }
     view! { app_page(active_page: "preview") }
 }
 

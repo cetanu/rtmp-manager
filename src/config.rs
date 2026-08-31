@@ -177,6 +177,9 @@ impl Default for ChatSettings {
 #[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq)]
 pub struct AppConfig {
     #[serde(default)]
+    pub initialized: bool,
+
+    #[serde(default)]
     pub server: ServerSettings,
 
     #[serde(default)]
@@ -579,14 +582,6 @@ impl ConfigStore {
             config_path.to_path_buf()
         };
         let database_exists = database_path.exists();
-        if is_json && !config_path.exists() && !database_path.exists() {
-            bail!(
-                "Configuration database '{}' (from '{}') does not exist",
-                database_path.display(),
-                config_path.display()
-            );
-        }
-
         let database = toasty::Db::builder()
             .models(toasty::models!(StoredConfig))
             .connect(&format!("sqlite:{}", database_path.display()))
@@ -708,6 +703,13 @@ impl ConfigHandle {
         self.save_updated(current_config, updated).await
     }
 
+    pub async fn complete_setup(&self, updated: AppConfig) -> Result<Arc<AppConfig>> {
+        let _guard = self.update_lock.lock().await;
+        let current_config = self.get();
+        let (config, _, _) = self.save_updated(current_config, updated).await?;
+        Ok(config)
+    }
+
     pub async fn set_youtube_polling(&self, enabled: bool) -> Result<(Arc<AppConfig>, bool, bool)> {
         let _guard = self.update_lock.lock().await;
         let current_config = self.get();
@@ -774,6 +776,7 @@ mod tests {
 
     fn populated_config() -> AppConfig {
         AppConfig {
+            initialized: true,
             server: ServerSettings {
                 listen: "0.0.0.0:1935".parse().unwrap(),
                 api_listen: "10.0.0.1:3000".parse().unwrap(),
