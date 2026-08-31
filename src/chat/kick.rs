@@ -3,14 +3,13 @@ use crate::chat::IncomingChatMessage;
 use crate::config::AppConfig;
 use crate::server::state::WebhookEvent;
 use anyhow::{Context, Result, bail};
+use aws_lc_rs::signature::{ParsedPublicKey, RSA_PKCS1_2048_8192_SHA256};
 use base64::{Engine, engine::general_purpose::STANDARD};
-use rsa::{RsaPublicKey, pkcs1v15::VerifyingKey, pkcs8::DecodePublicKey, signature::Verifier};
 use serde::Deserialize;
-use sha2::Sha256;
 use std::sync::Arc;
 use tokio::sync::{broadcast, watch};
 
-const KICK_PUBLIC_KEY: &str = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq/+l1WnlRrGSolDMA+A8\n6rAhMbQGmQ2SapVcGM3zq8ANXjnhDWocMqfWcTd95btDydITa10kDvHzw9WQOqp2\nMZI7ZyrfzJuz5nhTPCiJwTwnEtWft7nV14BYRDHvlfqPUaZ+1KR4OCaO/wWIk/rQ\nL/TjY0M70gse8rlBkbo2a8rKhu69RQTRsoaf4DVhDPEeSeI5jVrRDGAMGL3cGuyY\n6CLKGdjVEM78g3JfYOvDU/RvfqD7L89TZ3iN94jrmWdGz34JNlEI5hqK8dd7C5EF\nBEbZ5jgB8s8ReQV8H+MkuffjdAj3ajDDX3DOJMIut1lBrUVD1AaSrGCKHooWoL2e\ntwIDAQAB\n-----END PUBLIC KEY-----";
+const KICK_PUBLIC_KEY: &str = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq/+l1WnlRrGSolDMA+A86rAhMbQGmQ2SapVcGM3zq8ANXjnhDWocMqfWcTd95btDydITa10kDvHzw9WQOqp2MZI7ZyrfzJuz5nhTPCiJwTwnEtWft7nV14BYRDHvlfqPUaZ+1KR4OCaO/wWIk/rQL/TjY0M70gse8rlBkbo2a8rKhu69RQTRsoaf4DVhDPEeSeI5jVrRDGAMGL3cGuyY6CLKGdjVEM78g3JfYOvDU/RvfqD7L89TZ3iN94jrmWdGz34JNlEI5hqK8dd7C5EFBEbZ5jgB8s8ReQV8H+MkuffjdAj3ajDDX3DOJMIut1lBrUVD1AaSrGCKHooWoL2etwIDAQAB";
 
 #[derive(Debug, Deserialize)]
 struct KickChatEvent {
@@ -35,13 +34,14 @@ pub fn verify_webhook(
     let signature = STANDARD
         .decode(signature)
         .context("Kick signature is not valid base64")?;
-    let signature = rsa::pkcs1v15::Signature::try_from(signature.as_slice())
-        .context("Kick signature has an invalid format")?;
-    let public_key =
-        RsaPublicKey::from_public_key_pem(KICK_PUBLIC_KEY).context("Kick public key is invalid")?;
+    let public_key = STANDARD
+        .decode(KICK_PUBLIC_KEY)
+        .context("Kick public key is invalid base64")?;
+    let public_key = ParsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, public_key)
+        .context("Kick public key is invalid")?;
     let payload = [message_id.as_bytes(), timestamp.as_bytes(), body].join(&b'.');
-    VerifyingKey::<Sha256>::new(public_key)
-        .verify(&payload, &signature)
+    public_key
+        .verify_sig(&payload, &signature)
         .map_err(|_| anyhow::anyhow!("Kick webhook signature verification failed"))
 }
 
@@ -125,5 +125,12 @@ mod tests {
         assert_eq!(message.external_id, "01ABC");
         assert_eq!(message.author, "viewer");
         assert_eq!(message.text, "Hello Kick");
+    }
+
+    #[test]
+    fn parses_public_key_before_rejecting_invalid_signature() {
+        let signature = STANDARD.encode([0_u8; 256]);
+        let error = verify_webhook("message", "timestamp", b"{}", &signature).unwrap_err();
+        assert!(error.to_string().contains("signature verification failed"));
     }
 }
