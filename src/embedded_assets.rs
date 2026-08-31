@@ -16,6 +16,7 @@ const APP_NAVIGATION: &[u8] = include_bytes!("../static/app-navigation.js");
 const LOG_VIEWER: &[u8] = include_bytes!("../static/log-viewer.js");
 const METRICS_CHARTS: &[u8] = include_bytes!("../static/metrics-charts.js");
 const SECRET_FIELDS: &[u8] = include_bytes!("../static/secret-fields.js");
+const CHAT_OVERLAY: &[u8] = include_bytes!("../static/chat-overlay.js");
 
 struct EmbeddedAsset {
     id: Asset,
@@ -108,6 +109,13 @@ fn install_at(executable: &Path, tailwind_stylesheet: Asset) -> Result<()> {
             extension: "js",
             content_type: "text/javascript",
             contents: SECRET_FIELDS,
+        },
+        EmbeddedAsset {
+            id: crate::web::CHAT_OVERLAY_SCRIPT,
+            stem: "chat-overlay",
+            extension: "js",
+            content_type: "text/javascript",
+            contents: CHAT_OVERLAY,
         },
     ];
 

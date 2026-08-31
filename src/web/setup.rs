@@ -1,7 +1,5 @@
 use crate::config::{AppConfig, TargetConfig};
 use crate::server::state::AppHandle;
-use aws_lc_rs::rand::{SecureRandom, SystemRandom};
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::Deserialize;
 use std::time::Duration;
 use topcoat::{
@@ -111,15 +109,19 @@ async fn complete_setup(
     let form: SetupForm = serde_qs::from_bytes(&body)
         .map_err(|error| bad_request(format!("Invalid setup form: {error}")))?;
     let target = destination(&form).map_err(bad_request)?;
-    let mut config = AppConfig::default();
-    config.initialized = true;
+    let mut config = AppConfig {
+        initialized: true,
+        ..AppConfig::default()
+    };
     config.web_auth.username = form.admin_username.trim().to_owned();
     config.web_auth.password = form.admin_password;
     config.server.ingest_stream_key = if form.ingest_stream_key.trim().is_empty() {
-        generate_stream_key().map_err(bad_request)?
+        crate::util::generate_secure_token().map_err(|error| bad_request(error.to_string()))?
     } else {
         form.ingest_stream_key.trim().to_owned()
     };
+    config.overlay.key =
+        crate::util::generate_secure_token().map_err(|error| bad_request(error.to_string()))?;
     config.chat.twitch_channel = optional(form.twitch_channel);
     config.chat.youtube_api_key = optional(form.youtube_api_key);
 
@@ -143,14 +145,6 @@ async fn complete_setup(
 fn optional(value: String) -> Option<String> {
     let value = value.trim();
     (!value.is_empty()).then(|| value.to_owned())
-}
-
-fn generate_stream_key() -> std::result::Result<String, String> {
-    let mut bytes = [0_u8; 24];
-    SystemRandom::new()
-        .fill(&mut bytes)
-        .map_err(|_| "Failed to generate a secure ingest key".to_owned())?;
-    Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 
 fn destination(form: &SetupForm) -> std::result::Result<Option<TargetConfig>, String> {
@@ -229,8 +223,8 @@ mod tests {
 
     #[test]
     fn generated_stream_keys_are_valid_and_unique() {
-        let first = generate_stream_key().unwrap();
-        let second = generate_stream_key().unwrap();
+        let first = crate::util::generate_secure_token().unwrap();
+        let second = crate::util::generate_secure_token().unwrap();
         assert_ne!(first, second);
         assert!(
             first

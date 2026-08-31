@@ -7,6 +7,7 @@ pub mod configuration_form;
 pub mod log_viewer;
 pub mod metrics;
 pub mod notifications;
+pub mod overlay_settings;
 pub mod publishing_controls;
 pub mod server_settings;
 pub mod stream_preview;

@@ -7,11 +7,10 @@ use topcoat::{
     router::{Body, IntoResponse, Next, Response, StatusCode, header, layer},
 };
 
-const PUBLIC_INGEST_PATHS: [&str; 1] = ["/api/webhook"];
-
 #[layer("/")]
 async fn basic_auth(cx: &mut CxBuilder, body: Body, next: Next<'_>) -> Result<Response> {
-    if PUBLIC_INGEST_PATHS.contains(&topcoat::router::uri(cx).path()) {
+    let path = topcoat::router::uri(cx).path();
+    if path == "/api/webhook" || path.starts_with("/overlay/chat") {
         return next.run(cx, body).await;
     }
 

@@ -23,6 +23,7 @@ use topcoat::{
 
 pub mod auth;
 pub mod components;
+mod overlay;
 mod setup;
 use components::{
     app_navigation::app_navigation, chat_inbox::chat_inbox, config_transfer::config_transfer,
@@ -47,6 +48,8 @@ pub(crate) const METRICS_CHARTS_SCRIPT: topcoat::asset::Asset =
     topcoat::asset::asset!("static/metrics-charts.js");
 pub(crate) const SECRET_FIELDS_SCRIPT: topcoat::asset::Asset =
     topcoat::asset::asset!("static/secret-fields.js");
+pub(crate) const CHAT_OVERLAY_SCRIPT: topcoat::asset::Asset =
+    topcoat::asset::asset!("static/chat-overlay.js");
 
 pub async fn run_web_server(
     app_handle: AppHandle,

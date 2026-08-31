@@ -96,6 +96,60 @@ pub struct WebAuthSettings {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Validate)]
+pub struct OverlaySettings {
+    #[serde(default)]
+    #[validate(max_length = 256)]
+    #[validate(pattern = r"^[A-Za-z0-9_-]*$")]
+    pub key: String,
+    #[serde(default = "default_overlay_theme")]
+    pub theme: String,
+    #[serde(default = "default_overlay_font_size")]
+    #[validate(minimum = 12)]
+    #[validate(maximum = 72)]
+    pub font_size_px: u8,
+    #[serde(default = "default_overlay_opacity")]
+    #[validate(maximum = 100)]
+    pub background_opacity_percent: u8,
+    #[serde(default = "default_true")]
+    pub show_badges: bool,
+    #[serde(default = "default_true")]
+    pub show_avatars: bool,
+    #[serde(default = "default_true")]
+    pub show_emotes: bool,
+    #[serde(default = "default_overlay_fade_duration")]
+    #[validate(maximum = 300)]
+    pub fade_duration_secs: u16,
+}
+
+fn default_overlay_theme() -> String {
+    "dark".to_owned()
+}
+fn default_overlay_font_size() -> u8 {
+    24
+}
+fn default_overlay_opacity() -> u8 {
+    70
+}
+fn default_overlay_fade_duration() -> u16 {
+    15
+}
+
+impl Default for OverlaySettings {
+    fn default() -> Self {
+        Self {
+            key: String::new(),
+            theme: default_overlay_theme(),
+            font_size_px: default_overlay_font_size(),
+            background_opacity_percent: default_overlay_opacity(),
+            show_badges: true,
+            show_avatars: true,
+            show_emotes: true,
+            fade_duration_secs: default_overlay_fade_duration(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Validate)]
 pub struct ChatSettings {
     #[serde(default = "default_chat_queue_capacity")]
     #[validate(minimum = 1)]
@@ -192,6 +246,9 @@ pub struct AppConfig {
     pub web_auth: WebAuthSettings,
 
     #[serde(default)]
+    pub overlay: OverlaySettings,
+
+    #[serde(default)]
     pub chat: ChatSettings,
 }
 
@@ -204,6 +261,15 @@ impl AppConfig {
         self.chat
             .validate()
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        self.overlay
+            .validate()
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        if !matches!(
+            self.overlay.theme.as_str(),
+            "dark" | "minimal" | "comic" | "transparent-box"
+        ) {
+            bail!("Overlay theme must be Dark, Minimal, Comic, or Transparent Box");
+        }
 
         let username_set = !self.web_auth.username.trim().is_empty();
         let password_set = !self.web_auth.password.is_empty();
@@ -328,6 +394,22 @@ impl AppConfig {
                     .trim()
                     .to_string(),
                 password: non_empty(auth_fields.password).unwrap_or(config.web_auth.password),
+            };
+        }
+        if let Some(overlay) = form.overlay {
+            config.overlay = OverlaySettings {
+                key: non_empty(overlay.key).unwrap_or(config.overlay.key),
+                theme: overlay.theme.unwrap_or(config.overlay.theme),
+                font_size_px: overlay.font_size_px.unwrap_or(config.overlay.font_size_px),
+                background_opacity_percent: overlay
+                    .background_opacity_percent
+                    .unwrap_or(config.overlay.background_opacity_percent),
+                show_badges: overlay.show_badges,
+                show_avatars: overlay.show_avatars,
+                show_emotes: overlay.show_emotes,
+                fade_duration_secs: overlay
+                    .fade_duration_secs
+                    .unwrap_or(config.overlay.fade_duration_secs),
             };
         }
         if let Some(chat) = form.chat {
@@ -540,6 +622,7 @@ pub struct TargetForm {
 pub struct ConfigForm {
     pub server: Option<ServerForm>,
     pub web_auth: Option<WebAuthForm>,
+    pub overlay: Option<OverlayForm>,
     pub chat: Option<ChatForm>,
     pub notifications: Option<NotificationsForm>,
     pub targets: Option<Vec<TargetForm>>,
@@ -551,10 +634,26 @@ impl ConfigForm {
     pub fn is_empty(&self) -> bool {
         self.server.is_none()
             && self.web_auth.is_none()
+            && self.overlay.is_none()
             && self.chat.is_none()
             && self.notifications.is_none()
             && self.targets.is_none()
     }
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct OverlayForm {
+    pub key: Option<String>,
+    pub theme: Option<String>,
+    pub font_size_px: Option<u8>,
+    pub background_opacity_percent: Option<u8>,
+    #[serde(default)]
+    pub show_badges: bool,
+    #[serde(default)]
+    pub show_avatars: bool,
+    #[serde(default)]
+    pub show_emotes: bool,
+    pub fade_duration_secs: Option<u16>,
 }
 
 #[derive(Debug, toasty::Model)]
@@ -799,6 +898,7 @@ mod tests {
                 username: "operator".into(),
                 password: "correct horse battery staple".into(),
             },
+            overlay: OverlaySettings::default(),
             chat: ChatSettings {
                 twitch_channel: Some("streamer".into()),
                 youtube_api_key: Some("youtube-api-key".into()),

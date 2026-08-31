@@ -1,4 +1,14 @@
+use aws_lc_rs::rand::{SecureRandom, SystemRandom};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+pub fn generate_secure_token() -> anyhow::Result<String> {
+    let mut bytes = [0_u8; 24];
+    SystemRandom::new()
+        .fill(&mut bytes)
+        .map_err(|_| anyhow::anyhow!("Failed to generate a secure token"))?;
+    Ok(URL_SAFE_NO_PAD.encode(bytes))
+}
 
 /// Compares two byte slices in constant time.
 pub fn constant_time_eq(expected: impl AsRef<[u8]>, submitted: impl AsRef<[u8]>) -> bool {
@@ -105,5 +115,17 @@ mod tests {
             Some("hello".to_string())
         );
         assert_eq!(non_empty(None), None);
+    }
+
+    #[test]
+    fn generated_tokens_are_url_safe_and_unique() {
+        let first = generate_secure_token().unwrap();
+        let second = generate_secure_token().unwrap();
+        assert_ne!(first, second);
+        assert!(
+            first
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "_-".contains(character))
+        );
     }
 }

@@ -26,3 +26,11 @@ database. Set `HTTP_PORT`, `RTMP_PORT`, or `RUST_LOG` in the shell or a `.env`
 file to override the corresponding Compose defaults. To use a prebuilt image,
 remove the `build` block or run `docker compose pull` after images have been
 published to GHCR.
+
+## OBS chat overlay
+
+After first-run setup, open Settings and copy the private OBS Browser Source URL
+from **OBS Chat Overlay**. The transparent overlay receives aggregated chat over
+Server-Sent Events and supports Dark, Minimal, Comic, and Transparent Box
+themes plus font size, message opacity, badges, avatars, emoji, and fade timing.
+Keep the overlay URL private because its query key grants read access to chat.

@@ -1,6 +1,7 @@
 use crate::web::components::actions_panel::actions_panel;
 use crate::web::components::chat_settings::chat_settings;
 use crate::web::components::notifications::notifications;
+use crate::web::components::overlay_settings::overlay_settings;
 use crate::web::components::server_settings::server_settings;
 use crate::web::components::targets::targets;
 use crate::web::components::web_auth::web_auth;
@@ -32,6 +33,7 @@ pub async fn configuration_form(active_page: &'static str) -> Result {
                     <div class="min-w-0">web_auth()</div>
                     <div class="min-w-0">chat_settings()</div>
                     <div class="min-w-0">notifications()</div>
+                    <div class="min-w-0 lg:col-span-2">overlay_settings()</div>
                 </div>
             </section>
             <section data-app-page="targets" hidden=(active_page != "targets")>
