@@ -1,6 +1,7 @@
 pub mod handler;
 pub mod preview;
 pub mod relay;
+pub mod srt;
 pub mod state;
 pub mod stream_actor;
 

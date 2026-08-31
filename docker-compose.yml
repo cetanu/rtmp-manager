@@ -10,9 +10,9 @@ services:
     ports:
       - "${RTMP_PORT:-1935}:1935"
       - "${HTTP_PORT:-3000}:3000"
+      - "${SRT_PORT:-6000}:6000/udp"
     volumes:
       - rtmp-manager-data:/data
 
 volumes:
   rtmp-manager-data:
-

@@ -16,6 +16,12 @@ pub struct ServerSettings {
     #[serde(default = "default_api_listen")]
     pub api_listen: SocketAddr,
 
+    #[serde(default = "default_srt_listen")]
+    pub srt_listen: SocketAddr,
+
+    #[serde(default = "default_true")]
+    pub srt_enabled: bool,
+
     #[serde(default = "default_test_stream_duration_secs")]
     #[validate(minimum = 1)]
     #[validate(maximum = 86_400)]
@@ -38,6 +44,10 @@ fn default_api_listen() -> SocketAddr {
     "0.0.0.0:3000".parse().unwrap()
 }
 
+fn default_srt_listen() -> SocketAddr {
+    "0.0.0.0:6000".parse().unwrap()
+}
+
 fn default_test_stream_duration_secs() -> u64 {
     15
 }
@@ -47,6 +57,8 @@ impl Default for ServerSettings {
         Self {
             listen: default_listen(),
             api_listen: default_api_listen(),
+            srt_listen: default_srt_listen(),
+            srt_enabled: true,
             test_stream_duration_secs: default_test_stream_duration_secs(),
             ingest_stream_key: String::new(),
         }
@@ -362,6 +374,12 @@ impl AppConfig {
                     config.server.api_listen,
                     "API listen",
                 )?,
+                srt_listen: parse_address(
+                    server.srt_listen,
+                    config.server.srt_listen,
+                    "SRT listen",
+                )?,
+                srt_enabled: server.srt_enabled,
                 test_stream_duration_secs: server
                     .test_stream_duration_secs
                     .unwrap_or(config.server.test_stream_duration_secs),
@@ -554,6 +572,9 @@ fn parse_address(
 pub struct ServerForm {
     pub listen: Option<String>,
     pub api_listen: Option<String>,
+    pub srt_listen: Option<String>,
+    #[serde(default)]
+    pub srt_enabled: bool,
     pub test_stream_duration_secs: Option<u64>,
     pub ingest_stream_key: Option<String>,
 }
@@ -879,6 +900,8 @@ mod tests {
             server: ServerSettings {
                 listen: "0.0.0.0:1935".parse().unwrap(),
                 api_listen: "10.0.0.1:3000".parse().unwrap(),
+                srt_listen: "10.0.0.1:6000".parse().unwrap(),
+                srt_enabled: true,
                 test_stream_duration_secs: 15,
                 ingest_stream_key: "existing-ingest-key".into(),
             },

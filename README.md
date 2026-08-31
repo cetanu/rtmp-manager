@@ -16,13 +16,18 @@ Start the dashboard and RTMP ingest listener with:
 docker compose up --build
 ```
 
-The dashboard is available at <http://localhost:3000>. Publish from OBS to
+The dashboard is available at <http://localhost:3000>. Publish RTMP from OBS to
 `rtmp://localhost:1935/live/CHANGE_ME_TO_A_PRIVATE_STREAM_KEY`, then replace the
 placeholder ingest and destination keys in the dashboard before using the
 service publicly.
 
+SRT ingest listens on UDP port 6000. Configure OBS with
+`srt://localhost:6000?mode=caller&streamid=#!::r=live,m=publish,u=<stream_key>`.
+The access-control stream ID is authenticated before MPEG-TS packets are
+remuxed into the same relay pipeline as RTMP ingest.
+
 The `rtmp-manager-data` volume persists the seed configuration and SQLite
-database. Set `HTTP_PORT`, `RTMP_PORT`, or `RUST_LOG` in the shell or a `.env`
+database. Set `HTTP_PORT`, `RTMP_PORT`, `SRT_PORT`, or `RUST_LOG` in the shell or a `.env`
 file to override the corresponding Compose defaults. To use a prebuilt image,
 remove the `build` block or run `docker compose pull` after images have been
 published to GHCR.

@@ -136,6 +136,8 @@ async fn main() -> Result<()> {
     let web_addr = config.server.api_listen;
     let rtmp_listen = config.server.listen;
     let listen_port = config.server.listen.port();
+    let srt_listen = config.server.srt_listen;
+    let srt_enabled = config.server.srt_enabled;
 
     let app = AppHandle::new(metrics, config_handle, http_client, listen_port).await?;
 
@@ -146,6 +148,15 @@ async fn main() -> Result<()> {
             warn!("Web interface server error: {:#}", e);
         }
     });
+
+    if srt_enabled {
+        let srt_app = app.clone();
+        tokio::spawn(async move {
+            if let Err(error) = crate::server::srt::run_srt_server(srt_listen, srt_app).await {
+                warn!("SRT ingest server error: {error:#}");
+            }
+        });
+    }
 
     // Run RTMP Server
     run_rtmp_server(rtmp_listen, app).await

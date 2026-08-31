@@ -39,6 +39,6 @@ ENV CONFIG_PATH=/data/config.json \
     RUST_LOG=rtmp_proxy=info,rtmp_rs=off
 
 VOLUME ["/data"]
-EXPOSE 1935 3000
+EXPOSE 1935 3000 6000/udp
 
 ENTRYPOINT ["/opt/rtmp-manager/rtmp-proxy"]

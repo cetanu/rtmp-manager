@@ -28,6 +28,8 @@ base64 = "0.22.1"
 futures-util = "0.3"
 regex = "1.10"
 aws-lc-rs = "1.17.3"
+srt-tokio = "0.4.4"
+bytes = "1"
 
 [build-dependencies]
 topcoat = { version = "0.5.0", default-features = false, features = ["tailwind"] }
