@@ -1,7 +1,5 @@
-use crate::chat::{ChatInboxSnapshot, EnqueueOutcome, IncomingChatMessage};
 use crate::config::ConfigForm;
 use crate::server::state::{AppHandle, StreamStatus};
-use crate::util::secure_token_matches;
 use futures_util::StreamExt;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -17,7 +15,7 @@ use topcoat::{
             multipart::Multipart,
             sse::{Event as SseEvent, KeepAlive, Sse},
         },
-        error::{bad_request, internal_server_error, not_found, unauthorized},
+        error::{bad_request, internal_server_error, not_found},
         page, route,
     },
     view::{component, view},
@@ -217,20 +215,6 @@ async fn get_metrics_history(cx: &Cx) -> Result<Json<Vec<crate::metrics::Metrics
 #[derive(Debug, Deserialize)]
 struct AcknowledgeChatMessage {
     id: u64,
-}
-
-#[derive(Debug, serde::Serialize)]
-struct ChatIngestResponse {
-    outcome: &'static str,
-    inbox: ChatInboxSnapshot,
-}
-
-fn bearer_token(cx: &Cx) -> Option<&str> {
-    topcoat::router::headers(cx)
-        .get(topcoat::router::header::AUTHORIZATION)?
-        .to_str()
-        .ok()?
-        .strip_prefix("Bearer ")
 }
 
 #[route(POST "/api/config")]
@@ -450,49 +434,6 @@ async fn service_logs(
         }
     });
     Ok(Sse::new(initial.chain(live)).keep_alive(KeepAlive::new()))
-}
-
-#[route(POST "/api/chat/ingest")]
-async fn ingest_chat_message(
-    cx: &Cx,
-    Json(message): Json<IncomingChatMessage>,
-) -> Result<topcoat::router::Response> {
-    let app: &AppHandle = app_context(cx);
-    let expected_token = app
-        .config
-        .get()
-        .chat
-        .ingest_token
-        .clone()
-        .filter(|value| !value.trim().is_empty());
-    let Some(expected_token) = expected_token.as_deref() else {
-        return topcoat::router::IntoResponse::into_response(
-            (
-                topcoat::router::StatusCode::SERVICE_UNAVAILABLE,
-                "Chat ingest is disabled; configure a chat ingest token",
-            ),
-            cx,
-        );
-    };
-    if !bearer_token(cx).is_some_and(|submitted| secure_token_matches(expected_token, submitted)) {
-        return Err(unauthorized().into());
-    }
-
-    let outcome = match app.chat.enqueue(message).await {
-        Ok(EnqueueOutcome::Accepted) => "accepted",
-        Ok(EnqueueOutcome::Duplicate) => "duplicate",
-        Ok(EnqueueOutcome::Dropped) => "dropped",
-        Err(error) => return Err(bad_request(error.to_string()).into()),
-    };
-    let response = ChatIngestResponse {
-        outcome,
-        inbox: app.chat.snapshot().await?,
-    };
-
-    topcoat::router::IntoResponse::into_response(
-        (topcoat::router::StatusCode::ACCEPTED, Json(response)),
-        cx,
-    )
 }
 
 #[route(POST "/api/webhook")]

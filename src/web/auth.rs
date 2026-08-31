@@ -7,7 +7,7 @@ use topcoat::{
     router::{Body, IntoResponse, Next, Response, StatusCode, header, layer},
 };
 
-const PUBLIC_INGEST_PATHS: [&str; 2] = ["/api/chat/ingest", "/api/webhook"];
+const PUBLIC_INGEST_PATHS: [&str; 1] = ["/api/webhook"];
 
 #[layer("/")]
 async fn basic_auth(cx: &mut CxBuilder, body: Body, next: Next<'_>) -> Result<Response> {

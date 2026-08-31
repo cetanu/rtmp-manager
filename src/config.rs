@@ -97,8 +97,6 @@ pub struct WebAuthSettings {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Validate)]
 pub struct ChatSettings {
-    #[serde(default)]
-    pub ingest_token: Option<String>,
     #[serde(default = "default_chat_queue_capacity")]
     #[validate(minimum = 1)]
     pub queue_capacity: usize,
@@ -140,7 +138,6 @@ fn default_true() -> bool {
 impl Default for ChatSettings {
     fn default() -> Self {
         Self {
-            ingest_token: None,
             queue_capacity: default_chat_queue_capacity(),
             twitch_channel: None,
             youtube_api_key: None,
@@ -196,14 +193,6 @@ impl AppConfig {
         }
         if username_set && self.web_auth.username.contains(':') {
             bail!("Web authentication username must not contain ':'");
-        }
-        if self
-            .chat
-            .ingest_token
-            .as_ref()
-            .is_some_and(|token| !token.trim().is_empty() && token.len() < 16)
-        {
-            bail!("Chat ingest token must be at least 16 characters");
         }
         if self.chat.twitch_channel.as_ref().is_some_and(|channel| {
             let channel = channel.trim().trim_start_matches('#');
@@ -291,11 +280,6 @@ impl AppConfig {
         }
         if let Some(chat) = form.chat {
             config.chat = ChatSettings {
-                ingest_token: updated_secret(
-                    chat.ingest_token,
-                    chat.clear_ingest_token,
-                    config.chat.ingest_token,
-                ),
                 queue_capacity: chat.queue_capacity.unwrap_or(config.chat.queue_capacity),
                 twitch_channel: non_empty(chat.twitch_channel)
                     .map(|channel| channel.trim_start_matches('#').to_ascii_lowercase()),
@@ -431,9 +415,6 @@ pub struct WebAuthForm {
 
 #[derive(Debug, Default, Deserialize)]
 pub struct ChatForm {
-    pub ingest_token: Option<String>,
-    #[serde(default)]
-    pub clear_ingest_token: bool,
     pub queue_capacity: Option<usize>,
     pub twitch_channel: Option<String>,
     pub youtube_api_key: Option<String>,
@@ -717,7 +698,6 @@ mod tests {
                 password: "correct horse battery staple".into(),
             },
             chat: ChatSettings {
-                ingest_token: Some("generic-ingest-token".into()),
                 twitch_channel: Some("streamer".into()),
                 youtube_api_key: Some("youtube-api-key".into()),
                 youtube_polling_enabled: true,
@@ -734,16 +714,6 @@ mod tests {
         assert!(config.validate().unwrap_err().to_string().contains("':'"));
 
         config.web_auth.username = "operator".into();
-        config.chat.ingest_token = Some("too-short".into());
-        assert!(
-            config
-                .validate()
-                .unwrap_err()
-                .to_string()
-                .contains("at least 16")
-        );
-
-        config.chat.ingest_token = None;
         config.chat.twitch_channel = Some("invalid-channel!".into());
         assert!(
             config
@@ -781,7 +751,6 @@ mod tests {
             username: "operator".into(),
             password: "correct horse battery staple".into(),
         };
-        config.chat.ingest_token = Some("chat-token-long-enough".into());
         config.chat.youtube_video_id = Some("video-id".into());
         config.chat.youtube_api_key = Some("api-key".into());
         store.save(&config).await.unwrap();
@@ -792,10 +761,6 @@ mod tests {
         assert_eq!(reloaded.notifications.live_message, "saved in sqlite");
         assert_eq!(reloaded.web_auth.username, "operator");
         assert_eq!(reloaded.web_auth.password, "correct horse battery staple");
-        assert_eq!(
-            reloaded.chat.ingest_token.as_deref(),
-            Some("chat-token-long-enough")
-        );
         assert_eq!(reloaded.chat.youtube_video_id.as_deref(), Some("video-id"));
 
         fs::remove_dir_all(directory).unwrap();
@@ -871,10 +836,6 @@ mod tests {
         assert_eq!(updated.targets.len(), 1);
         assert_eq!(updated.targets[0].stream_key, "secret");
         assert_eq!(updated.web_auth.password, "correct horse battery staple");
-        assert_eq!(
-            updated.chat.ingest_token.as_deref(),
-            Some("generic-ingest-token")
-        );
     }
 
     #[test]
@@ -991,17 +952,13 @@ mod tests {
             .use_form_encoding(true)
             .deserialize_str(
                 "web_auth%5Busername%5D=operator&web_auth%5Bpassword%5D=&\
-                 chat%5Bingest_token%5D=&chat%5Btwitch_channel%5D=streamer&\
+                 chat%5Btwitch_channel%5D=streamer&\
                  chat%5Byoutube_api_key%5D=&chat%5Bqueue_capacity%5D=250&action=save",
             )
             .unwrap();
         let updated = populated_config().merge_form(form).unwrap();
 
         assert_eq!(updated.web_auth.password, "correct horse battery staple");
-        assert_eq!(
-            updated.chat.ingest_token.as_deref(),
-            Some("generic-ingest-token")
-        );
         assert_eq!(updated.chat.twitch_channel.as_deref(), Some("streamer"));
         assert_eq!(
             updated.chat.youtube_api_key.as_deref(),

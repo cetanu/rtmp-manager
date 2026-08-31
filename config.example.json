@@ -10,7 +10,6 @@
     "password": ""
   },
   "chat": {
-    "ingest_token": "",
     "queue_capacity": 500,
     "twitch_channel": "",
     "youtube_api_key": "",
