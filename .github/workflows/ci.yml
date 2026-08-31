@@ -50,6 +50,22 @@ jobs:
   check:
     name: Check, lint, and test
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: rtmp_manager_test
+          POSTGRES_USER: rtmp_manager
+          POSTGRES_PASSWORD: rtmp_manager
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rtmp_manager -d rtmp_manager_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_POSTGRES_URL: postgres://rtmp_manager:rtmp_manager@127.0.0.1:5432/rtmp_manager_test
     steps:
       - uses: actions/checkout@v4
         with:

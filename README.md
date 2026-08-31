@@ -6,7 +6,7 @@ and X.
 
 The Rust service includes a server-rendered Topcoat dashboard for stream
 targets, notifications, access credentials, and chat integrations. Application
-configuration and chat state are stored in SQLite.
+configuration and chat state are stored in SQLite or PostgreSQL.
 
 ## Run with Docker Compose
 
@@ -26,11 +26,12 @@ SRT ingest listens on UDP port 6000. Configure OBS with
 The access-control stream ID is authenticated before MPEG-TS packets are
 remuxed into the same relay pipeline as RTMP ingest.
 
-The `rtmp-manager-data` volume persists the seed configuration and SQLite
-database. Set `HTTP_PORT`, `RTMP_PORT`, `SRT_PORT`, or `RUST_LOG` in the shell or a `.env`
-file to override the corresponding Compose defaults. To use a prebuilt image,
-remove the `build` block or run `docker compose pull` after images have been
-published to GHCR.
+The `rtmp-manager-data` volume persists the SQLite database. Set `HTTP_PORT`,
+`RTMP_PORT`, `SRT_PORT`, or `RUST_LOG` in the shell or a `.env` file to override
+the corresponding Compose defaults. Set `DATABASE_URL` to a PostgreSQL URL to
+use PostgreSQL instead. Both backends run embedded schema migrations during
+startup. To use a prebuilt image, remove the `build` block or run
+`docker compose pull` after images have been published to GHCR.
 
 ## OBS chat overlay
 

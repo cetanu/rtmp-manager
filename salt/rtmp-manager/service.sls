@@ -20,5 +20,4 @@ rtmp-proxy.service:
       - file: /etc/systemd/system/rtmp-proxy.service
     - require:
       - file: /usr/local/bin/ffmpeg
-      - file: /opt/apps/rtmp-proxy/shared/config.json
       - cmd: reload-systemd-for-rtmp-proxy

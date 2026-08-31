@@ -36,13 +36,14 @@ pub struct AppHandle {
 impl AppHandle {
     pub async fn new(
         metrics: Arc<Metrics>,
+        database: crate::database::Database,
         config_handle: ConfigHandle,
         http_client: Client,
         listen_port: u16,
     ) -> Result<Self> {
         let initial_config = config_handle.get();
         let chat = ChatHandle::spawn(
-            config_handle.path(),
+            database,
             initial_config.chat.queue_capacity,
             http_client.clone(),
         )

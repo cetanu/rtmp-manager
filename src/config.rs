@@ -2,9 +2,7 @@ use crate::util::non_empty;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_valid::Validate;
-use std::fs;
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{Mutex, watch};
 
@@ -677,60 +675,15 @@ pub struct OverlayForm {
     pub fade_duration_secs: Option<u16>,
 }
 
-#[derive(Debug, toasty::Model)]
-#[table = "app_config"]
-struct StoredConfig {
-    #[key]
-    id: i64,
-    data: String,
-}
-
-/// Toasty-backed SQLite configuration storage.
+/// Database-agnostic configuration repository.
 #[derive(Clone)]
 pub struct ConfigStore {
-    path: PathBuf,
-    database: toasty::Db,
+    database: crate::database::Database,
 }
 
 impl ConfigStore {
-    pub async fn open<P: AsRef<Path>>(config_path: P) -> Result<(Self, AppConfig)> {
-        let config_path = config_path.as_ref();
-        let is_json = config_path.extension().is_some_and(|ext| ext == "json");
-        let database_path = if is_json {
-            config_path.with_extension("sqlite3")
-        } else {
-            config_path.to_path_buf()
-        };
-        let database_exists = database_path.exists();
-        let database = toasty::Db::builder()
-            .models(toasty::models!(StoredConfig))
-            .connect(&format!("sqlite:{}", database_path.display()))
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to open config database '{}'",
-                    database_path.display()
-                )
-            })?;
-        #[cfg(unix)]
-        if !database_exists {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&database_path, fs::Permissions::from_mode(0o600)).with_context(
-                || {
-                    format!(
-                        "Failed to secure config database '{}'",
-                        database_path.display()
-                    )
-                },
-            )?;
-        }
-        let store = Self {
-            path: database_path,
-            database,
-        };
-        if !database_exists {
-            store.database.push_schema().await?;
-        }
+    pub async fn open(database: crate::database::Database) -> Result<(Self, AppConfig)> {
+        let store = Self { database };
         let config = match store.load().await? {
             Some(config) => config,
             None => {
@@ -743,44 +696,33 @@ impl ConfigStore {
         Ok((store, config))
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
     pub async fn load(&self) -> Result<Option<AppConfig>> {
-        let mut database = self.database.clone();
-        let record = StoredConfig::filter(StoredConfig::fields().id().eq(1_i64))
-            .first()
-            .exec(&mut database)
+        let data: Option<String> = sqlx::query_scalar("SELECT data FROM app_config WHERE id = $1")
+            .bind(1_i64)
+            .fetch_optional(self.database.pool())
             .await?;
-        record
-            .map(|record| {
-                serde_json::from_str(&record.data)
-                    .context("Failed to deserialize configuration from Toasty")
-            })
-            .transpose()
+        data.map(|data| {
+            serde_json::from_str(&data).context("Failed to deserialize stored configuration")
+        })
+        .transpose()
     }
 
     pub async fn save(&self, config: &AppConfig) -> Result<()> {
         config.validate()?;
         let data = serde_json::to_string(config)?;
-        let mut database = self.database.clone();
-        if let Some(mut record) = StoredConfig::filter(StoredConfig::fields().id().eq(1_i64))
-            .first()
-            .exec(&mut database)
-            .await?
-        {
-            record.update().data(data).exec(&mut database).await?;
-        } else {
-            toasty::create!(StoredConfig { id: 1, data })
-                .exec(&mut database)
-                .await?;
-        }
+        sqlx::query(
+            "INSERT INTO app_config (id, data) VALUES ($1, $2) \
+             ON CONFLICT (id) DO UPDATE SET data = excluded.data",
+        )
+        .bind(1_i64)
+        .bind(data)
+        .execute(self.database.pool())
+        .await?;
         Ok(())
     }
 }
 
-/// Lightweight, cloneable handle managing live configuration broadcasts and persistent SQLite storage.
+/// Lightweight, cloneable handle managing live configuration broadcasts and persistence.
 #[derive(Clone)]
 pub struct ConfigHandle {
     store: ConfigStore,
@@ -789,8 +731,8 @@ pub struct ConfigHandle {
 }
 
 impl ConfigHandle {
-    pub async fn open<P: AsRef<Path>>(config_path: P) -> Result<(Self, Arc<AppConfig>)> {
-        let (store, config) = ConfigStore::open(config_path).await?;
+    pub async fn open(database: crate::database::Database) -> Result<(Self, Arc<AppConfig>)> {
+        let (store, config) = ConfigStore::open(database).await?;
         config.validate()?;
         let config_arc = Arc::new(config);
         let (current, _) = watch::channel(Arc::clone(&config_arc));
@@ -883,16 +825,19 @@ impl ConfigHandle {
         let current_config = self.get();
         self.save_updated(current_config, imported).await
     }
-
-    pub fn path(&self) -> &Path {
-        self.store.path()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    async fn test_database(path: &std::path::Path) -> crate::database::Database {
+        crate::database::Database::connect(&crate::database::sqlite_url(path))
+            .await
+            .unwrap()
+    }
 
     fn populated_config() -> AppConfig {
         AppConfig {
@@ -967,7 +912,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stores_and_round_trips_config_with_toasty() {
+    async fn stores_and_round_trips_config() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -975,7 +920,9 @@ mod tests {
         let directory = std::env::temp_dir().join(format!("rtmp-proxy-config-{unique}"));
         fs::create_dir(&directory).unwrap();
         let database_path = directory.join("config.sqlite3");
-        let (store, mut config) = ConfigStore::open(&database_path).await.unwrap();
+        let (store, mut config) = ConfigStore::open(test_database(&database_path).await)
+            .await
+            .unwrap();
         config.server.test_stream_duration_secs = 30;
         config.server.ingest_stream_key = "new-ingest-key".into();
         config.notifications.live_message = "saved in sqlite".into();
@@ -987,7 +934,9 @@ mod tests {
         config.chat.youtube_api_key = Some("api-key".into());
         store.save(&config).await.unwrap();
 
-        let (_, reloaded) = ConfigStore::open(&database_path).await.unwrap();
+        let (_, reloaded) = ConfigStore::open(test_database(&database_path).await)
+            .await
+            .unwrap();
         assert_eq!(reloaded.server.test_stream_duration_secs, 30);
         assert_eq!(reloaded.server.ingest_stream_key, "new-ingest-key");
         assert_eq!(reloaded.notifications.live_message, "saved in sqlite");
@@ -1007,7 +956,9 @@ mod tests {
         let directory = std::env::temp_dir().join(format!("rtmp-proxy-handle-{unique}"));
         fs::create_dir(&directory).unwrap();
         let database_path = directory.join("config.sqlite3");
-        let (handle, _) = ConfigHandle::open(&database_path).await.unwrap();
+        let (handle, _) = ConfigHandle::open(test_database(&database_path).await)
+            .await
+            .unwrap();
         let mut rx = handle.subscribe();
 
         let form: ConfigForm = serde_qs::Config::new()
@@ -1032,7 +983,9 @@ mod tests {
         let directory = std::env::temp_dir().join(format!("rtmp-proxy-polling-{unique}"));
         fs::create_dir(&directory).unwrap();
         let database_path = directory.join("config.sqlite3");
-        let (handle, _) = ConfigHandle::open(&database_path).await.unwrap();
+        let (handle, _) = ConfigHandle::open(test_database(&database_path).await)
+            .await
+            .unwrap();
         let form: ConfigForm = serde_qs::Config::new()
             .use_form_encoding(true)
             .deserialize_str(

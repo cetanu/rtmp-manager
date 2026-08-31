@@ -1,5 +1,6 @@
 mod chat;
 mod config;
+mod database;
 mod embedded_assets;
 mod log_buffer;
 mod metrics;
@@ -25,9 +26,13 @@ const SYSTEMD_UNIT_TEMPLATE: &str = include_str!("../systemd/rtmp-proxy.service"
 #[derive(Parser, Debug)]
 #[command(author, version, about = "RTMP Stream Multiplexer powered by rtmp-rs", long_about = None)]
 struct CliArgs {
-    /// Path to the SQLite database; a `.json` suffix maps to a `.sqlite3` path
-    #[arg(short, long, env = "CONFIG_PATH", default_value = "config.json")]
-    config: PathBuf,
+    /// SQLite or PostgreSQL connection URL
+    #[arg(
+        long,
+        env = "DATABASE_URL",
+        default_value = "sqlite://rtmp-manager.sqlite3?mode=rwc"
+    )]
+    database_url: String,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -38,25 +43,17 @@ enum Commands {
     InstallSystemd {
         #[arg(long, default_value = "/opt/rtmp-proxy")]
         work_dir: PathBuf,
-
-        #[arg(long, default_value = "/opt/rtmp-proxy/config.json")]
-        config_path: PathBuf,
     },
 }
 
-fn install_systemd(work_dir: &Path, config_path: &Path) -> Result<()> {
+fn install_systemd(work_dir: &Path) -> Result<()> {
     let current_exe =
         std::env::current_exe().context("Failed to determine path of current executable")?;
 
-    let state_dir = config_path
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or(work_dir);
     let unit_content = SYSTEMD_UNIT_TEMPLATE
         .replace("{WORK_DIR}", &work_dir.display().to_string())
         .replace("{EXEC_START}", &current_exe.display().to_string())
-        .replace("{CONFIG_PATH}", &config_path.display().to_string())
-        .replace("{STATE_DIR}", &state_dir.display().to_string());
+        .replace("{STATE_DIR}", &work_dir.display().to_string());
 
     let unit_path = Path::new("/etc/systemd/system/rtmp-proxy.service");
     fs::write(unit_path, unit_content)
@@ -101,19 +98,16 @@ async fn main() -> Result<()> {
 
     let cli = CliArgs::parse();
 
-    if let Some(Commands::InstallSystemd {
-        work_dir,
-        config_path,
-    }) = cli.command
-    {
-        return install_systemd(&work_dir, &config_path);
+    if let Some(Commands::InstallSystemd { work_dir }) = cli.command {
+        return install_systemd(&work_dir);
     }
 
     embedded_assets::install(web::TAILWIND_STYLESHEET)
         .context("Failed to install embedded web assets")?;
 
-    info!(path = ?cli.config, "Loading configuration");
-    let (config_handle, config) = ConfigHandle::open(&cli.config).await?;
+    info!("Connecting to application database");
+    let database = database::Database::connect(&cli.database_url).await?;
+    let (config_handle, config) = ConfigHandle::open(database.clone()).await?;
 
     let metrics = Arc::new(Metrics::default());
     let http_client = reqwest::Client::builder()
@@ -139,7 +133,7 @@ async fn main() -> Result<()> {
     let srt_listen = config.server.srt_listen;
     let srt_enabled = config.server.srt_enabled;
 
-    let app = AppHandle::new(metrics, config_handle, http_client, listen_port).await?;
+    let app = AppHandle::new(metrics, database, config_handle, http_client, listen_port).await?;
 
     // Spawn Web Server
     let web_app = app.clone();

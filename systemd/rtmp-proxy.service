@@ -8,11 +8,12 @@ RequiresMountsFor={STATE_DIR}
 Type=simple
 User=root
 WorkingDirectory={WORK_DIR}
-ExecStart={EXEC_START} --config {CONFIG_PATH}
+ExecStart={EXEC_START}
 Restart=always
 RestartSec=5
 LimitNOFILE=65536
 Environment=RUST_LOG=rtmp_proxy=info,rtmp_rs=info
+Environment=DATABASE_URL=sqlite://{WORK_DIR}/rtmp-manager.sqlite3?mode=rwc
 EnvironmentFile=-/etc/rtmp-proxy.env
 
 [Install]

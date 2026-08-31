@@ -6,18 +6,19 @@ fn normal_startup_installs_the_embedded_asset_bundle() {
     let test_dir =
         std::env::temp_dir().join(format!("rtmp-proxy-startup-assets-{}", std::process::id()));
     let executable = test_dir.join("rtmp-proxy");
-    let missing_config = test_dir.join("missing-config.json");
+    let database = test_dir.join("rtmp-manager.sqlite3");
 
     fs::create_dir_all(&test_dir).unwrap();
     fs::copy(env!("CARGO_BIN_EXE_rtmp-proxy"), &executable).unwrap();
 
     let mut child = Command::new(&executable)
-        .arg("--config")
-        .arg(&missing_config)
+        .env(
+            "DATABASE_URL",
+            format!("sqlite://{}?mode=rwc", database.display()),
+        )
         .spawn()
         .unwrap();
 
-    let database = missing_config.with_extension("sqlite3");
     for _ in 0..50 {
         if database.exists() && test_dir.join("assets").exists() {
             break;

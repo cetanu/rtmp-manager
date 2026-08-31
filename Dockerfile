@@ -31,11 +31,10 @@ RUN apt-get update \
     && install -d -o rtmp-manager -g rtmp-manager /data /opt/rtmp-manager
 
 COPY --from=builder --chown=rtmp-manager:rtmp-manager /output/rtmp-proxy /opt/rtmp-manager/rtmp-proxy
-COPY --chown=rtmp-manager:rtmp-manager config.example.json /data/config.json
 
 USER rtmp-manager
 WORKDIR /data
-ENV CONFIG_PATH=/data/config.json \
+ENV DATABASE_URL=sqlite:///data/rtmp-manager.sqlite3?mode=rwc \
     RUST_LOG=rtmp_proxy=info,rtmp_rs=off
 
 VOLUME ["/data"]

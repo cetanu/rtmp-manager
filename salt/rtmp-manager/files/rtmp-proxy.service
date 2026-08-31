@@ -7,11 +7,12 @@ Wants=network-online.target
 Type=simple
 User=root
 WorkingDirectory=/opt/apps/rtmp-proxy/shared
-ExecStart=/opt/apps/rtmp-proxy/current/rtmp-proxy --config /opt/apps/rtmp-proxy/shared/config.json
+ExecStart=/opt/apps/rtmp-proxy/current/rtmp-proxy
 Restart=always
 RestartSec=5s
 LimitNOFILE=65536
 Environment=RUST_LOG=rtmp_proxy=info,rtmp_rs=info
+Environment=DATABASE_URL=sqlite:///opt/apps/rtmp-proxy/shared/rtmp-manager.sqlite3?mode=rwc
 Environment=PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin
 EnvironmentFile=-/etc/rtmp-proxy.env
 
