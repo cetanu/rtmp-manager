@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3](https://github.com/cetanu/rtmp-manager/compare/v0.3.2...v0.3.3) - 2026-08-31
+
+### Added
+
+- *(chat)* ingest X broadcast webhooks
+- *(chat)* add Kick chat toggle
+- *(webhooks)* broadcast inbound events
+- *(ui)* display version in navigation
+
+### Fixed
+
+- *(ci)* configure release-plz for git-only releases
+- *(security)* replace vulnerable RSA verifier
+- *(ci)* specify release repository
+
+### Other
+
+- *(chat)* remove external ingest endpoint
+
 ## [0.3.2](https://github.com/cetanu/rtmp-manager/releases/tag/v0.3.2) - 2026-08-30
 
 ### Added
