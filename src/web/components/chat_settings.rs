@@ -79,6 +79,37 @@ pub async fn chat_settings(cx: &Cx) -> Result {
                         clearable_secret_field(control_id: "x_client_id", name: "chat[x_client_id]", label_text: "X OAuth client ID", empty_placeholder: "Not configured", value: chat.x_client_id.clone().unwrap_or_default())
                         clearable_secret_field(control_id: "x_client_secret", name: "chat[x_client_secret]", label_text: "X OAuth client secret", empty_placeholder: "Not configured", value: chat.x_client_secret.clone().unwrap_or_default())
                     </div>
+
+                    <div class="grid gap-6 md:grid-cols-2">
+                        form_field(
+                            control_id: "kick_client_id",
+                            label_text: "Kick client ID",
+                            input(attrs: attributes! {
+                                id="kick_client_id"
+                                name="chat[kick_client_id]"
+                                value=(chat.kick_client_id.clone().unwrap_or_default())
+                            })
+                        )
+                        clearable_secret_field(
+                            control_id: "kick_client_secret",
+                            name: "chat[kick_client_secret]",
+                            label_text: "Kick client secret",
+                            empty_placeholder: "Required to manage webhook subscriptions",
+                            value: chat.kick_client_secret.clone().unwrap_or_default()
+                        )
+                        form_field(
+                            control_id: "kick_broadcaster_user_id",
+                            label_text: "Kick broadcaster user ID",
+                            attrs: attributes! { class="md:col-span-2" },
+                            input(attrs: attributes! {
+                                id="kick_broadcaster_user_id"
+                                name="chat[kick_broadcaster_user_id]"
+                                type="number"
+                                min="1"
+                                value=(chat.kick_broadcaster_user_id.map(|id| id.to_string()).unwrap_or_default())
+                            })
+                        )
+                    </div>
                 </div>
             )
         )

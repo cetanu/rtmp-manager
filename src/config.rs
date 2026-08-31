@@ -128,6 +128,12 @@ pub struct ChatSettings {
     #[serde(default)]
     pub x_webhook_enabled: bool,
     #[serde(default)]
+    pub kick_client_id: Option<String>,
+    #[serde(default)]
+    pub kick_client_secret: Option<String>,
+    #[serde(default)]
+    pub kick_broadcaster_user_id: Option<u64>,
+    #[serde(default)]
     pub kick_webhook_enabled: bool,
 }
 
@@ -160,6 +166,9 @@ impl Default for ChatSettings {
             x_client_id: None,
             x_client_secret: None,
             x_webhook_enabled: false,
+            kick_client_id: None,
+            kick_client_secret: None,
+            kick_broadcaster_user_id: None,
             kick_webhook_enabled: false,
         }
     }
@@ -226,6 +235,21 @@ impl AppConfig {
         .count();
         if youtube_selectors > 1 {
             bail!("Configure only one of YouTube live chat ID, video ID, or channel ID");
+        }
+        if self.chat.kick_webhook_enabled
+            && (self
+                .chat
+                .kick_client_id
+                .as_ref()
+                .is_none_or(|value| value.trim().is_empty())
+                || self
+                    .chat
+                    .kick_client_secret
+                    .as_ref()
+                    .is_none_or(|value| value.trim().is_empty())
+                || self.chat.kick_broadcaster_user_id.is_none_or(|id| id == 0))
+        {
+            bail!("Kick webhooks require a client ID, client secret, and broadcaster user ID");
         }
         for target in &self.targets {
             if target.enabled {
@@ -329,6 +353,13 @@ impl AppConfig {
                     config.chat.x_client_secret,
                 ),
                 x_webhook_enabled: config.chat.x_webhook_enabled,
+                kick_client_id: non_empty(chat.kick_client_id),
+                kick_client_secret: updated_secret(
+                    chat.kick_client_secret,
+                    chat.clear_kick_client_secret,
+                    config.chat.kick_client_secret,
+                ),
+                kick_broadcaster_user_id: chat.kick_broadcaster_user_id,
                 kick_webhook_enabled: config.chat.kick_webhook_enabled,
             };
         }
@@ -470,6 +501,11 @@ pub struct ChatForm {
     pub x_client_secret: Option<String>,
     #[serde(default)]
     pub clear_x_client_secret: bool,
+    pub kick_client_id: Option<String>,
+    pub kick_client_secret: Option<String>,
+    #[serde(default)]
+    pub clear_kick_client_secret: bool,
+    pub kick_broadcaster_user_id: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -754,6 +790,9 @@ mod tests {
                 x_api_secret: Some("x-api-secret".into()),
                 x_client_id: Some("x-client-id".into()),
                 x_client_secret: Some("x-client-secret".into()),
+                kick_client_id: Some("kick-client-id".into()),
+                kick_client_secret: Some("kick-client-secret".into()),
+                kick_broadcaster_user_id: Some(123),
                 ..ChatSettings::default()
             },
         }
@@ -854,6 +893,15 @@ mod tests {
         fs::create_dir(&directory).unwrap();
         let database_path = directory.join("config.sqlite3");
         let (handle, _) = ConfigHandle::open(&database_path).await.unwrap();
+        let form: ConfigForm = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str(
+                "chat%5Bkick_client_id%5D=client-id&\
+                 chat%5Bkick_client_secret%5D=client-secret&\
+                 chat%5Bkick_broadcaster_user_id%5D=123&action=save",
+            )
+            .unwrap();
+        handle.save_form(form).await.unwrap();
 
         let youtube = {
             let handle = handle.clone();
@@ -1022,6 +1070,35 @@ mod tests {
         assert!(updated.chat.x_api_secret.is_none());
         assert!(updated.chat.x_client_id.is_none());
         assert!(updated.chat.x_client_secret.is_none());
+    }
+
+    #[test]
+    fn explicit_clear_removes_kick_client_secret() {
+        let form: ConfigForm = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str("chat%5Bclear_kick_client_secret%5D=true&action=save")
+            .unwrap();
+        let updated = populated_config().merge_form(form).unwrap();
+
+        assert!(updated.chat.kick_client_secret.is_none());
+    }
+
+    #[test]
+    fn enabled_kick_webhooks_require_app_credentials_and_broadcaster() {
+        let mut config = AppConfig::default();
+        config.chat.kick_webhook_enabled = true;
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("Kick webhooks require")
+        );
+
+        config.chat.kick_client_id = Some("client-id".into());
+        config.chat.kick_client_secret = Some("client-secret".into());
+        config.chat.kick_broadcaster_user_id = Some(123);
+        config.validate().unwrap();
     }
 
     #[test]

@@ -456,11 +456,41 @@ async fn receive_webhook(
         })
         .collect();
     let body_bytes = body.len();
-    let subscribers = app
-        .webhooks
-        .send(crate::server::state::WebhookEvent { headers, body })
-        .unwrap_or(0);
-    tracing::info!(body_bytes, subscribers, "Webhook received");
+    let event = crate::server::state::WebhookEvent { headers, body };
+    let settings = app.config.get().chat.clone();
+    let platform = if event.header("kick-event-signature").is_some() {
+        let message = match crate::chat::kick::process_event(&settings, &event) {
+            Ok(message) => message,
+            Err(error) => {
+                tracing::warn!("Rejected Kick webhook: {error:#}");
+                return Err(bad_request("Rejected Kick webhook").into());
+            }
+        };
+        app.chat
+            .enqueue(message)
+            .await
+            .map_err(internal_server_error)?;
+        "kick"
+    } else if event.header("x-twitter-webhooks-signature").is_some() {
+        let message = match crate::chat::x::process_event(&settings, &event) {
+            Ok(message) => message,
+            Err(error) => {
+                tracing::warn!("Rejected X webhook: {error:#}");
+                return Err(bad_request("Rejected X webhook").into());
+            }
+        };
+        if let Some(message) = message {
+            app.chat
+                .enqueue(message)
+                .await
+                .map_err(internal_server_error)?;
+        }
+        "x"
+    } else {
+        tracing::warn!("Rejected webhook without a recognized platform signature");
+        return Err(bad_request("Webhook signature is missing").into());
+    };
+    tracing::info!(platform, body_bytes, "Webhook accepted");
     topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
 }
 

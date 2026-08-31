@@ -6,7 +6,6 @@ use anyhow::Result;
 use reqwest::Client;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::broadcast;
 
 #[derive(Debug, Clone)]
 pub struct WebhookEvent {
@@ -32,7 +31,6 @@ pub struct AppHandle {
     pub config: ConfigHandle,
     pub metrics: Arc<Metrics>,
     pub http_client: Client,
-    pub webhooks: broadcast::Sender<WebhookEvent>,
 }
 
 impl AppHandle {
@@ -57,29 +55,31 @@ impl AppHandle {
             config_handle.subscribe(),
         )
         .await?;
-        let (webhooks, _) = broadcast::channel(64);
-
         let handle = Self {
             stream,
             chat,
             config: config_handle,
             metrics,
             http_client,
-            webhooks,
         };
 
-        tokio::spawn(crate::chat::kick::run(
-            handle.webhooks.subscribe(),
-            handle.config.subscribe(),
-            handle.chat.clone(),
-        ));
-        tokio::spawn(crate::chat::x::run(
-            handle.webhooks.subscribe(),
-            handle.config.subscribe(),
-            handle.chat.clone(),
-        ));
-
         handle.apply_chat_config().await?;
+        let kick_settings = handle.config.get().chat.clone();
+        if kick_settings.kick_webhook_enabled {
+            let http_client = handle.http_client.clone();
+            tokio::spawn(async move {
+                match crate::chat::kick::set_chat_subscription(&http_client, &kick_settings, true)
+                    .await
+                {
+                    Ok(()) => tracing::info!("Kick chat webhook subscription is active"),
+                    Err(error) => {
+                        tracing::warn!(
+                            "Failed to restore Kick chat webhook subscription: {error:#}"
+                        )
+                    }
+                }
+            });
+        }
 
         Ok(handle)
     }
@@ -107,6 +107,11 @@ impl AppHandle {
     }
 
     pub async fn set_kick_webhook(&self, enabled: bool) -> Result<()> {
+        let current = self.config.get();
+        if current.chat.kick_webhook_enabled == enabled {
+            return Ok(());
+        }
+        crate::chat::kick::set_chat_subscription(&self.http_client, &current.chat, enabled).await?;
         let (_, changed, _) = self.config.set_kick_webhook(enabled).await?;
         if changed {
             tracing::info!(enabled, "Kick webhook ingestion changed");

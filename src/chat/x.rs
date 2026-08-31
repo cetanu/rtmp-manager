@@ -1,13 +1,11 @@
-use crate::chat::{ChatHandle, IncomingChatMessage};
-use crate::config::{AppConfig, ChatSettings};
+use crate::chat::IncomingChatMessage;
+use crate::config::ChatSettings;
 use crate::server::state::WebhookEvent;
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
-use std::sync::Arc;
-use tokio::sync::{broadcast, watch};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -86,12 +84,12 @@ pub fn parse_chat_event(body: &[u8]) -> Result<Option<IncomingChatMessage>> {
     }))
 }
 
-fn process_event(
+pub fn process_event(
     config: &ChatSettings,
     event: &WebhookEvent,
 ) -> Result<Option<IncomingChatMessage>> {
     if !config.x_webhook_enabled {
-        return Ok(None);
+        bail!("X webhook ingestion is disabled");
     }
     let secret = config
         .x_api_secret
@@ -103,33 +101,6 @@ fn process_event(
         .context("X webhook is missing its signature")?;
     verify_webhook(&event.body, signature, secret)?;
     parse_chat_event(&event.body)
-}
-
-pub async fn run(
-    mut webhooks: broadcast::Receiver<WebhookEvent>,
-    config: watch::Receiver<Arc<AppConfig>>,
-    chat: ChatHandle,
-) {
-    loop {
-        match webhooks.recv().await {
-            Ok(event) => {
-                let settings = config.borrow().chat.clone();
-                match process_event(&settings, &event) {
-                    Ok(Some(message)) => {
-                        if let Err(error) = chat.enqueue(message).await {
-                            tracing::warn!("Discarding X chat event: {error:#}");
-                        }
-                    }
-                    Ok(None) => {}
-                    Err(error) => tracing::warn!("Rejected X webhook: {error:#}"),
-                }
-            }
-            Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                tracing::warn!(skipped, "X webhook subscriber lagged behind");
-            }
-            Err(broadcast::error::RecvError::Closed) => return,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -181,11 +152,12 @@ mod tests {
     }
 
     #[test]
-    fn disabled_webhook_ignores_events() {
+    fn disabled_webhook_rejects_events() {
         assert!(
             process_event(&ChatSettings::default(), &signed_event("secret"))
-                .unwrap()
-                .is_none()
+                .unwrap_err()
+                .to_string()
+                .contains("disabled")
         );
     }
 }
