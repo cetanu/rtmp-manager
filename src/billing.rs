@@ -310,6 +310,32 @@ mod tests {
         assert_eq!(active.plan, "free");
         assert_eq!(active.stream_seconds, 0);
         assert_eq!(active.active_streams, 1);
+        assert!(
+            usage
+                .enforce_destination_limit("tenant-a", 2, started)
+                .await
+                .is_ok()
+        );
+        assert!(
+            usage
+                .enforce_destination_limit("tenant-a", 3, started)
+                .await
+                .is_err()
+        );
+
+        usage.set_plan("tenant-a", "pro", started).await.unwrap();
+        assert!(
+            usage
+                .enforce_destination_limit("tenant-a", 5, started)
+                .await
+                .is_ok()
+        );
+        assert!(
+            usage
+                .enforce_destination_limit("tenant-a", 6, started)
+                .await
+                .is_err()
+        );
 
         usage
             .record_seconds("tenant-a", "stream-a", started, started + 90)
