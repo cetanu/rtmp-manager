@@ -64,6 +64,15 @@ Keep the overlay URL private because its query key grants read access to chat.
 Authenticated operators can scrape tenant-scoped Prometheus metrics from
 `/api/metrics/prometheus`.
 
+## Operations and moderation
+
+Relay workers terminate FFmpeg processes after five seconds without progress and
+restart them with bounded backoff. Administrators can inspect all tenant stream
+states at `/api/admin/streams`, review the bounded audit feed at
+`/api/admin/audit-log`, and fetch a live tenant thumbnail from
+`/api/admin/tenants/<tenant_id>/thumbnail`. Emergency-stop actions are recorded
+before they are dispatched to the media actor.
+
 ## Stripe billing (optional)
 
 Set `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRO_PRICE_ID`,
