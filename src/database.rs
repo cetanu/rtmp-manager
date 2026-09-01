@@ -68,6 +68,13 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(count, 1);
+        let audit_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'admin_audit_log'",
+        )
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+        assert_eq!(audit_count, 1);
         drop(database);
         std::fs::remove_file(path).unwrap();
     }
