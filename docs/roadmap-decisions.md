@@ -46,6 +46,9 @@
 - CPU and hardware encoded outputs force AAC at 128 kbps, 48 kHz, stereo so
   surround or incompatible source audio layouts do not break destination
   publishing.
+- Requested dimensions use aspect-preserving enlargement followed by a
+  centered crop, making vertical profiles usable without stretching the
+  source image.
 
 ## GOAL-303: disconnect grace
 
