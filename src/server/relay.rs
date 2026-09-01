@@ -14,7 +14,7 @@ use tokio::task::JoinHandle;
 
 static RELAY_JOB_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
-fn ffmpeg_command(args: &[String]) -> tokio::process::Command {
+pub(crate) fn ffmpeg_command(args: &[String]) -> tokio::process::Command {
     let cpu = std::env::var("RELAY_MAX_CPU_SECONDS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())

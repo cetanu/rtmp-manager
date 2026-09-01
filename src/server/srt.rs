@@ -81,21 +81,21 @@ async fn relay_mpeg_ts(
         "rtmp://127.0.0.1:{}/live/{stream_key}",
         app.config.get().server.listen.port()
     );
-    let mut child = tokio::process::Command::new("ffmpeg")
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "warning",
-            "-f",
-            "mpegts",
-            "-i",
-            "pipe:0",
-            "-c",
-            "copy",
-            "-f",
-            "flv",
-            &destination,
-        ])
+    let args = vec![
+        "-hide_banner".to_owned(),
+        "-loglevel".to_owned(),
+        "warning".to_owned(),
+        "-f".to_owned(),
+        "mpegts".to_owned(),
+        "-i".to_owned(),
+        "pipe:0".to_owned(),
+        "-c".to_owned(),
+        "copy".to_owned(),
+        "-f".to_owned(),
+        "flv".to_owned(),
+        destination,
+    ];
+    let mut child = crate::server::relay::ffmpeg_command(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
