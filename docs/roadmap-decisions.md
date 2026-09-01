@@ -59,6 +59,8 @@
   silent-audio lavfi relay. A successful republish cancels the standby jobs
   and starts live relays again; explicit stop and expiry still tear everything
   down.
+- Standby output also honors each target's configured dimensions and video
+  bitrate cap, keeping the reconnect feed within the destination profile.
 
 ## GOAL-501: usage quotas
 
