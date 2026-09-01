@@ -1,4 +1,5 @@
 use crate::web::components::actions_panel::actions_panel;
+use crate::web::components::billing_usage::billing_usage;
 use crate::web::components::chat_settings::chat_settings;
 use crate::web::components::notifications::notifications;
 use crate::web::components::overlay_settings::overlay_settings;
@@ -38,6 +39,7 @@ pub async fn configuration_form(cx: &Cx, active_page: &'static str) -> Result {
                     }
                     <div class="min-w-0">chat_settings()</div>
                     <div class="min-w-0">notifications()</div>
+                    <div class="min-w-0 lg:col-span-2">billing_usage()</div>
                     <div class="min-w-0 lg:col-span-2">overlay_settings()</div>
                 </div>
             </section>
