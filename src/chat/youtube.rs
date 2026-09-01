@@ -7,11 +7,13 @@ use reqwest::header::{ACCEPT_LANGUAGE, USER_AGENT};
 use serde::Serialize;
 use std::sync::LazyLock;
 use std::time::Duration;
+use tokio::sync::Semaphore;
 
 const DEFAULT_INNERTUBE_API_KEY: &str = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
 const INNERTUBE_LIVE_CHAT_URL: &str = "https://www.youtube.com/youtubei/v1/live_chat/get_live_chat";
 const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const BROWSER_ACCEPT_LANGUAGE: &str = "en-US,en;q=0.9";
+static REQUEST_LIMITER: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(8));
 
 static API_KEY_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#""INNERTUBE_API_KEY":"([^"]+)""#).unwrap());
@@ -185,6 +187,12 @@ pub async fn run(client: Client, chat: ChatHandle, config: YouTubeChatConfig) {
                 tokio::time::sleep(retry_delay).await;
                 retry_delay = (retry_delay * 2).min(Duration::from_secs(60));
             }
+            Err(PollFailure::RateLimited) => {
+                let detail = "YouTube quota/rate limit reached; backing off for 60 seconds";
+                tracing::warn!("{detail}");
+                chat.update_youtube_status("rate-limited", detail, None, None);
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }
         }
     }
 }
@@ -357,6 +365,7 @@ struct InnerTubeFetchResult {
 #[derive(Debug)]
 enum PollFailure {
     SessionExpired(anyhow::Error),
+    RateLimited,
     Retry(anyhow::Error),
 }
 
@@ -364,6 +373,10 @@ async fn fetch_innertube_page(
     client: &Client,
     session: &LiveChatSession,
 ) -> std::result::Result<InnerTubeFetchResult, PollFailure> {
+    let _permit = REQUEST_LIMITER
+        .acquire()
+        .await
+        .map_err(|_| PollFailure::Retry(anyhow::anyhow!("YouTube request limiter stopped")))?;
     let url = format!("{INNERTUBE_LIVE_CHAT_URL}?key={}", session.api_key);
     let payload = serde_json::json!({
         "context": {
@@ -395,6 +408,8 @@ async fn fetch_innertube_page(
         );
         return if status.as_u16() == 404 {
             Err(PollFailure::SessionExpired(error))
+        } else if status.as_u16() == 429 {
+            Err(PollFailure::RateLimited)
         } else {
             Err(PollFailure::Retry(error))
         };
