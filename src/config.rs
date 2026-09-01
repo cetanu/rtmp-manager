@@ -897,6 +897,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn rejects_unknown_hardware_encoder_profiles() {
+        let mut config = AppConfig::default();
+        config.targets.push(TargetConfig {
+            name: "GPU".into(),
+            url: "rtmp://example.test/live".into(),
+            stream_key: "key".into(),
+            public_url: None,
+            enabled: false,
+            encoding: EncodingProfile {
+                hardware_encoder: Some("unknown".into()),
+                ..EncodingProfile::default()
+            },
+        });
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("unsupported hardware encoder")
+        );
+    }
+
     #[tokio::test]
     async fn stores_and_round_trips_config() {
         let unique = SystemTime::now()
