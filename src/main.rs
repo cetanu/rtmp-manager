@@ -6,6 +6,7 @@ mod log_buffer;
 mod metrics;
 mod notifications;
 mod server;
+mod tenant;
 mod util;
 mod web;
 

@@ -684,14 +684,9 @@ pub struct ConfigStore {
 impl ConfigStore {
     pub async fn open(database: crate::database::Database) -> Result<(Self, AppConfig)> {
         let store = Self { database };
-        let config = match store.load().await? {
-            Some(config) => config,
-            None => {
-                let config = AppConfig::default();
-                store.save(&config).await?;
-                config
-            }
-        };
+        let config: AppConfig = store.load().await?.unwrap_or_default();
+        // Keep the built-in self-hosted tenant synchronized after every schema upgrade.
+        store.save(&config).await?;
 
         Ok((store, config))
     }
@@ -718,6 +713,17 @@ impl ConfigStore {
         .bind(data)
         .execute(self.database.pool())
         .await?;
+        crate::tenant::TenantRepository::new(self.database.clone())
+            .save(crate::tenant::TenantDefinition {
+                id: &crate::tenant::TenantId::default_tenant(),
+                name: "Default tenant",
+                stream_key: &config.server.ingest_stream_key,
+                active: config.initialized && !config.server.ingest_stream_key.is_empty(),
+                max_concurrent_streams: 1,
+                notifications: &config.notifications,
+                targets: &config.targets,
+            })
+            .await?;
         Ok(())
     }
 }
@@ -751,7 +757,7 @@ impl ConfigHandle {
         Arc::clone(&self.current.borrow())
     }
 
-    /// Subscribes to live configuration change events.
+    #[cfg(test)]
     pub fn subscribe(&self) -> watch::Receiver<Arc<AppConfig>> {
         self.current.subscribe()
     }

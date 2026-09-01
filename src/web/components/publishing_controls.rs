@@ -1,4 +1,5 @@
 use crate::server::state::{AppHandle, StreamState};
+use crate::tenant::TenantId;
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -10,9 +11,11 @@ use topcoat::{
 async fn toggle_publishing(cx: &Cx, is_live: bool) -> Result<String> {
     let app: &AppHandle = app_context(cx);
     let result = if is_live {
-        app.stream.stop_publishing().await
+        app.stream.stop_publishing(TenantId::default_tenant()).await
     } else {
-        app.stream.publish_staged_stream().await
+        app.stream
+            .publish_staged_stream(TenantId::default_tenant())
+            .await
     };
     Ok(result
         .err()

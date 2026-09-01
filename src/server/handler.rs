@@ -1,5 +1,4 @@
 use super::state::AppHandle;
-use crate::util::secure_token_matches;
 use rtmp_rs::media::flv::FlvTag;
 use rtmp_rs::protocol::message::{ConnectParams, PublishParams};
 use rtmp_rs::session::SessionContext;
@@ -31,18 +30,28 @@ impl RtmpHandler for ProxyHandler {
 
     async fn on_publish(&self, ctx: &SessionContext, params: &PublishParams) -> AuthResult {
         let stream_key = params.stream_key.clone();
-        let expected_stream_key = self.app.config.get().server.ingest_stream_key.clone();
-
-        if !secure_token_matches(&expected_stream_key, &stream_key) {
+        let tenant = match self.app.tenants.authenticate(&stream_key).await {
+            Ok(Some(tenant)) => tenant,
+            Ok(None) => {
+                error!(session_id = %ctx.session_id, "Rejected RTMP publish with invalid stream key");
+                return AuthResult::Reject("Invalid stream key".into());
+            }
+            Err(error) => {
+                error!(session_id = %ctx.session_id, %error, "Failed to authenticate RTMP publish");
+                return AuthResult::Reject("Stream authentication unavailable".into());
+            }
+        };
+        if !tenant.active {
             error!(session_id = %ctx.session_id, "Rejected RTMP publish with invalid stream key");
             return AuthResult::Reject("Invalid stream key".into());
         }
         info!(
             session_id = %ctx.session_id,
+            tenant_id = %tenant.id.as_str(),
             "Stream published from client"
         );
 
-        match self.app.stream.stage_stream(stream_key).await {
+        match self.app.stream.stage_stream(tenant, stream_key).await {
             Ok(()) => AuthResult::Accept,
             Err(error) => {
                 error!(%error, "Failed to stage stream preview");
@@ -58,18 +67,5 @@ impl RtmpHandler for ProxyHandler {
 
     async fn on_disconnect(&self, ctx: &SessionContext) {
         info!(session_id = %ctx.session_id, "Client disconnected");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ingest_requires_an_exact_nonempty_stream_key() {
-        assert!(secure_token_matches("private-key", "private-key"));
-        assert!(!secure_token_matches("private-key", "wrong-key"));
-        assert!(!secure_token_matches("private-key", "private-key-extra"));
-        assert!(!secure_token_matches("", ""));
     }
 }

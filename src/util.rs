@@ -1,5 +1,6 @@
 use aws_lc_rs::rand::{SecureRandom, SystemRandom};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn generate_secure_token() -> anyhow::Result<String> {
@@ -8,6 +9,10 @@ pub fn generate_secure_token() -> anyhow::Result<String> {
         .fill(&mut bytes)
         .map_err(|_| anyhow::anyhow!("Failed to generate a secure token"))?;
     Ok(URL_SAFE_NO_PAD.encode(bytes))
+}
+
+pub fn stream_key_digest(stream_key: &str) -> String {
+    URL_SAFE_NO_PAD.encode(Sha256::digest(stream_key.as_bytes()))
 }
 
 /// Compares two byte slices in constant time.
@@ -127,5 +132,13 @@ mod tests {
                 .chars()
                 .all(|character| character.is_ascii_alphanumeric() || "_-".contains(character))
         );
+    }
+
+    #[test]
+    fn stream_key_digests_are_stable_without_exposing_the_key() {
+        let digest = stream_key_digest("private-key");
+        assert_eq!(digest, stream_key_digest("private-key"));
+        assert_ne!(digest, stream_key_digest("different-key"));
+        assert!(!digest.contains("private-key"));
     }
 }

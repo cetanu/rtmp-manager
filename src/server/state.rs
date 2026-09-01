@@ -2,6 +2,7 @@ use crate::chat::ChatHandle;
 use crate::config::ConfigHandle;
 use crate::metrics::Metrics;
 use crate::server::stream_actor::StreamHandle;
+use crate::tenant::TenantRepository;
 use anyhow::Result;
 use reqwest::Client;
 use std::collections::HashMap;
@@ -29,6 +30,7 @@ pub struct AppHandle {
     pub stream: StreamHandle,
     pub chat: ChatHandle,
     pub config: ConfigHandle,
+    pub tenants: TenantRepository,
     pub metrics: Arc<Metrics>,
     pub http_client: Client,
 }
@@ -42,6 +44,7 @@ impl AppHandle {
         listen_port: u16,
     ) -> Result<Self> {
         let initial_config = config_handle.get();
+        let tenants = TenantRepository::new(database.clone());
         let chat = ChatHandle::spawn(
             database,
             initial_config.chat.queue_capacity,
@@ -53,13 +56,14 @@ impl AppHandle {
             listen_port,
             Arc::clone(&metrics),
             http_client.clone(),
-            config_handle.subscribe(),
+            tenants.clone(),
         )
         .await?;
         let handle = Self {
             stream,
             chat,
             config: config_handle,
+            tenants,
             metrics,
             http_client,
         };

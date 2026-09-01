@@ -88,5 +88,29 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(data, "{}");
+
+        let repository = crate::tenant::TenantRepository::new(database);
+        let tenant_id = crate::tenant::TenantId::new("postgres-test").unwrap();
+        repository
+            .save(crate::tenant::TenantDefinition {
+                id: &tenant_id,
+                name: "PostgreSQL test",
+                stream_key: "postgres-private-key",
+                active: true,
+                max_concurrent_streams: 1,
+                notifications: &crate::config::NotificationSettings::default(),
+                targets: &[],
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            repository
+                .authenticate("postgres-private-key")
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            tenant_id
+        );
     }
 }

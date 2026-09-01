@@ -1,5 +1,4 @@
 use crate::server::state::AppHandle;
-use crate::util::secure_token_matches;
 use anyhow::{Context, Result, bail};
 use futures_util::StreamExt;
 use srt_tokio::{
@@ -20,8 +19,17 @@ pub async fn run_srt_server(bind_addr: SocketAddr, app: AppHandle) -> Result<()>
         let remote = request.remote();
         let stream_id = request.stream_id().map(ToString::to_string);
         let stream_key = stream_id.as_deref().and_then(parse_publish_stream_id);
-        let expected = app.config.get().server.ingest_stream_key.clone();
-        let Some(stream_key) = stream_key.filter(|key| secure_token_matches(&expected, key)) else {
+        let tenant = match stream_key {
+            Some(stream_key) => match app.tenants.authenticate(stream_key).await {
+                Ok(tenant) => tenant,
+                Err(error) => {
+                    tracing::error!(%remote, %error, "Failed to authenticate SRT publish");
+                    None
+                }
+            },
+            None => None,
+        };
+        let Some((stream_key, tenant)) = stream_key.zip(tenant) else {
             tracing::warn!(%remote, "Rejected SRT publish with invalid stream ID");
             request
                 .reject(RejectReason::Server(ServerRejectReason::Unauthorized))
@@ -33,7 +41,9 @@ pub async fn run_srt_server(bind_addr: SocketAddr, app: AppHandle) -> Result<()>
         let session_app = app.clone();
         let stream_key = stream_key.to_owned();
         tokio::spawn(async move {
-            if let Err(error) = relay_mpeg_ts(socket, &stream_key, session_app).await {
+            if let Err(error) =
+                relay_mpeg_ts(socket, &stream_key, tenant.id.as_str(), session_app).await
+            {
                 tracing::error!(%remote, %error, "SRT ingest session failed");
             }
         });
@@ -64,6 +74,7 @@ fn parse_publish_stream_id(stream_id: &str) -> Option<&str> {
 async fn relay_mpeg_ts(
     mut socket: srt_tokio::SrtSocket,
     stream_key: &str,
+    tenant_id: &str,
     app: AppHandle,
 ) -> Result<()> {
     let destination = format!(
@@ -92,7 +103,7 @@ async fn relay_mpeg_ts(
         .spawn()
         .context("Failed to start SRT MPEG-TS relay")?;
     let mut stdin = child.stdin.take().context("FFmpeg stdin was unavailable")?;
-    tracing::info!("Authenticated SRT stream connected");
+    tracing::info!(%tenant_id, "Authenticated SRT stream connected");
 
     while let Some(packet) = socket.next().await {
         let (_, bytes) = packet.context("Failed to receive SRT packet")?;
