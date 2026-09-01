@@ -136,6 +136,17 @@ impl AppHandle {
         let current = self.tenant_config(tenant_id).await?;
         let updated = current.merge_form(form)?;
         updated.validate()?;
+        self.usage
+            .enforce_destination_limit(
+                tenant_id.as_str(),
+                updated
+                    .targets
+                    .iter()
+                    .filter(|target| target.enabled)
+                    .count(),
+                crate::util::now_unix_secs() as i64,
+            )
+            .await?;
         let chat_changed = current.chat != updated.chat;
         self.tenants
             .update_configuration(

@@ -15,6 +15,31 @@ pub struct UsageSnapshot {
     pub limit_seconds: Option<i64>,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct PlanLimits {
+    pub max_destinations: Option<usize>,
+    pub stream_seconds: Option<i64>,
+}
+
+impl PlanLimits {
+    pub fn for_plan(plan: &str) -> Self {
+        match plan {
+            "pro" => Self {
+                max_destinations: Some(5),
+                stream_seconds: None,
+            },
+            "enterprise" => Self {
+                max_destinations: None,
+                stream_seconds: None,
+            },
+            _ => Self {
+                max_destinations: Some(2),
+                stream_seconds: Some(20 * 60 * 60),
+            },
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct UsageRepository {
     database: Database,
@@ -45,12 +70,10 @@ impl UsageRepository {
         .bind(period)
         .fetch_one(&mut *tx)
         .await?;
-        let limit = match plan.as_str() {
-            "pro" => 100 * 60 * 60,
-            "enterprise" => i64::MAX,
-            _ => 10 * 60 * 60,
-        };
-        if used >= limit {
+        if PlanLimits::for_plan(&plan)
+            .stream_seconds
+            .is_some_and(|limit| used >= limit)
+        {
             tx.rollback().await?;
             return Ok(false);
         }
@@ -107,17 +130,31 @@ impl UsageRepository {
         .bind(tenant_id)
         .fetch_one(self.database.pool())
         .await?;
-        let limit_seconds = match plan.as_str() {
-            "pro" => Some(100 * 60 * 60),
-            "enterprise" => None,
-            _ => Some(10 * 60 * 60),
-        };
+        let limit_seconds = PlanLimits::for_plan(&plan).stream_seconds;
         Ok(UsageSnapshot {
             plan,
             stream_seconds,
             active_streams,
             limit_seconds,
         })
+    }
+
+    pub async fn enforce_destination_limit(
+        &self,
+        tenant_id: &str,
+        destination_count: usize,
+        now: i64,
+    ) -> Result<()> {
+        let usage = self.current_usage(tenant_id, now).await?;
+        if let Some(limit) = PlanLimits::for_plan(&usage.plan).max_destinations
+            && destination_count > limit
+        {
+            bail!(
+                "{} plan supports at most {limit} destinations; upgrade your plan to add more",
+                usage.plan
+            );
+        }
+        Ok(())
     }
 
     pub fn verify_webhook(body: &[u8], signature: &str, secret: &str) -> bool {
@@ -179,6 +216,31 @@ impl UsageRepository {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn plan_limits_match_product_tiers() {
+        assert_eq!(
+            PlanLimits::for_plan("free"),
+            PlanLimits {
+                max_destinations: Some(2),
+                stream_seconds: Some(20 * 60 * 60),
+            }
+        );
+        assert_eq!(
+            PlanLimits::for_plan("pro"),
+            PlanLimits {
+                max_destinations: Some(5),
+                stream_seconds: None,
+            }
+        );
+        assert_eq!(
+            PlanLimits::for_plan("enterprise"),
+            PlanLimits {
+                max_destinations: None,
+                stream_seconds: None,
+            }
+        );
+    }
 
     #[test]
     fn verifies_provider_signatures_without_accepting_modified_payloads() {
