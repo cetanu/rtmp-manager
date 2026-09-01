@@ -41,6 +41,8 @@
   Stripe/LemonSqueezy adapters can translate their events into this contract.
 - Stripe has a dedicated `/api/billing/stripe` adapter using its five-minute
   signed-event window and tenant/plan metadata on subscription objects.
+- LemonSqueezy has a dedicated `/api/billing/lemonsqueezy` adapter using its
+  raw-body `X-Signature` HMAC and `meta.custom_data` tenant metadata.
 
 ## GOAL-403: chat relaying
 

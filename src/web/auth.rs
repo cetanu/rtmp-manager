@@ -27,6 +27,7 @@ fn public_path(path: &str) -> bool {
         || path.starts_with("/api/v1/webhooks/")
         || path == "/api/billing/webhook"
         || path == "/api/billing/stripe"
+        || path == "/api/billing/lemonsqueezy"
         || path.starts_with("/overlay/chat")
 }
 

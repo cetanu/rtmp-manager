@@ -110,4 +110,14 @@ impl UsageRepository {
                 == 1
         })
     }
+
+    pub fn verify_hex_signature(body: &[u8], signature: &str, secret: &str) -> bool {
+        let Ok(mut mac) = BillingHmac::new_from_slice(secret.as_bytes()) else {
+            return false;
+        };
+        mac.update(body);
+        let expected = hex::encode(mac.finalize().into_bytes());
+        subtle::ConstantTimeEq::ct_eq(expected.as_bytes(), signature.trim().as_bytes()).unwrap_u8()
+            == 1
+    }
 }

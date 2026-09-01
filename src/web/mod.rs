@@ -433,6 +433,61 @@ async fn stripe_billing_webhook(
     topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
 }
 
+#[route(POST "/api/billing/lemonsqueezy")]
+async fn lemonsqueezy_billing_webhook(
+    cx: &Cx,
+    body: topcoat::router::Bytes,
+) -> Result<topcoat::router::Response> {
+    let secret = std::env::var("LEMONSQUEEZY_WEBHOOK_SECRET")
+        .map_err(|_| bad_request("LemonSqueezy billing is not configured"))?;
+    let signature = topcoat::router::headers(cx)
+        .get("x-signature")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| bad_request("Missing LemonSqueezy signature"))?;
+    if !crate::billing::UsageRepository::verify_hex_signature(&body, signature, &secret) {
+        return Err(bad_request("Invalid LemonSqueezy signature").into());
+    }
+    let payload: serde_json::Value =
+        serde_json::from_slice(&body).map_err(|_| bad_request("Invalid LemonSqueezy event"))?;
+    let event = payload
+        .pointer("/meta/event_name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if matches!(
+        event,
+        "subscription_created"
+            | "subscription_updated"
+            | "subscription_cancelled"
+            | "subscription_expired"
+    ) {
+        let custom = payload
+            .pointer("/meta/custom_data")
+            .ok_or_else(|| bad_request("LemonSqueezy event is missing custom data"))?;
+        let tenant_id = custom
+            .get("tenant_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| bad_request("LemonSqueezy event is missing tenant metadata"))?;
+        let plan = custom
+            .get("plan")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("free");
+        let app: &AppHandle = app_context(cx);
+        app.usage
+            .set_plan(
+                tenant_id,
+                if event.ends_with("cancelled") || event.ends_with("expired") {
+                    "free"
+                } else {
+                    plan
+                },
+                crate::util::now_unix_secs() as i64,
+            )
+            .await
+            .map_err(|error| bad_request(error.to_string()))?;
+    }
+    topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
+}
+
 #[route(POST "/api/config/import")]
 async fn import_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat::router::Response> {
     let app: &AppHandle = app_context(cx);
