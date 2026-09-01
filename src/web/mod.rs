@@ -487,10 +487,26 @@ async fn service_logs(
     Ok(Sse::new(initial.chain(live)).keep_alive(KeepAlive::new()))
 }
 
-#[route(POST "/api/webhook")]
-async fn receive_webhook(
+#[route(POST "/api/v1/webhooks/kick")]
+async fn receive_kick_webhook(
     cx: &Cx,
     body: topcoat::router::Bytes,
+) -> Result<topcoat::router::Response> {
+    receive_webhook_for_platform(cx, body, "kick").await
+}
+
+#[route(POST "/api/v1/webhooks/x")]
+async fn receive_x_webhook(
+    cx: &Cx,
+    body: topcoat::router::Bytes,
+) -> Result<topcoat::router::Response> {
+    receive_webhook_for_platform(cx, body, "x").await
+}
+
+async fn receive_webhook_for_platform(
+    cx: &Cx,
+    body: topcoat::router::Bytes,
+    platform: &str,
 ) -> Result<topcoat::router::Response> {
     const MAX_WEBHOOK_SIZE: usize = 128 * 1024;
     if body.len() > MAX_WEBHOOK_SIZE {
@@ -508,14 +524,17 @@ async fn receive_webhook(
         .collect();
     let body_bytes = body.len();
     let event = crate::server::state::WebhookEvent { headers, body };
-    let default_tenant = app
+    let stream_key = event
+        .header("x-tenant-stream-key")
+        .ok_or_else(|| bad_request("X-Tenant-Stream-Key header is required"))?;
+    let tenant = app
         .tenants
-        .find(&crate::tenant::TenantId::default_tenant())
+        .authenticate(stream_key)
         .await?
-        .ok_or_else(|| internal_server_error(anyhow::anyhow!("Default tenant is missing")))?;
-    let settings = default_tenant.chat;
-    let chat = app.tenant_chat(&default_tenant.id).await?;
-    let platform = if event.header("kick-event-signature").is_some() {
+        .ok_or_else(|| bad_request("Invalid tenant stream key"))?;
+    let settings = tenant.chat;
+    let chat = app.tenant_chat(&tenant.id).await?;
+    if platform == "kick" {
         let message = match crate::chat::kick::process_event(&settings, &event) {
             Ok(message) => message,
             Err(error) => {
@@ -524,8 +543,7 @@ async fn receive_webhook(
             }
         };
         chat.enqueue(message).await.map_err(internal_server_error)?;
-        "kick"
-    } else if event.header("x-twitter-webhooks-signature").is_some() {
+    } else {
         let message = match crate::chat::x::process_event(&settings, &event) {
             Ok(message) => message,
             Err(error) => {
@@ -536,11 +554,7 @@ async fn receive_webhook(
         if let Some(message) = message {
             chat.enqueue(message).await.map_err(internal_server_error)?;
         }
-        "x"
-    } else {
-        tracing::warn!("Rejected webhook without a recognized platform signature");
-        return Err(bad_request("Webhook signature is missing").into());
-    };
+    }
     tracing::info!(platform, body_bytes, "Webhook accepted");
     topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
 }
