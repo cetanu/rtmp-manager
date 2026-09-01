@@ -848,7 +848,11 @@ async fn receive_webhook_for_platform(
             .as_deref()
             .filter(|secret| !secret.is_empty())
             .map(ToOwned::to_owned)
-            .or_else(|| std::env::var("TWITCH_EVENTSUB_SECRET").ok())
+            .or_else(|| {
+                (tenant.id == crate::tenant::TenantId::default_tenant())
+                    .then(|| std::env::var("TWITCH_EVENTSUB_SECRET").ok())
+                    .flatten()
+            })
             .ok_or_else(|| bad_request("Twitch EventSub is not configured"))?;
         let (challenge, message) = crate::chat::twitch_eventsub::parse(&event, &secret)
             .map_err(|error| bad_request(error.to_string()))?;
