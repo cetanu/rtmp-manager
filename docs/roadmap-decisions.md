@@ -147,3 +147,6 @@
   replacement worker to recover jobs left pending by a crashed consumer.
 - The Compose broker profile health-checks Redis before starting workers and
   restarts workers automatically, removing the cold-start dependency race.
+- During control-plane shutdown, broker-backed relay handles are detached
+  instead of sending stop intents; explicit stops and emergency kills still
+  send stop intents, so API restarts do not interrupt active broadcasts.
