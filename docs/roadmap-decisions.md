@@ -64,6 +64,12 @@
 - Standby jobs retry failed FFmpeg connections once per second until the
   ingest stream republishes or its grace window expires.
 
+## GOAL-204: database health
+
+- `/healthz` is unauthenticated so orchestrators can probe the service before
+  login; it executes a live `SELECT 1` against the configured SQLx pool and
+  returns `503` when the database is unavailable.
+
 ## GOAL-501: usage quotas
 
 - Quotas are enforced independently of payment-provider integrations. The
