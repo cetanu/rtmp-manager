@@ -352,6 +352,13 @@ async fn supervise_relay(
     target: TargetConfig,
     mut cancel: watch::Receiver<bool>,
 ) {
+    let relay_span = tracing::info_span!(
+        "relay.worker",
+        otel.name = "relay.worker",
+        tenant_id = %tenant_id,
+        target = %target.name,
+    );
+    let _span_guard = relay_span.enter();
     let bitrate = metrics.register_target(tenant_id.clone(), target.name.clone());
     let destination = target_destination(&target);
     let secrets = [

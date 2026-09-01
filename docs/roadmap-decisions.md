@@ -56,6 +56,12 @@
   is done with `CHAT_RELAY_DESTINATION` and source filtering with
   `CHAT_RELAY_SOURCE`.
 
+## GOAL-502: observability
+
+- Relay lifecycle is emitted as a structured `relay.worker` tracing span with
+  tenant and target attributes, allowing any OpenTelemetry-compatible tracing
+  subscriber/collector to export it without hard-coding a vendor SDK.
+
 ## GOAL-301: relay control plane
 
 - Redis Streams is the first broker adapter because it is easy to self-host;
