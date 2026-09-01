@@ -145,3 +145,5 @@
   after a worker crash without coupling the control plane to one process.
 - Workers reclaim entries idle for 30 seconds with `XAUTOCLAIM`, allowing a
   replacement worker to recover jobs left pending by a crashed consumer.
+- The Compose broker profile health-checks Redis before starting workers and
+  restarts workers automatically, removing the cold-start dependency race.
