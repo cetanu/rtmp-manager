@@ -388,8 +388,15 @@ async fn supervise_relay(
         if target.encoding.mode == EncodingMode::Passthrough {
             args.extend(["-c", "copy"].into_iter().map(str::to_owned));
         } else {
+            let encoder = match target.encoding.hardware_encoder.as_deref() {
+                Some("nvenc") => "h264_nvenc",
+                Some("vaapi") => "h264_vaapi",
+                Some("qsv") => "h264_qsv",
+                Some("videotoolbox") => "h264_videotoolbox",
+                _ => "libx264",
+            };
             args.extend(
-                ["-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac"]
+                ["-c:v", encoder, "-preset", "veryfast", "-c:a", "aac"]
                     .into_iter()
                     .map(str::to_owned),
             );

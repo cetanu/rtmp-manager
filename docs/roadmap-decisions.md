@@ -31,6 +31,12 @@
   deployments remain portable. Linux workers use `prlimit`; other platforms
   continue with the supervisor's cancellation and restart guarantees.
 
+## GOAL-304: hardware encoding
+
+- Hardware encoders are explicitly allow-listed (`nvenc`, `vaapi`, `qsv`, and
+  `videotoolbox`) and map to FFmpeg's native H.264 encoders. The host image is
+  responsible for exposing the matching device/runtime.
+
 ## GOAL-501: usage quotas
 
 - Quotas are enforced independently of payment-provider integrations. The

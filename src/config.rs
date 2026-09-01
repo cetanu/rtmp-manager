@@ -109,6 +109,8 @@ pub struct EncodingProfile {
     pub width: Option<u32>,
     #[serde(default)]
     pub height: Option<u32>,
+    #[serde(default)]
+    pub hardware_encoder: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default)]
@@ -126,6 +128,7 @@ impl Default for EncodingProfile {
             max_video_bitrate_kbps: None,
             width: None,
             height: None,
+            hardware_encoder: None,
         }
     }
 }
@@ -353,6 +356,14 @@ impl AppConfig {
             bail!("Kick channel must be 1-25 ASCII letters, numbers, hyphens, or underscores");
         }
         for target in &self.targets {
+            if let Some(encoder) = target.encoding.hardware_encoder.as_deref()
+                && !matches!(encoder, "nvenc" | "vaapi" | "qsv" | "videotoolbox")
+            {
+                bail!(
+                    "Target '{}' has an unsupported hardware encoder",
+                    target.name
+                );
+            }
             if target.enabled {
                 let url = target.url.trim();
                 if url.is_empty() {
