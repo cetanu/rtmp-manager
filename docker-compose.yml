@@ -8,6 +8,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-sqlite:///data/rtmp-manager.sqlite3?mode=rwc}
       RUST_LOG: ${RUST_LOG:-rtmp_proxy=info,rtmp_rs=off}
       MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:?Set a strong master encryption key}
+      RELAY_BROKER_URL: ${RELAY_BROKER_URL:-}
     ports:
       - "${RTMP_PORT:-1935}:1935"
       - "${HTTP_PORT:-3000}:3000"
@@ -15,5 +16,15 @@ services:
     volumes:
       - rtmp-manager-data:/data
 
+  # Optional control-plane broker for distributed relay workers.
+  relay-broker:
+    image: redis:7-alpine
+    profiles: [broker]
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - relay-broker-data:/data
+
 volumes:
   rtmp-manager-data:
+
+  relay-broker-data:

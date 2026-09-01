@@ -39,3 +39,9 @@
   without changing stream lifecycle code.
 - Provider webhooks use `BILLING_WEBHOOK_SECRET` and a generic signed payload;
   Stripe/LemonSqueezy adapters can translate their events into this contract.
+
+## GOAL-301: relay control plane
+
+- Redis Streams is the first broker adapter because it is easy to self-host;
+  `RELAY_BROKER_URL` selects it while the local executor remains the default
+  for installations without a broker.

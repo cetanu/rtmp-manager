@@ -52,6 +52,63 @@ pub struct LocalRelayExecutor {
     metrics: Arc<Metrics>,
 }
 
+/// Publishes relay intents to Redis Streams for execution by separate media workers.
+#[derive(Clone)]
+pub struct RedisRelayExecutor {
+    url: String,
+}
+
+impl RedisRelayExecutor {
+    pub fn new(url: impl Into<String>) -> Self {
+        Self { url: url.into() }
+    }
+}
+
+impl RelayExecutor for RedisRelayExecutor {
+    fn spawn(&self, tenant_id: String, source_url: String, target: TargetConfig) -> RelayProcess {
+        let (cancel, mut cancel_rx) = watch::channel(false);
+        let url = self.url.clone();
+        let task = tokio::spawn(async move {
+            let client = match redis::Client::open(url) {
+                Ok(client) => client,
+                Err(error) => {
+                    tracing::error!(%error, "Invalid relay broker URL");
+                    return;
+                }
+            };
+            let mut connection = match client.get_multiplexed_async_connection().await {
+                Ok(connection) => connection,
+                Err(error) => {
+                    tracing::error!(%error, "Relay broker connection failed");
+                    return;
+                }
+            };
+            let payload = match serde_json::to_string(&serde_json::json!({
+                "tenant_id": tenant_id, "source_url": source_url, "target": target
+            })) {
+                Ok(payload) => payload,
+                Err(error) => {
+                    tracing::error!(%error, "Failed to serialize relay intent");
+                    return;
+                }
+            };
+            if let Err(error) = redis::cmd("XADD")
+                .arg("rtmp-manager:relay-intents")
+                .arg("*")
+                .arg("payload")
+                .arg(payload)
+                .query_async::<String>(&mut connection)
+                .await
+            {
+                tracing::error!(%error, "Failed to publish relay intent");
+                return;
+            }
+            let _ = cancel_rx.changed().await;
+        });
+        RelayProcess { cancel, task }
+    }
+}
+
 impl LocalRelayExecutor {
     pub fn new(metrics: Arc<Metrics>) -> Self {
         Self { metrics }

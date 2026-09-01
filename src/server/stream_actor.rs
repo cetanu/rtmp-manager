@@ -6,7 +6,8 @@ use crate::server::preview::{
     StreamState, StreamStatus, create_preview_dir, valid_preview_file_name,
 };
 use crate::server::relay::{
-    LocalRelayExecutor, RelayExecutor, RelayProcess, cancel_relays, run_direct_test,
+    LocalRelayExecutor, RedisRelayExecutor, RelayExecutor, RelayProcess, cancel_relays,
+    run_direct_test,
 };
 use crate::tenant::{Tenant, TenantId, TenantRepository};
 use crate::util::stream_key_digest;
@@ -435,6 +436,10 @@ impl StreamHandle {
             preview_dir: preview_dir.clone(),
         };
 
+        let relay_executor: Arc<dyn RelayExecutor> = match std::env::var("RELAY_BROKER_URL") {
+            Ok(url) if !url.trim().is_empty() => Arc::new(RedisRelayExecutor::new(url)),
+            _ => Arc::new(LocalRelayExecutor::new(Arc::clone(&metrics))),
+        };
         let actor = StreamActor {
             preview_dir,
             staged: HashMap::new(),
@@ -443,7 +448,7 @@ impl StreamHandle {
             http_client,
             tenants,
             usage,
-            relay_executor: Arc::new(LocalRelayExecutor::new(Arc::clone(&metrics))),
+            relay_executor,
             status_tx,
         };
 

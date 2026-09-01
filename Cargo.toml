@@ -21,6 +21,7 @@ serde_valid = "2.0"
 hmac = "0.12.1"
 hex = "0.4.3"
 subtle = "2.6.1"
+redis = { version = "1.6.0", features = ["tokio-comp"] }
 sha2 = "0.10.9"
 time = { version = "0.3.54", features = ["parsing"] }
 topcoat = { version = "0.5.0", features = ["ui", "tailwind", "asset", "multipart", "runtime", "sse"] }
