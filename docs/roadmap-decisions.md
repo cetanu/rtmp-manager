@@ -71,6 +71,10 @@
   returns `503` when the database is unavailable.
 - The runtime image uses curl for a Docker `HEALTHCHECK` against `/healthz`,
   allowing Compose and schedulers to restart unhealthy instances.
+- The container entrypoint accepts an explicit `MASTER_ENCRYPTION_KEY`; when
+  omitted, it generates a random key once and persists it in `/data` with
+  restrictive permissions so first-run setup remains one-command while
+  encrypted data survives restarts.
 
 ## GOAL-501: usage quotas
 

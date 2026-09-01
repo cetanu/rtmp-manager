@@ -26,9 +26,11 @@ SRT ingest listens on UDP port 6000. Configure OBS with
 The access-control stream ID is authenticated before MPEG-TS packets are
 remuxed into the same relay pipeline as RTMP ingest.
 
-The `rtmp-manager-data` volume persists the SQLite database. Set
-`MASTER_ENCRYPTION_KEY` to a strong, stable secret; it encrypts destination
-stream keys and OAuth state at rest. On Linux, `RELAY_MAX_CPU_SECONDS` and
+The `rtmp-manager-data` volume persists the SQLite database and generated
+encryption key. Set `MASTER_ENCRYPTION_KEY` to a strong, stable secret when
+you need externally managed key material; otherwise the container generates a
+random key once in the volume. The key encrypts destination stream keys and
+OAuth state at rest. On Linux, `RELAY_MAX_CPU_SECONDS` and
 `RELAY_MAX_MEMORY_MB` optionally apply per-relay `prlimit` caps to FFmpeg
 workers. Set `HTTP_PORT`,
 `RTMP_PORT`, `SRT_PORT`, or `RUST_LOG` in the shell or a `.env` file to override
