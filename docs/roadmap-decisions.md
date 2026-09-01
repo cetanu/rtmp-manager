@@ -81,8 +81,9 @@
 ## GOAL-501: usage quotas
 
 - Quotas are enforced independently of payment-provider integrations. The
-  initial plans are free (10 hours/month), pro (100 hours/month), and
-  enterprise (unlimited); a later billing adapter can update the plan column
+  initial plans are free (20 hours/month and two enabled destinations), pro
+  (unlimited hours and five enabled destinations), and enterprise (unlimited);
+  a later billing adapter can update the plan column
   without changing stream lifecycle code.
 - Active streams are recorded separately from accumulated seconds so live
   reservations remain inspectable and are removed on every stream teardown.
@@ -97,6 +98,10 @@
   query is scoped by the session tenant ID.
 - Settings renders that snapshot as a tenant-scoped Plan Usage card, keeping
   quota state visible without exposing provider billing credentials.
+- Stream admission reserves monthly usage before launching a preview and
+  rejects new streams once the plan's allowance is exhausted. Tenant settings
+  reject enabled destination counts above the active plan's limit with an
+  actionable upgrade error, so limits are enforced before relay launch.
 
 ## GOAL-401: YouTube quota partitioning
 
