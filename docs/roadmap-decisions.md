@@ -61,6 +61,8 @@
 - Relay lifecycle is emitted as a structured `relay.worker` tracing span with
   tenant and target attributes, allowing any OpenTelemetry-compatible tracing
   subscriber/collector to export it without hard-coding a vendor SDK.
+- `/api/metrics/prometheus` is the scrape boundary; it emits only the
+  authenticated tenant's ingest and outbound bitrate series.
 
 ## GOAL-301: relay control plane
 

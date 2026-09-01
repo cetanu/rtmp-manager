@@ -251,6 +251,43 @@ async fn get_metrics_history(cx: &Cx) -> Result<Json<Vec<crate::metrics::Metrics
     Ok(Json(history))
 }
 
+#[route(GET "/api/metrics/prometheus")]
+async fn get_metrics_prometheus(cx: &Cx) -> Result<topcoat::router::Response> {
+    let app: &AppHandle = app_context(cx);
+    let tenant_id = auth::current_user(cx).tenant_id.as_str();
+    let mut output = format!(
+        "# TYPE rtmp_manager_ingest_bps gauge\nrtmp_manager_ingest_bps{{tenant_id=\"{}\"}} {}\n",
+        prometheus_label(tenant_id),
+        app.metrics.current_ingest_bps()
+    );
+    for sample in app
+        .metrics
+        .current_target_bitrates()
+        .into_iter()
+        .filter(|sample| sample.tenant_id == tenant_id)
+    {
+        output.push_str(&format!(
+            "rtmp_manager_target_outbound_bps{{tenant_id=\"{}\",target=\"{}\"}} {}\n",
+            prometheus_label(tenant_id),
+            prometheus_label(&sample.name),
+            sample.outbound_bps
+        ));
+    }
+    let mut response = topcoat::router::Response::new(topcoat::router::Body::from(output));
+    response.headers_mut().insert(
+        topcoat::router::header::CONTENT_TYPE,
+        topcoat::router::HeaderValue::from_static("text/plain; version=0.0.4"),
+    );
+    Ok(response)
+}
+
+fn prometheus_label(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+}
+
 #[route(POST "/api/admin/emergency-stop")]
 async fn emergency_stop(cx: &Cx) -> Result<topcoat::router::Response> {
     let app: &AppHandle = app_context(cx);

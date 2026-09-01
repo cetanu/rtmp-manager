@@ -48,3 +48,6 @@ from **OBS Chat Overlay**. The transparent overlay receives aggregated chat over
 Server-Sent Events and supports Dark, Minimal, Comic, and Transparent Box
 themes plus font size, message opacity, badges, avatars, emoji, and fade timing.
 Keep the overlay URL private because its query key grants read access to chat.
+
+Authenticated operators can scrape tenant-scoped Prometheus metrics from
+`/api/metrics/prometheus`.
