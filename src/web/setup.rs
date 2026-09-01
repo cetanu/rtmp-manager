@@ -189,6 +189,7 @@ fn destination(form: &SetupForm) -> std::result::Result<Option<TargetConfig>, St
         stream_key: form.destination_stream_key.trim().to_owned(),
         public_url: None,
         enabled: true,
+        encoding: crate::config::EncodingProfile::default(),
     }))
 }
 

@@ -95,6 +95,39 @@ pub struct TargetConfig {
     pub public_url: Option<String>,
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default)]
+    pub encoding: EncodingProfile,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+pub struct EncodingProfile {
+    #[serde(default)]
+    pub mode: EncodingMode,
+    #[serde(default)]
+    pub max_video_bitrate_kbps: Option<u32>,
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum EncodingMode {
+    #[default]
+    Passthrough,
+    Cpu,
+}
+
+impl Default for EncodingProfile {
+    fn default() -> Self {
+        Self {
+            mode: EncodingMode::Passthrough,
+            max_video_bitrate_kbps: None,
+            width: None,
+            height: None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Validate)]
@@ -460,6 +493,11 @@ impl AppConfig {
                     }),
                     public_url: non_empty(target.public_url),
                     enabled: target.enabled,
+                    encoding: config
+                        .targets
+                        .get(index)
+                        .map(|target| target.encoding.clone())
+                        .unwrap_or_default(),
                 })
                 .collect();
         }
@@ -472,6 +510,7 @@ impl AppConfig {
                 stream_key: "".to_string(),
                 public_url: None,
                 enabled: false,
+                encoding: EncodingProfile::default(),
             });
         } else if action.starts_with("remove_target:")
             && let Some(idx_str) = action.split(':').nth(1)
@@ -805,6 +844,7 @@ mod tests {
                 stream_key: "secret".into(),
                 public_url: Some("https://example.test/watch".into()),
                 enabled: true,
+                encoding: EncodingProfile::default(),
             }],
             overlay: OverlaySettings::default(),
             chat: ChatSettings {

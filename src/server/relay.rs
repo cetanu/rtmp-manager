@@ -1,4 +1,4 @@
-use crate::config::TargetConfig;
+use crate::config::{EncodingMode, TargetConfig};
 use crate::metrics::Metrics;
 use crate::util::redact_secrets;
 use std::process::Stdio;
@@ -145,22 +145,34 @@ async fn supervise_relay(
         }
         attempt += 1;
         let started_at = tokio::time::Instant::now();
+        let mut args = vec![
+            "-loglevel".to_owned(),
+            "warning".to_owned(),
+            "-stats_period".to_owned(),
+            "1".to_owned(),
+            "-progress".to_owned(),
+            "pipe:1".to_owned(),
+            "-i".to_owned(),
+            source_url.clone(),
+        ];
+        if target.encoding.mode == EncodingMode::Passthrough {
+            args.extend(["-c", "copy"].into_iter().map(str::to_owned));
+        } else {
+            args.extend(
+                ["-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac"]
+                    .into_iter()
+                    .map(str::to_owned),
+            );
+            if let Some(bitrate) = target.encoding.max_video_bitrate_kbps {
+                args.extend(["-b:v".to_owned(), format!("{bitrate}k")]);
+            }
+            if let (Some(width), Some(height)) = (target.encoding.width, target.encoding.height) {
+                args.extend(["-vf".to_owned(), format!("scale={width}:{height}")]);
+            }
+        }
+        args.extend(["-f".to_owned(), "flv".to_owned(), destination.clone()]);
         let child = tokio::process::Command::new("ffmpeg")
-            .args([
-                "-loglevel",
-                "warning",
-                "-stats_period",
-                "1",
-                "-progress",
-                "pipe:1",
-                "-i",
-                &source_url,
-                "-c",
-                "copy",
-                "-f",
-                "flv",
-                &destination,
-            ])
+            .args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true)

@@ -263,6 +263,7 @@ mod tests {
             stream_key: stream_key.to_owned(),
             public_url: None,
             enabled: true,
+            encoding: crate::config::EncodingProfile::default(),
         }
     }
 
