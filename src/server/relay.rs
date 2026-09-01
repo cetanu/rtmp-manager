@@ -529,7 +529,12 @@ fn relay_ffmpeg_args(source_url: &str, destination: &str, target: &TargetConfig)
             args.extend(["-b:v".to_owned(), format!("{bitrate}k")]);
         }
         if let (Some(width), Some(height)) = (target.encoding.width, target.encoding.height) {
-            args.extend(["-vf".to_owned(), format!("scale={width}:{height}")]);
+            args.extend([
+                "-vf".to_owned(),
+                format!(
+                    "scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"
+                ),
+            ]);
         }
     }
     args.extend(["-f".to_owned(), "flv".to_owned(), destination.to_owned()]);
@@ -616,10 +621,12 @@ mod tests {
         assert!(args.windows(2).any(|pair| pair == ["-c:a", "aac"]));
         assert!(args.windows(2).any(|pair| pair == ["-ac", "2"]));
         assert!(args.windows(2).any(|pair| pair == ["-ar", "48000"]));
-        assert!(
-            args.windows(2)
-                .any(|pair| pair == ["-vf", "scale=1920:1080"])
-        );
+        assert!(args.windows(2).any(|pair| {
+            pair == [
+                "-vf",
+                "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080",
+            ]
+        }));
         assert!(args.windows(2).any(|pair| pair == ["-b:v", "6000k"]));
     }
 
