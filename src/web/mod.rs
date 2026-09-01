@@ -581,6 +581,9 @@ async fn stripe_checkout(
     cx: &Cx,
     body: topcoat::router::Bytes,
 ) -> Result<topcoat::router::Response> {
+    if body.len() > 16 * 1024 {
+        return Err(bad_request("Stripe checkout request exceeds 16 KiB").into());
+    }
     let request: StripeCheckoutRequest = serde_json::from_slice(&body)
         .map_err(|_| bad_request("Invalid Stripe checkout request"))?;
     let price_variable = match request.plan.as_str() {
