@@ -495,9 +495,10 @@ impl AppConfig {
                 kick_channel: non_empty(chat.kick_channel)
                     .map(|channel| channel.trim().to_ascii_lowercase()),
                 kick_webhook_enabled: config.chat.kick_webhook_enabled,
-                relay_enabled: config.chat.relay_enabled,
-                relay_source: config.chat.relay_source,
-                relay_destination: config.chat.relay_destination,
+                relay_enabled: chat.relay_enabled.unwrap_or(config.chat.relay_enabled),
+                relay_source: non_empty(chat.relay_source).or(config.chat.relay_source),
+                relay_destination: non_empty(chat.relay_destination)
+                    .or(config.chat.relay_destination),
             };
         }
         if let Some(target_fields) = form.targets {
@@ -646,6 +647,10 @@ pub struct ChatForm {
     #[serde(default)]
     pub clear_kick_client_secret: bool,
     pub kick_channel: Option<String>,
+    #[serde(default)]
+    pub relay_enabled: Option<bool>,
+    pub relay_source: Option<String>,
+    pub relay_destination: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

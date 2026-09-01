@@ -69,6 +69,8 @@
 - Relay source/destination settings are stored with each tenant's encrypted
   chat configuration; environment variables remain an explicit deployment
   override for installations managed outside the dashboard.
+- The dashboard exposes those source, destination, and enabled fields so a
+  tenant can configure relay rules without editing environment files.
 
 ## GOAL-502: observability
 

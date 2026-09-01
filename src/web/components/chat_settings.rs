@@ -32,6 +32,40 @@ pub async fn chat_settings(cx: &Cx) -> Result {
                         )
                     </div>
 
+                    <div class="grid gap-6 md:grid-cols-3">
+                        form_field(
+                            control_id: "relay_source",
+                            label_text: "Relay source platform",
+                            input(attrs: attributes! {
+                                id="relay_source"
+                                name="chat[relay_source]"
+                                placeholder="youtube, kick, or twitch"
+                                value=(chat.relay_source.clone().unwrap_or_default())
+                            })
+                        )
+                        form_field(
+                            control_id: "relay_destination",
+                            label_text: "Relay destination platform",
+                            input(attrs: attributes! {
+                                id="relay_destination"
+                                name="chat[relay_destination]"
+                                placeholder="twitch, kick, or youtube"
+                                value=(chat.relay_destination.clone().unwrap_or_default())
+                            })
+                        )
+                        form_field(
+                            control_id: "relay_enabled",
+                            label_text: "Enable cross-platform relay",
+                            input(attrs: attributes! {
+                                id="relay_enabled"
+                                name="chat[relay_enabled]"
+                                type="checkbox"
+                                value="true"
+                                checked=(chat.relay_enabled)
+                            })
+                        )
+                    </div>
+
                     <div class="flex flex-col gap-6">
                         clearable_secret_field(
                             control_id: "youtube_api_key",
