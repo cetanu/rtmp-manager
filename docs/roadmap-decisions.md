@@ -92,6 +92,9 @@
   signed-event window and tenant/plan metadata on subscription objects.
 - LemonSqueezy has a dedicated `/api/billing/lemonsqueezy` adapter using its
   raw-body `X-Signature` HMAC and `meta.custom_data` tenant metadata.
+- Authenticated tenants can inspect their current plan, consumed seconds,
+  active reservations, and plan limit through `GET /api/billing/usage`; the
+  query is scoped by the session tenant ID.
 
 ## GOAL-401: YouTube quota partitioning
 
