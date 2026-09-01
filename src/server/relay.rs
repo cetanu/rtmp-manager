@@ -385,39 +385,7 @@ async fn supervise_relay(
         }
         attempt += 1;
         let started_at = tokio::time::Instant::now();
-        let mut args = vec![
-            "-loglevel".to_owned(),
-            "warning".to_owned(),
-            "-stats_period".to_owned(),
-            "1".to_owned(),
-            "-progress".to_owned(),
-            "pipe:1".to_owned(),
-            "-i".to_owned(),
-            source_url.clone(),
-        ];
-        if target.encoding.mode == EncodingMode::Passthrough {
-            args.extend(["-c", "copy"].into_iter().map(str::to_owned));
-        } else {
-            let encoder = match target.encoding.hardware_encoder.as_deref() {
-                Some("nvenc") => "h264_nvenc",
-                Some("vaapi") => "h264_vaapi",
-                Some("qsv") => "h264_qsv",
-                Some("videotoolbox") => "h264_videotoolbox",
-                _ => "libx264",
-            };
-            args.extend(
-                ["-c:v", encoder, "-preset", "veryfast", "-c:a", "aac"]
-                    .into_iter()
-                    .map(str::to_owned),
-            );
-            if let Some(bitrate) = target.encoding.max_video_bitrate_kbps {
-                args.extend(["-b:v".to_owned(), format!("{bitrate}k")]);
-            }
-            if let (Some(width), Some(height)) = (target.encoding.width, target.encoding.height) {
-                args.extend(["-vf".to_owned(), format!("scale={width}:{height}")]);
-            }
-        }
-        args.extend(["-f".to_owned(), "flv".to_owned(), destination.clone()]);
+        let args = relay_ffmpeg_args(&source_url, &destination, &target);
         let child = ffmpeg_command(&args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -528,6 +496,46 @@ async fn supervise_relay(
     tracing::info!(tenant_id = %tenant_id, name = %target.name, "Stream target relay supervisor stopped");
 }
 
+fn relay_ffmpeg_args(source_url: &str, destination: &str, target: &TargetConfig) -> Vec<String> {
+    let mut args = vec![
+        "-loglevel".to_owned(),
+        "warning".to_owned(),
+        "-stats_period".to_owned(),
+        "1".to_owned(),
+        "-progress".to_owned(),
+        "pipe:1".to_owned(),
+        "-i".to_owned(),
+        source_url.to_owned(),
+    ];
+    if target.encoding.mode == EncodingMode::Passthrough {
+        args.extend(["-c", "copy"].into_iter().map(str::to_owned));
+    } else {
+        let encoder = match target.encoding.hardware_encoder.as_deref() {
+            Some("nvenc") => "h264_nvenc",
+            Some("vaapi") => "h264_vaapi",
+            Some("qsv") => "h264_qsv",
+            Some("videotoolbox") => "h264_videotoolbox",
+            _ => "libx264",
+        };
+        args.extend(
+            [
+                "-c:v", encoder, "-preset", "veryfast", "-c:a", "aac", "-b:a", "128k", "-ar",
+                "48000", "-ac", "2",
+            ]
+            .into_iter()
+            .map(str::to_owned),
+        );
+        if let Some(bitrate) = target.encoding.max_video_bitrate_kbps {
+            args.extend(["-b:v".to_owned(), format!("{bitrate}k")]);
+        }
+        if let (Some(width), Some(height)) = (target.encoding.width, target.encoding.height) {
+            args.extend(["-vf".to_owned(), format!("scale={width}:{height}")]);
+        }
+    }
+    args.extend(["-f".to_owned(), "flv".to_owned(), destination.to_owned()]);
+    args
+}
+
 async fn wait_for_retry(cancel: &mut watch::Receiver<bool>, seconds: u64) -> bool {
     tokio::select! {
         _ = tokio::time::sleep(Duration::from_secs(seconds)) => false,
@@ -586,6 +594,33 @@ mod tests {
     fn parses_ffmpeg_progress_bitrate() {
         assert_eq!(parse_ffmpeg_bitrate(" 2450.5kbits/s"), Some(2_450_500));
         assert_eq!(parse_ffmpeg_bitrate("N/A"), None);
+    }
+
+    #[test]
+    fn cpu_profile_normalizes_audio_and_scales_video() {
+        let target = TargetConfig {
+            name: "Twitch".into(),
+            url: "rtmp://example.test/app".into(),
+            stream_key: "key".into(),
+            public_url: None,
+            enabled: true,
+            encoding: crate::config::EncodingProfile {
+                mode: crate::config::EncodingMode::Cpu,
+                max_video_bitrate_kbps: Some(6_000),
+                width: Some(1920),
+                height: Some(1080),
+                hardware_encoder: None,
+            },
+        };
+        let args = relay_ffmpeg_args("rtmp://127.0.0.1/live/key", "rtmp://target/key", &target);
+        assert!(args.windows(2).any(|pair| pair == ["-c:a", "aac"]));
+        assert!(args.windows(2).any(|pair| pair == ["-ac", "2"]));
+        assert!(args.windows(2).any(|pair| pair == ["-ar", "48000"]));
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["-vf", "scale=1920:1080"])
+        );
+        assert!(args.windows(2).any(|pair| pair == ["-b:v", "6000k"]));
     }
 
     #[test]
