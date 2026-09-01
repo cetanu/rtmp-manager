@@ -6,7 +6,7 @@ draft PR does not imply completion where an external service is still needed.
 
 | Goal | Current evidence | Remaining acceptance work |
 | --- | --- | --- |
-| 101–104 | Docker/Compose, setup, overlay, SRT listener | Live provider/container streaming smoke tests in CI |
+| 101–104 | Docker/Compose, runtime healthcheck, setup, overlay, SRT listener | Live provider/container streaming smoke tests in CI |
 | 201–204 | Tenant repository, accounts/RBAC, AES-GCM, SQLx migrations, and `/healthz` pool checks | Production key-management/KMS integration |
 | 301–302 | RelayExecutor, Redis Streams worker, ACK/claim, prlimit | Multi-node deployment soak and worker fencing |
 | 303–304 | Configurable disconnect grace with profile-aware, retrying generated standby slate, validated encoding profiles, aspect-preserving crop, target settings controls, and normalized encoded audio | Platform-specific reconnect/transcode validation |

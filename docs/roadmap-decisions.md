@@ -69,6 +69,8 @@
 - `/healthz` is unauthenticated so orchestrators can probe the service before
   login; it executes a live `SELECT 1` against the configured SQLx pool and
   returns `503` when the database is unavailable.
+- The runtime image uses curl for a Docker `HEALTHCHECK` against `/healthz`,
+  allowing Compose and schedulers to restart unhealthy instances.
 
 ## GOAL-501: usage quotas
 
