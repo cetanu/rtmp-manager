@@ -1,17 +1,15 @@
-use crate::server::state::AppHandle;
 use crate::web::components::ui::card::{card, card_content, card_header, card_title};
 use crate::web::components::ui::form::{form_field, secret_input, switch_field};
 use crate::web::components::ui::input::input;
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::Cx,
     view::{attributes, component, view},
 };
 
 #[component]
 pub async fn server_settings(cx: &Cx) -> Result {
-    let app: &AppHandle = app_context(cx);
-    let config = app.config.get();
+    let config = crate::web::request_config(cx).await?;
     view! {
         card(
             attrs: attributes! { class="h-full" },

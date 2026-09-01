@@ -1,10 +1,13 @@
+use crate::accounts::Role;
 use crate::config::ConfigForm;
-use crate::server::state::{AppHandle, StreamStatus};
+use crate::server::state::{AppHandle, StreamState, StreamStatus};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use topcoat::asset::{AssetBundle, RouterBuilderAssetExt};
+use topcoat::cookie::RouterBuilderCookieExt;
+use topcoat::session::{RouterBuilderSessionExt, SessionConfig};
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -23,6 +26,7 @@ use topcoat::{
 
 pub mod auth;
 pub mod components;
+mod oauth;
 mod overlay;
 mod setup;
 use components::{
@@ -51,6 +55,16 @@ pub(crate) const SECRET_FIELDS_SCRIPT: topcoat::asset::Asset =
 pub(crate) const CHAT_OVERLAY_SCRIPT: topcoat::asset::Asset =
     topcoat::asset::asset!("static/chat-overlay.js");
 
+pub async fn request_config(cx: &Cx) -> anyhow::Result<crate::config::AppConfig> {
+    let app: &AppHandle = app_context(cx);
+    app.tenant_config(&auth::current_user(cx).tenant_id).await
+}
+
+pub async fn request_chat(cx: &Cx) -> anyhow::Result<crate::chat::ChatHandle> {
+    let app: &AppHandle = app_context(cx);
+    app.tenant_chat(&auth::current_user(cx).tenant_id).await
+}
+
 pub async fn run_web_server(
     app_handle: AppHandle,
     addr: std::net::SocketAddr,
@@ -60,6 +74,8 @@ pub async fn run_web_server(
         .discover()
         .assets(AssetBundle::load()?)
         .app_context(app_handle)
+        .cookies()
+        .sessions(SessionConfig::default())
         .build();
 
     tokio::spawn(async move {
@@ -181,7 +197,10 @@ struct PreviewFile(str);
 async fn get_preview_file(cx: &Cx) -> Result<topcoat::router::Response> {
     let app: &AppHandle = app_context(cx);
     let name = topcoat::router::path_param::<PreviewFile>(cx);
-    let Some(path) = app.stream.preview_file(name) else {
+    let Some(path) = app
+        .stream
+        .preview_file(&auth::current_user(cx).tenant_id, name)
+    else {
         return Err(not_found().into());
     };
     let bytes = match tokio::fs::read(path).await {
@@ -211,7 +230,7 @@ async fn get_preview_file(cx: &Cx) -> Result<topcoat::router::Response> {
 #[route(GET "/api/stream/status")]
 async fn get_stream_status(cx: &Cx) -> Result<Json<StreamStatus>> {
     let app: &AppHandle = app_context(cx);
-    Ok(Json(app.stream.status()))
+    Ok(Json(app.stream.status(&auth::current_user(cx).tenant_id)))
 }
 
 #[route(GET "/api/metrics/history")]
@@ -257,12 +276,28 @@ async fn update_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
         [(topcoat::router::header::LOCATION, return_to)],
     );
 
-    let (_, _changed, chat_changed) = match app.config.save_form(form).await {
-        Ok(res) => res,
-        Err(error) => return Err(bad_request(error.to_string()).into()),
+    let user = auth::current_user(cx);
+    let chat_changed = if user.role == Role::Admin
+        && user.tenant_id == crate::tenant::TenantId::default_tenant()
+    {
+        match app.config.save_form(form).await {
+            Ok((_, _, chat_changed)) => chat_changed,
+            Err(error) => return Err(bad_request(error.to_string()).into()),
+        }
+    } else {
+        if form.server.is_some() {
+            return Err(bad_request("Only administrators can change server settings").into());
+        }
+        match app.save_tenant_form(&user.tenant_id, form).await {
+            Ok((_, chat_changed)) => chat_changed,
+            Err(error) => return Err(bad_request(error.to_string()).into()),
+        }
     };
 
-    if chat_changed && let Err(error) = app.apply_chat_config().await {
+    if chat_changed
+        && user.tenant_id == crate::tenant::TenantId::default_tenant()
+        && let Err(error) = app.apply_chat_config().await
+    {
         tracing::error!("Failed to apply chat configuration: {error:#}");
         return Err(internal_server_error(error).into());
     }
@@ -272,11 +307,10 @@ async fn update_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
 
 #[route(GET "/api/config")]
 async fn get_config(cx: &Cx) -> Result<topcoat::router::Response> {
-    let app: &AppHandle = app_context(cx);
     topcoat::router::IntoResponse::into_response(
         (
             [(topcoat::router::header::CACHE_CONTROL, "no-store, private")],
-            Json(app.config.get().as_ref().clone()),
+            Json(request_config(cx).await?),
         ),
         cx,
     )
@@ -343,8 +377,7 @@ fn redirect_to(cx: &Cx, location: &'static str) -> Result<topcoat::router::Respo
 
 #[route(GET "/api/chat")]
 async fn get_chat_inbox(cx: &Cx) -> Result<topcoat::router::Response> {
-    let app: &AppHandle = app_context(cx);
-    let snapshot = app.chat.snapshot().await?;
+    let snapshot = request_chat(cx).await?.snapshot().await?;
     topcoat::router::IntoResponse::into_response(
         (
             [(topcoat::router::header::CACHE_CONTROL, "no-store")],
@@ -359,8 +392,8 @@ async fn acknowledge_chat_message(
     cx: &Cx,
     Json(request): Json<AcknowledgeChatMessage>,
 ) -> Result<topcoat::router::Response> {
-    let app: &AppHandle = app_context(cx);
-    if !app.chat.acknowledge(request.id).await? {
+    let chat = request_chat(cx).await?;
+    if !chat.acknowledge(request.id).await? {
         return topcoat::router::IntoResponse::into_response(
             (
                 topcoat::router::StatusCode::CONFLICT,
@@ -370,7 +403,7 @@ async fn acknowledge_chat_message(
         );
     }
 
-    topcoat::router::IntoResponse::into_response(Json(app.chat.snapshot().await?), cx)
+    topcoat::router::IntoResponse::into_response(Json(chat.snapshot().await?), cx)
 }
 
 #[route(GET "/api/events")]
@@ -379,29 +412,34 @@ async fn server_events(
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<SseEvent>> + use<>>> {
     let app: &AppHandle = app_context(cx);
     let status_rx = app.stream.subscribe_status();
-    let chat_changes = app.chat.subscribe_changes();
+    let tenant_id = auth::current_user(cx).tenant_id.clone();
+    let chat_changes = request_chat(cx).await?.subscribe_changes();
 
     let initial_status = SseEvent::new()
         .event("stream_status")
-        .json_data(&*status_rx.borrow())?;
+        .json_data(&app.stream.status(&tenant_id))?;
     let initial_events = futures_util::stream::iter([
         Ok(initial_status),
         Ok(SseEvent::new().event("chat_changed").data("changed")),
     ]);
 
     let changes = futures_util::stream::unfold(
-        (status_rx, chat_changes),
-        |(mut status_rx, mut chat_changes)| async move {
+        (status_rx, chat_changes, tenant_id),
+        |(mut status_rx, mut chat_changes, tenant_id)| async move {
             tokio::select! {
                 changed = status_rx.changed() => {
                     if changed.is_err() {
                         return None;
                     }
-                    let status = *status_rx.borrow();
+                    let status = status_rx
+                        .borrow()
+                        .get(&tenant_id)
+                        .copied()
+                        .unwrap_or(StreamStatus { state: StreamState::Offline });
                     let event = SseEvent::new()
                         .event("stream_status")
                         .json_data(&status);
-                    Some((event, (status_rx, chat_changes)))
+                    Some((event, (status_rx, chat_changes, tenant_id)))
                 }
                 changed = chat_changes.changed() => {
                     if changed.is_err() {
@@ -409,7 +447,7 @@ async fn server_events(
                     }
                     Some((
                         Ok(SseEvent::new().event("chat_changed").data("changed")),
-                        (status_rx, chat_changes),
+                        (status_rx, chat_changes, tenant_id),
                     ))
                 }
             }
@@ -465,7 +503,13 @@ async fn receive_webhook(
         .collect();
     let body_bytes = body.len();
     let event = crate::server::state::WebhookEvent { headers, body };
-    let settings = app.config.get().chat.clone();
+    let default_tenant = app
+        .tenants
+        .find(&crate::tenant::TenantId::default_tenant())
+        .await?
+        .ok_or_else(|| internal_server_error(anyhow::anyhow!("Default tenant is missing")))?;
+    let settings = default_tenant.chat;
+    let chat = app.tenant_chat(&default_tenant.id).await?;
     let platform = if event.header("kick-event-signature").is_some() {
         let message = match crate::chat::kick::process_event(&settings, &event) {
             Ok(message) => message,
@@ -474,10 +518,7 @@ async fn receive_webhook(
                 return Err(bad_request("Rejected Kick webhook").into());
             }
         };
-        app.chat
-            .enqueue(message)
-            .await
-            .map_err(internal_server_error)?;
+        chat.enqueue(message).await.map_err(internal_server_error)?;
         "kick"
     } else if event.header("x-twitter-webhooks-signature").is_some() {
         let message = match crate::chat::x::process_event(&settings, &event) {
@@ -488,10 +529,7 @@ async fn receive_webhook(
             }
         };
         if let Some(message) = message {
-            app.chat
-                .enqueue(message)
-                .await
-                .map_err(internal_server_error)?;
+            chat.enqueue(message).await.map_err(internal_server_error)?;
         }
         "x"
     } else {

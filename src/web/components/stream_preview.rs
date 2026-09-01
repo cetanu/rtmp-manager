@@ -55,7 +55,9 @@ pub async fn stream_preview_player(child: View) -> Result {
 pub async fn stream_preview_placeholder(cx: &Cx, revision: f64) -> Result {
     let _ = revision;
     let app: &AppHandle = app_context(cx);
-    let status = app.stream.status();
+    let status = app
+        .stream
+        .status(&crate::web::auth::current_user(cx).tenant_id);
     let message = status.state.to_string();
     view! {
         <div

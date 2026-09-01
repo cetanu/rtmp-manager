@@ -1,4 +1,4 @@
-use crate::config::{NotificationSettings, TargetConfig};
+use crate::config::{ChatSettings, NotificationSettings, OverlaySettings, TargetConfig};
 use crate::database::Database;
 use crate::util::stream_key_digest;
 use anyhow::{Context, Result, bail};
@@ -30,9 +30,12 @@ impl TenantId {
 #[derive(Clone, Debug)]
 pub struct Tenant {
     pub id: TenantId,
+    pub name: String,
     pub active: bool,
     pub max_concurrent_streams: usize,
     pub notifications: NotificationSettings,
+    pub chat: ChatSettings,
+    pub overlay: OverlaySettings,
     pub targets: Vec<TargetConfig>,
 }
 
@@ -43,6 +46,8 @@ pub struct TenantDefinition<'a> {
     pub active: bool,
     pub max_concurrent_streams: usize,
     pub notifications: &'a NotificationSettings,
+    pub chat: &'a ChatSettings,
+    pub overlay: &'a OverlaySettings,
     pub targets: &'a [TargetConfig],
 }
 
@@ -74,9 +79,25 @@ impl TenantRepository {
         }
     }
 
+    pub async fn authenticate_overlay(&self, overlay_key: &str) -> Result<Option<Tenant>> {
+        if overlay_key.is_empty() {
+            return Ok(None);
+        }
+        let tenant_id: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM tenants WHERE overlay_key_digest = $1 AND active = 1",
+        )
+        .bind(stream_key_digest(overlay_key))
+        .fetch_optional(self.database.pool())
+        .await?;
+        match tenant_id {
+            Some(tenant_id) => self.find(&TenantId::new(tenant_id)?).await,
+            None => Ok(None),
+        }
+    }
+
     pub async fn find(&self, tenant_id: &TenantId) -> Result<Option<Tenant>> {
         let row = sqlx::query(
-            "SELECT active, max_concurrent_streams, notifications \
+            "SELECT name, active, max_concurrent_streams, notifications, chat, overlay \
              FROM tenants WHERE id = $1",
         )
         .bind(tenant_id.as_str())
@@ -88,6 +109,8 @@ impl TenantRepository {
         let active: i64 = row.try_get("active")?;
         let max_concurrent_streams: i64 = row.try_get("max_concurrent_streams")?;
         let notifications: String = row.try_get("notifications")?;
+        let chat: String = row.try_get("chat")?;
+        let overlay: String = row.try_get("overlay")?;
         let target_data: Vec<String> = sqlx::query_scalar(
             "SELECT config FROM tenant_targets WHERE tenant_id = $1 ORDER BY position",
         )
@@ -97,11 +120,15 @@ impl TenantRepository {
 
         Ok(Some(Tenant {
             id: tenant_id.clone(),
+            name: row.try_get("name")?,
             active: active != 0,
             max_concurrent_streams: usize::try_from(max_concurrent_streams)
                 .context("Tenant concurrency limit is invalid")?,
             notifications: serde_json::from_str(&notifications)
                 .context("Tenant notification settings are invalid")?,
+            chat: serde_json::from_str(&chat).context("Tenant chat settings are invalid")?,
+            overlay: serde_json::from_str(&overlay)
+                .context("Tenant overlay settings are invalid")?,
             targets: target_data
                 .into_iter()
                 .map(|target| {
@@ -115,27 +142,36 @@ impl TenantRepository {
         if definition.max_concurrent_streams == 0 {
             bail!("Tenant concurrency limit must be positive");
         }
-        let stream_key_digest =
+        let ingest_digest =
             (!definition.stream_key.is_empty()).then(|| stream_key_digest(definition.stream_key));
         let notifications = serde_json::to_string(definition.notifications)?;
         let mut transaction = self.database.pool().begin().await?;
         sqlx::query(
             "INSERT INTO tenants \
-             (id, name, stream_key_digest, active, max_concurrent_streams, notifications) \
-             VALUES ($1, $2, $3, $4, $5, $6) \
+             (id, name, stream_key_digest, active, max_concurrent_streams, notifications, chat, overlay, overlay_key_digest) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
              ON CONFLICT (id) DO UPDATE SET \
                 name = excluded.name, \
                 stream_key_digest = excluded.stream_key_digest, \
                 active = excluded.active, \
                 max_concurrent_streams = excluded.max_concurrent_streams, \
-                notifications = excluded.notifications",
+                notifications = excluded.notifications, \
+                chat = excluded.chat, \
+                overlay = excluded.overlay, \
+                overlay_key_digest = excluded.overlay_key_digest",
         )
         .bind(definition.id.as_str())
         .bind(definition.name)
-        .bind(stream_key_digest)
+        .bind(ingest_digest)
         .bind(i64::from(definition.active))
         .bind(i64::try_from(definition.max_concurrent_streams)?)
         .bind(notifications)
+        .bind(serde_json::to_string(definition.chat)?)
+        .bind(serde_json::to_string(definition.overlay)?)
+        .bind(
+            (!definition.overlay.key.is_empty())
+                .then(|| stream_key_digest(&definition.overlay.key)),
+        )
         .execute(&mut *transaction)
         .await?;
         sqlx::query("DELETE FROM tenant_targets WHERE tenant_id = $1")
@@ -150,6 +186,47 @@ impl TenantRepository {
             )
             .bind(target_id)
             .bind(definition.id.as_str())
+            .bind(i64::try_from(position)?)
+            .bind(serde_json::to_string(target)?)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    pub async fn update_configuration(
+        &self,
+        tenant_id: &TenantId,
+        notifications: &NotificationSettings,
+        chat: &ChatSettings,
+        overlay: &OverlaySettings,
+        targets: &[TargetConfig],
+    ) -> Result<()> {
+        let mut transaction = self.database.pool().begin().await?;
+        let updated = sqlx::query(
+            "UPDATE tenants SET notifications = $1, chat = $2, overlay = $3, overlay_key_digest = $4 WHERE id = $5",
+        )
+        .bind(serde_json::to_string(notifications)?)
+        .bind(serde_json::to_string(chat)?)
+        .bind(serde_json::to_string(overlay)?)
+        .bind((!overlay.key.is_empty()).then(|| stream_key_digest(&overlay.key)))
+        .bind(tenant_id.as_str())
+        .execute(&mut *transaction)
+        .await?;
+        if updated.rows_affected() != 1 {
+            bail!("Tenant does not exist");
+        }
+        sqlx::query("DELETE FROM tenant_targets WHERE tenant_id = $1")
+            .bind(tenant_id.as_str())
+            .execute(&mut *transaction)
+            .await?;
+        for (position, target) in targets.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO tenant_targets (id, tenant_id, position, config) VALUES ($1, $2, $3, $4)",
+            )
+            .bind(format!("{}:{position}", tenant_id.as_str()))
+            .bind(tenant_id.as_str())
             .bind(i64::try_from(position)?)
             .bind(serde_json::to_string(target)?)
             .execute(&mut *transaction)
@@ -200,6 +277,8 @@ mod tests {
                 active: true,
                 max_concurrent_streams: 1,
                 notifications: &NotificationSettings::default(),
+                chat: &ChatSettings::default(),
+                overlay: &OverlaySettings::default(),
                 targets: &[target("alpha", "alpha-destination")],
             })
             .await
@@ -212,6 +291,8 @@ mod tests {
                 active: true,
                 max_concurrent_streams: 1,
                 notifications: &NotificationSettings::default(),
+                chat: &ChatSettings::default(),
+                overlay: &OverlaySettings::default(),
                 targets: &[target("beta", "beta-destination")],
             })
             .await

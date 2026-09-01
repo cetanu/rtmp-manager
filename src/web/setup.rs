@@ -14,7 +14,7 @@ use topcoat::{
 
 #[derive(Debug, Deserialize)]
 struct SetupForm {
-    admin_username: String,
+    admin_email: String,
     admin_password: String,
     ingest_stream_key: String,
     destination: String,
@@ -45,8 +45,8 @@ async fn setup_document() -> Result {
                 <form method="post" action="/api/setup" class="space-y-6">
                     <fieldset class="rounded-xl border border-border bg-card p-6">
                         <legend class="px-2 font-semibold">"1. Dashboard administrator"</legend>
-                        <label class="mt-2 block text-sm">"Username"</label>
-                        <input class="mt-1 h-10 w-full rounded-md border bg-background px-3" name="admin_username" required="required" autocomplete="username" />
+                        <label class="mt-2 block text-sm">"Email"</label>
+                        <input class="mt-1 h-10 w-full rounded-md border bg-background px-3" type="email" name="admin_email" required="required" autocomplete="email" />
                         <label class="mt-4 block text-sm">"Password (at least 12 characters)"</label>
                         <input class="mt-1 h-10 w-full rounded-md border bg-background px-3" type="password" name="admin_password" required="required" minlength="12" autocomplete="new-password" />
                     </fieldset>
@@ -113,8 +113,8 @@ async fn complete_setup(
         initialized: true,
         ..AppConfig::default()
     };
-    config.web_auth.username = form.admin_username.trim().to_owned();
-    config.web_auth.password = form.admin_password;
+    let admin_email = form.admin_email.trim().to_owned();
+    let admin_password = form.admin_password;
     config.server.ingest_stream_key = if form.ingest_stream_key.trim().is_empty() {
         crate::util::generate_secure_token().map_err(|error| bad_request(error.to_string()))?
     } else {
@@ -131,6 +131,23 @@ async fn complete_setup(
     }
     config
         .validate()
+        .map_err(|error| bad_request(error.to_string()))?;
+    if app
+        .accounts
+        .has_users()
+        .await
+        .map_err(|error| bad_request(error.to_string()))?
+    {
+        return Err(bad_request("An administrator account already exists").into());
+    }
+    app.accounts
+        .create_local_user(
+            &crate::tenant::TenantId::default_tenant(),
+            &admin_email,
+            &admin_password,
+            crate::accounts::Role::Admin,
+        )
+        .await
         .map_err(|error| bad_request(error.to_string()))?;
     app.config
         .complete_setup(config)
@@ -202,7 +219,7 @@ mod tests {
 
     fn form(destination: &str) -> SetupForm {
         SetupForm {
-            admin_username: "admin".into(),
+            admin_email: "admin@example.com".into(),
             admin_password: "long-enough-password".into(),
             ingest_stream_key: String::new(),
             destination: destination.into(),

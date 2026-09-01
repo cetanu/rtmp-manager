@@ -99,6 +99,8 @@ mod tests {
                 active: true,
                 max_concurrent_streams: 1,
                 notifications: &crate::config::NotificationSettings::default(),
+                chat: &crate::config::ChatSettings::default(),
+                overlay: &crate::config::OverlaySettings::default(),
                 targets: &[],
             })
             .await

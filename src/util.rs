@@ -15,31 +15,6 @@ pub fn stream_key_digest(stream_key: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(stream_key.as_bytes()))
 }
 
-/// Compares two byte slices in constant time.
-pub fn constant_time_eq(expected: impl AsRef<[u8]>, submitted: impl AsRef<[u8]>) -> bool {
-    let expected = expected.as_ref();
-    let submitted = submitted.as_ref();
-    if expected.len() != submitted.len() {
-        return false;
-    }
-    expected
-        .iter()
-        .zip(submitted)
-        .fold(0_u8, |difference, (left, right)| {
-            difference | (left ^ right)
-        })
-        == 0
-}
-
-/// Constant-time comparison for authentication tokens and stream keys.
-/// Returns `false` if the expected token is empty or length differs.
-pub fn secure_token_matches(expected: &str, submitted: &str) -> bool {
-    if expected.is_empty() {
-        return false;
-    }
-    constant_time_eq(expected.as_bytes(), submitted.as_bytes())
-}
-
 /// Redacts sensitive stream keys and URLs from strings (e.g. process logs, stderr).
 pub fn redact_secrets(text: &str, secrets: &[String]) -> String {
     let redacted = secrets
@@ -88,21 +63,6 @@ pub fn non_empty(value: Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn constant_time_comparison_works() {
-        assert!(constant_time_eq(b"same", b"same"));
-        assert!(!constant_time_eq(b"same", b"diff"));
-        assert!(!constant_time_eq(b"short", b"longer"));
-    }
-
-    #[test]
-    fn secure_token_matching_requires_nonempty_and_exact() {
-        assert!(secure_token_matches("private-key", "private-key"));
-        assert!(!secure_token_matches("private-key", "wrong-key"));
-        assert!(!secure_token_matches("private-key", "private-key-extra"));
-        assert!(!secure_token_matches("", ""));
-    }
 
     #[test]
     fn secret_redaction_removes_keys_and_urls() {

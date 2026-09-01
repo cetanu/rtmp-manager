@@ -1,5 +1,4 @@
 use crate::server::state::{AppHandle, StreamState};
-use crate::tenant::TenantId;
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -10,12 +9,11 @@ use topcoat::{
 #[procedure]
 async fn toggle_publishing(cx: &Cx, is_live: bool) -> Result<String> {
     let app: &AppHandle = app_context(cx);
+    let tenant_id = crate::web::auth::current_user(cx).tenant_id.clone();
     let result = if is_live {
-        app.stream.stop_publishing(TenantId::default_tenant()).await
+        app.stream.stop_publishing(tenant_id).await
     } else {
-        app.stream
-            .publish_staged_stream(TenantId::default_tenant())
-            .await
+        app.stream.publish_staged_stream(tenant_id).await
     };
     Ok(result
         .err()
@@ -27,7 +25,9 @@ async fn toggle_publishing(cx: &Cx, is_live: bool) -> Result<String> {
 pub async fn publishing_controls(cx: &Cx, revision: f64) -> Result {
     let _ = revision;
     let app: &AppHandle = app_context(cx);
-    let status = app.stream.status();
+    let status = app
+        .stream
+        .status(&crate::web::auth::current_user(cx).tenant_id);
     let is_live = status.state == StreamState::Live;
     let toggle_available = is_live
         || matches!(

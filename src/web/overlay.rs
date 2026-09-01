@@ -1,6 +1,5 @@
 use crate::config::OverlaySettings;
 use crate::server::state::AppHandle;
-use crate::util::secure_token_matches;
 use futures_util::StreamExt;
 use serde::Deserialize;
 use topcoat::{
@@ -19,14 +18,13 @@ struct OverlayQuery {
     key: String,
 }
 
-fn authorized_settings(cx: &Cx) -> Result<OverlaySettings> {
+async fn authorized_tenant(cx: &Cx) -> Result<crate::tenant::Tenant> {
     let query: OverlayQuery = parse_query_params(cx).map_err(|_| not_found())?;
     let app: &AppHandle = app_context(cx);
-    let settings = app.config.get().overlay.clone();
-    if !secure_token_matches(&settings.key, &query.key) {
-        return Err(not_found().into());
-    }
-    Ok(settings)
+    app.tenants
+        .authenticate_overlay(&query.key)
+        .await?
+        .ok_or_else(|| not_found().into())
 }
 
 #[component]
@@ -80,7 +78,7 @@ async fn overlay_document(settings: OverlaySettings) -> Result {
 
 #[page("/overlay/chat")]
 async fn chat_overlay(cx: &Cx) -> Result {
-    let settings = authorized_settings(cx)?;
+    let settings = authorized_tenant(cx).await?.overlay;
     view! { overlay_document(settings: settings) }
 }
 
@@ -88,13 +86,13 @@ async fn chat_overlay(cx: &Cx) -> Result {
 async fn chat_overlay_events(
     cx: &Cx,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<SseEvent>> + use<>>> {
-    authorized_settings(cx)?;
+    let tenant = authorized_tenant(cx).await?;
     let app: &AppHandle = app_context(cx);
+    let chat = app.tenant_chat(&tenant.id).await?;
     let initial = SseEvent::new()
         .event("messages")
-        .json_data(&app.chat.snapshot().await?)?;
-    let changes = app.chat.subscribe_changes();
-    let chat = app.chat.clone();
+        .json_data(&chat.snapshot().await?)?;
+    let changes = chat.subscribe_changes();
     let updates = futures_util::stream::unfold((changes, chat), |(mut changes, chat)| async move {
         changes.changed().await.ok()?;
         let event = match chat.snapshot().await {

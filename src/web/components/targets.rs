@@ -1,5 +1,4 @@
 use crate::config::TargetConfig;
-use crate::server::state::AppHandle;
 use crate::web::components::ui::button::{ButtonSize, ButtonVariant, button};
 use crate::web::components::ui::card::{card, card_content, card_footer};
 use crate::web::components::ui::form::{form_field, secret_input, switch_field};
@@ -7,14 +6,13 @@ use crate::web::components::ui::icon::trash_icon;
 use crate::web::components::ui::input::input;
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::Cx,
     view::{attributes, component, view},
 };
 
 #[component]
 pub async fn targets(cx: &Cx) -> Result {
-    let app: &AppHandle = app_context(cx);
-    let config = app.config.get();
+    let config = crate::web::request_config(cx).await?;
     let targets = &config.targets;
 
     view! {

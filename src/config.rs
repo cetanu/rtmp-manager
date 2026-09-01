@@ -97,14 +97,6 @@ pub struct TargetConfig {
     pub enabled: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq)]
-pub struct WebAuthSettings {
-    #[serde(default)]
-    pub username: String,
-    #[serde(default)]
-    pub password: String,
-}
-
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Validate)]
 pub struct OverlaySettings {
     #[serde(default)]
@@ -253,9 +245,6 @@ pub struct AppConfig {
     pub targets: Vec<TargetConfig>,
 
     #[serde(default)]
-    pub web_auth: WebAuthSettings,
-
-    #[serde(default)]
     pub overlay: OverlaySettings,
 
     #[serde(default)]
@@ -281,19 +270,6 @@ impl AppConfig {
             bail!("Overlay theme must be Dark, Minimal, Comic, or Transparent Box");
         }
 
-        let username_set = !self.web_auth.username.trim().is_empty();
-        let password_set = !self.web_auth.password.is_empty();
-        if username_set != password_set {
-            bail!(
-                "Web authentication username and password must either both be set or both be empty"
-            );
-        }
-        if password_set && self.web_auth.password.len() < 12 {
-            bail!("Web authentication password must be at least 12 characters");
-        }
-        if username_set && self.web_auth.username.contains(':') {
-            bail!("Web authentication username must not contain ':'");
-        }
         if self.chat.twitch_channel.as_ref().is_some_and(|channel| {
             let channel = channel.trim().trim_start_matches('#');
             channel.is_empty()
@@ -400,16 +376,6 @@ impl AppConfig {
                     notification_fields.clear_webhook_url,
                     config.notifications.webhook_url,
                 ),
-            };
-        }
-        if let Some(auth_fields) = form.web_auth {
-            config.web_auth = WebAuthSettings {
-                username: auth_fields
-                    .username
-                    .unwrap_or(config.web_auth.username)
-                    .trim()
-                    .to_string(),
-                password: non_empty(auth_fields.password).unwrap_or(config.web_auth.password),
             };
         }
         if let Some(overlay) = form.overlay {
@@ -526,7 +492,7 @@ impl AppConfig {
             .as_object()
             .context("The JSON configuration must be an object")?;
 
-        for field in ["server", "notifications", "targets", "web_auth", "chat"] {
+        for field in ["server", "notifications", "targets", "chat"] {
             if !object.contains_key(field) {
                 bail!("JSON configuration is missing required field '{field}'");
             }
@@ -589,12 +555,6 @@ pub struct NotificationsForm {
 }
 
 #[derive(Debug, Default, Deserialize)]
-pub struct WebAuthForm {
-    pub username: Option<String>,
-    pub password: Option<String>,
-}
-
-#[derive(Debug, Default, Deserialize)]
 pub struct ChatForm {
     pub queue_capacity: Option<usize>,
     pub twitch_channel: Option<String>,
@@ -640,7 +600,6 @@ pub struct TargetForm {
 #[derive(Debug, Default, Deserialize)]
 pub struct ConfigForm {
     pub server: Option<ServerForm>,
-    pub web_auth: Option<WebAuthForm>,
     pub overlay: Option<OverlayForm>,
     pub chat: Option<ChatForm>,
     pub notifications: Option<NotificationsForm>,
@@ -652,7 +611,6 @@ pub struct ConfigForm {
 impl ConfigForm {
     pub fn is_empty(&self) -> bool {
         self.server.is_none()
-            && self.web_auth.is_none()
             && self.overlay.is_none()
             && self.chat.is_none()
             && self.notifications.is_none()
@@ -721,6 +679,8 @@ impl ConfigStore {
                 active: config.initialized && !config.server.ingest_stream_key.is_empty(),
                 max_concurrent_streams: 1,
                 notifications: &config.notifications,
+                chat: &config.chat,
+                overlay: &config.overlay,
                 targets: &config.targets,
             })
             .await?;
@@ -776,30 +736,6 @@ impl ConfigHandle {
         let current_config = self.get();
         let (config, _, _) = self.save_updated(current_config, updated).await?;
         Ok(config)
-    }
-
-    pub async fn set_youtube_polling(&self, enabled: bool) -> Result<(Arc<AppConfig>, bool, bool)> {
-        let _guard = self.update_lock.lock().await;
-        let current_config = self.get();
-        let mut updated = (*current_config).clone();
-        updated.chat.youtube_polling_enabled = enabled;
-        self.save_updated(current_config, updated).await
-    }
-
-    pub async fn set_x_webhook(&self, enabled: bool) -> Result<(Arc<AppConfig>, bool, bool)> {
-        let _guard = self.update_lock.lock().await;
-        let current_config = self.get();
-        let mut updated = (*current_config).clone();
-        updated.chat.x_webhook_enabled = enabled;
-        self.save_updated(current_config, updated).await
-    }
-
-    pub async fn set_kick_webhook(&self, enabled: bool) -> Result<(Arc<AppConfig>, bool, bool)> {
-        let _guard = self.update_lock.lock().await;
-        let current_config = self.get();
-        let mut updated = (*current_config).clone();
-        updated.chat.kick_webhook_enabled = enabled;
-        self.save_updated(current_config, updated).await
     }
 
     async fn save_updated(
@@ -868,10 +804,6 @@ mod tests {
                 public_url: Some("https://example.test/watch".into()),
                 enabled: true,
             }],
-            web_auth: WebAuthSettings {
-                username: "operator".into(),
-                password: "correct horse battery staple".into(),
-            },
             overlay: OverlaySettings::default(),
             chat: ChatSettings {
                 twitch_channel: Some("streamer".into()),
@@ -890,13 +822,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unsafe_web_and_chat_credentials() {
+    fn rejects_unsafe_chat_and_ingest_credentials() {
         let mut config = AppConfig::default();
-        config.web_auth.username = "operator:name".into();
-        config.web_auth.password = "correct horse battery staple".into();
-        assert!(config.validate().unwrap_err().to_string().contains("':'"));
-
-        config.web_auth.username = "operator".into();
         config.chat.twitch_channel = Some("invalid-channel!".into());
         assert!(
             config
@@ -932,10 +859,6 @@ mod tests {
         config.server.test_stream_duration_secs = 30;
         config.server.ingest_stream_key = "new-ingest-key".into();
         config.notifications.live_message = "saved in sqlite".into();
-        config.web_auth = WebAuthSettings {
-            username: "operator".into(),
-            password: "correct horse battery staple".into(),
-        };
         config.chat.youtube_video_id = Some("video-id".into());
         config.chat.youtube_api_key = Some("api-key".into());
         store.save(&config).await.unwrap();
@@ -946,8 +869,6 @@ mod tests {
         assert_eq!(reloaded.server.test_stream_duration_secs, 30);
         assert_eq!(reloaded.server.ingest_stream_key, "new-ingest-key");
         assert_eq!(reloaded.notifications.live_message, "saved in sqlite");
-        assert_eq!(reloaded.web_auth.username, "operator");
-        assert_eq!(reloaded.web_auth.password, "correct horse battery staple");
         assert_eq!(reloaded.chat.youtube_video_id.as_deref(), Some("video-id"));
 
         fs::remove_dir_all(directory).unwrap();
@@ -980,52 +901,6 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 
-    #[tokio::test]
-    async fn concurrent_ingest_updates_do_not_overwrite_each_other() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let directory = std::env::temp_dir().join(format!("rtmp-proxy-polling-{unique}"));
-        fs::create_dir(&directory).unwrap();
-        let database_path = directory.join("config.sqlite3");
-        let (handle, _) = ConfigHandle::open(test_database(&database_path).await)
-            .await
-            .unwrap();
-        let form: ConfigForm = serde_qs::Config::new()
-            .use_form_encoding(true)
-            .deserialize_str(
-                "chat%5Bkick_client_id%5D=client-id&\
-                 chat%5Bkick_client_secret%5D=client-secret&\
-                 chat%5Bkick_channel%5D=streamer&action=save",
-            )
-            .unwrap();
-        handle.save_form(form).await.unwrap();
-
-        let youtube = {
-            let handle = handle.clone();
-            tokio::spawn(async move { handle.set_youtube_polling(true).await.unwrap() })
-        };
-        let x = {
-            let handle = handle.clone();
-            tokio::spawn(async move { handle.set_x_webhook(true).await.unwrap() })
-        };
-        let kick = {
-            let handle = handle.clone();
-            tokio::spawn(async move { handle.set_kick_webhook(true).await.unwrap() })
-        };
-        youtube.await.unwrap();
-        x.await.unwrap();
-        kick.await.unwrap();
-
-        let config = handle.get();
-        assert!(config.chat.youtube_polling_enabled);
-        assert!(config.chat.x_webhook_enabled);
-        assert!(config.chat.kick_webhook_enabled);
-
-        fs::remove_dir_all(directory).unwrap();
-    }
-
     #[test]
     fn partial_form_update_preserves_every_omitted_field() {
         let form: ConfigForm = serde_qs::Config::new()
@@ -1041,7 +916,6 @@ mod tests {
         assert_eq!(updated.notifications.live_message, "Still live");
         assert_eq!(updated.targets.len(), 1);
         assert_eq!(updated.targets[0].stream_key, "secret");
-        assert_eq!(updated.web_auth.password, "correct horse battery staple");
     }
 
     #[test]
@@ -1212,18 +1086,16 @@ mod tests {
     }
 
     #[test]
-    fn blank_web_and_chat_secrets_preserve_existing_credentials() {
+    fn blank_chat_secrets_preserve_existing_credentials() {
         let form: ConfigForm = serde_qs::Config::new()
             .use_form_encoding(true)
             .deserialize_str(
-                "web_auth%5Busername%5D=operator&web_auth%5Bpassword%5D=&\
-                 chat%5Btwitch_channel%5D=streamer&\
+                "chat%5Btwitch_channel%5D=streamer&\
                  chat%5Byoutube_api_key%5D=&chat%5Bqueue_capacity%5D=250&action=save",
             )
             .unwrap();
         let updated = populated_config().merge_form(form).unwrap();
 
-        assert_eq!(updated.web_auth.password, "correct horse battery staple");
         assert_eq!(updated.chat.twitch_channel.as_deref(), Some("streamer"));
         assert_eq!(
             updated.chat.youtube_api_key.as_deref(),
@@ -1271,13 +1143,12 @@ mod tests {
             AppConfig::parse_imported(legacy_export)
                 .unwrap_err()
                 .to_string()
-                .contains("web_auth")
+                .contains("chat")
         );
 
         let invalid_target = br#"{
             "server": {},
             "notifications": {},
-            "web_auth": {},
             "chat": {},
             "targets": [{
                 "name": "Twitch",

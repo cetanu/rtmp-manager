@@ -1,17 +1,15 @@
-use crate::server::state::AppHandle;
 use crate::web::components::ui::card::{card, card_content, card_header, card_title};
 use crate::web::components::ui::form::{clearable_secret_field, form_field};
 use crate::web::components::ui::input::input;
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::Cx,
     view::{attributes, component, view},
 };
 
 #[component]
 pub async fn chat_settings(cx: &Cx) -> Result {
-    let app: &AppHandle = app_context(cx);
-    let chat = app.config.get().chat.clone();
+    let chat = crate::web::request_config(cx).await?.chat;
 
     view! {
         card(

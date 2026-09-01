@@ -27,7 +27,7 @@ pub async fn metrics_page(cx: &Cx) -> Result {
         .into_iter()
         .map(|sample| (sample.name.clone(), sample))
         .collect::<HashMap<_, _>>();
-    let targets = app.config.get().targets.clone();
+    let targets = crate::web::request_config(cx).await?.targets;
 
     view! {
         <section aria-labelledby="target-throughput-heading">

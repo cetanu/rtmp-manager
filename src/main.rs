@@ -1,3 +1,4 @@
+mod accounts;
 mod chat;
 mod config;
 mod database;

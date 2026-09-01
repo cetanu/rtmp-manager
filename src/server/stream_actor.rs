@@ -5,7 +5,7 @@ use crate::server::preview::{
     StreamState, StreamStatus, create_preview_dir, valid_preview_file_name,
 };
 use crate::server::relay::{RelayProcess, cancel_relays, run_direct_test, spawn_relay};
-use crate::tenant::{DEFAULT_TENANT_ID, Tenant, TenantId, TenantRepository};
+use crate::tenant::{Tenant, TenantId, TenantRepository};
 use crate::util::stream_key_digest;
 use anyhow::{Context, Result, bail};
 use reqwest::Client;
@@ -28,7 +28,7 @@ struct StagedStream {
 
 pub enum StreamCommand {
     StageStream {
-        tenant: Tenant,
+        tenant: Box<Tenant>,
         stream_key: String,
         respond_to: oneshot::Sender<Result<()>>,
     },
@@ -59,7 +59,7 @@ pub struct StreamActor {
     metrics: Arc<Metrics>,
     http_client: Client,
     tenants: TenantRepository,
-    status_tx: watch::Sender<StreamStatus>,
+    status_tx: watch::Sender<Arc<HashMap<TenantId, StreamStatus>>>,
 }
 
 impl StreamActor {
@@ -77,7 +77,7 @@ impl StreamActor {
                     };
                     match cmd {
                         StreamCommand::StageStream { tenant, stream_key, respond_to } => {
-                            let res = self.handle_stage_stream(tenant, stream_key).await;
+                            let res = self.handle_stage_stream(*tenant, stream_key).await;
                             let _ = respond_to.send(res);
                         }
                         StreamCommand::PublishStagedStream { tenant_id, respond_to } => {
@@ -126,27 +126,28 @@ impl StreamActor {
         self.update_status();
     }
 
-    fn compute_status(&self) -> StreamStatus {
-        let stream = self
-            .staged
+    fn compute_statuses(&self) -> HashMap<TenantId, StreamStatus> {
+        self.staged
             .values()
-            .find(|stream| stream.tenant_id.as_str() == DEFAULT_TENANT_ID);
-        let state = match stream {
-            None => StreamState::Offline,
-            Some(stream) if stream.published => StreamState::Live,
-            Some(stream) if stream.preview_failed => StreamState::PreviewFailed,
-            Some(stream) if stream.preview_dir.join("index.m3u8").is_file() => {
-                StreamState::PreviewReady
-            }
-            Some(_) => StreamState::Preparing,
-        };
-        StreamStatus { state }
+            .map(|stream| {
+                let state = if stream.published {
+                    StreamState::Live
+                } else if stream.preview_failed {
+                    StreamState::PreviewFailed
+                } else if stream.preview_dir.join("index.m3u8").is_file() {
+                    StreamState::PreviewReady
+                } else {
+                    StreamState::Preparing
+                };
+                (stream.tenant_id.clone(), StreamStatus { state })
+            })
+            .collect()
     }
 
     fn update_status(&mut self) {
-        let status = self.compute_status();
-        if *self.status_tx.borrow() != status {
-            self.status_tx.send_replace(status);
+        let statuses = Arc::new(self.compute_statuses());
+        if *self.status_tx.borrow() != statuses {
+            self.status_tx.send_replace(statuses);
         }
     }
 
@@ -160,11 +161,7 @@ impl StreamActor {
         if self.staged.contains_key(&stream_key) {
             bail!("This ingest stream is already active");
         }
-        let preview_dir = if tenant.id.as_str() == DEFAULT_TENANT_ID {
-            self.preview_dir.clone()
-        } else {
-            self.preview_dir.join(stream_key_digest(tenant.id.as_str()))
-        };
+        let preview_dir = self.preview_dir.join(stream_key_digest(tenant.id.as_str()));
         create_preview_dir(&preview_dir)?;
 
         let source_url = format!("rtmp://127.0.0.1:{}/live/{stream_key}", self.listen_port);
@@ -343,9 +340,12 @@ mod tests {
     fn tenant(id: &str, max_concurrent_streams: usize) -> Tenant {
         Tenant {
             id: TenantId::new(id).unwrap(),
+            name: id.to_owned(),
             active: true,
             max_concurrent_streams,
             notifications: NotificationSettings::default(),
+            chat: crate::config::ChatSettings::default(),
+            overlay: crate::config::OverlaySettings::default(),
             targets: Vec::new(),
         }
     }
@@ -364,7 +364,7 @@ mod tests {
 #[derive(Clone)]
 pub struct StreamHandle {
     sender: mpsc::Sender<StreamCommand>,
-    status_rx: watch::Receiver<StreamStatus>,
+    status_rx: watch::Receiver<Arc<HashMap<TenantId, StreamStatus>>>,
     preview_dir: PathBuf,
 }
 
@@ -380,9 +380,7 @@ impl StreamHandle {
             std::env::temp_dir().join(format!("rtmp-manager-hls-{}-{unique}", std::process::id()));
         create_preview_dir(&preview_dir)?;
 
-        let (status_tx, status_rx) = watch::channel(StreamStatus {
-            state: StreamState::Offline,
-        });
+        let (status_tx, status_rx) = watch::channel(Arc::new(HashMap::new()));
         let (sender, receiver) = mpsc::channel(64);
 
         let handle = Self {
@@ -411,7 +409,7 @@ impl StreamHandle {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(StreamCommand::StageStream {
-                tenant,
+                tenant: Box::new(tenant),
                 stream_key,
                 respond_to: tx,
             })
@@ -462,17 +460,27 @@ impl StreamHandle {
     }
 
     /// Returns the current stream status instantly with zero locks.
-    pub fn status(&self) -> StreamStatus {
-        *self.status_rx.borrow()
+    pub fn status(&self, tenant_id: &TenantId) -> StreamStatus {
+        self.status_rx
+            .borrow()
+            .get(tenant_id)
+            .copied()
+            .unwrap_or(StreamStatus {
+                state: StreamState::Offline,
+            })
     }
 
     /// Subscribes to stream status change events.
-    pub fn subscribe_status(&self) -> watch::Receiver<StreamStatus> {
+    pub fn subscribe_status(&self) -> watch::Receiver<Arc<HashMap<TenantId, StreamStatus>>> {
         self.status_rx.clone()
     }
 
     /// Returns an allowlisted preview file path for HTTP serving.
-    pub fn preview_file(&self, name: &str) -> Option<PathBuf> {
-        valid_preview_file_name(name).then(|| self.preview_dir.join(name))
+    pub fn preview_file(&self, tenant_id: &TenantId, name: &str) -> Option<PathBuf> {
+        valid_preview_file_name(name).then(|| {
+            self.preview_dir
+                .join(stream_key_digest(tenant_id.as_str()))
+                .join(name)
+        })
     }
 }

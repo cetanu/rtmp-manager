@@ -81,6 +81,10 @@ pub async fn app_navigation(active_page: &'static str) -> Result {
                         aria-current=(if active_page == "export" { "page" } else { "false" })
                     >"Export"</a>
                 </nav>
+                <a href="/profile" class="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground">"Profile"</a>
+                <form method="post" action="/logout">
+                    <button type="submit" class="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground">"Sign out"</button>
+                </form>
             </div>
         </header>
     }

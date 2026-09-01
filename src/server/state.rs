@@ -1,5 +1,6 @@
-use crate::chat::ChatHandle;
-use crate::config::ConfigHandle;
+use crate::accounts::AccountRepository;
+use crate::chat::{ChatHandle, ChatHub};
+use crate::config::{AppConfig, ConfigForm, ConfigHandle};
 use crate::metrics::Metrics;
 use crate::server::stream_actor::StreamHandle;
 use crate::tenant::TenantRepository;
@@ -27,8 +28,9 @@ pub use crate::server::preview::{StreamState, StreamStatus};
 /// Unified application handle containing cloneable subsystem handles and lock-free channels.
 #[derive(Clone)]
 pub struct AppHandle {
+    pub accounts: AccountRepository,
     pub stream: StreamHandle,
-    pub chat: ChatHandle,
+    pub chat: ChatHub,
     pub config: ConfigHandle,
     pub tenants: TenantRepository,
     pub metrics: Arc<Metrics>,
@@ -43,14 +45,9 @@ impl AppHandle {
         http_client: Client,
         listen_port: u16,
     ) -> Result<Self> {
-        let initial_config = config_handle.get();
+        let accounts = AccountRepository::new(database.clone());
         let tenants = TenantRepository::new(database.clone());
-        let chat = ChatHandle::spawn(
-            database,
-            initial_config.chat.queue_capacity,
-            http_client.clone(),
-        )
-        .await?;
+        let chat = ChatHub::new(database, http_client.clone());
 
         let stream = StreamHandle::spawn(
             listen_port,
@@ -60,6 +57,7 @@ impl AppHandle {
         )
         .await?;
         let handle = Self {
+            accounts,
             stream,
             chat,
             config: config_handle,
@@ -92,35 +90,122 @@ impl AppHandle {
     /// Re-applies the latest chat configuration to the background chat ingestion workers.
     pub async fn apply_chat_config(&self) -> Result<()> {
         let chat_settings = self.config.get().chat.clone();
-        self.chat.apply_config(chat_settings).await
+        self.chat
+            .apply_config(&crate::tenant::TenantId::default_tenant(), chat_settings)
+            .await
     }
 
-    pub async fn set_youtube_polling(&self, enabled: bool) -> Result<()> {
-        let (config, changed, _) = self.config.set_youtube_polling(enabled).await?;
-        if changed {
-            self.chat.set_youtube_polling(config.chat.clone()).await?;
-        }
-        Ok(())
+    pub async fn tenant_chat(&self, tenant_id: &crate::tenant::TenantId) -> Result<ChatHandle> {
+        let tenant = self
+            .tenants
+            .find(tenant_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Tenant does not exist"))?;
+        self.chat
+            .tenant(tenant_id, tenant.chat.queue_capacity)
+            .await
     }
 
-    pub async fn set_x_webhook(&self, enabled: bool) -> Result<()> {
-        let (_, changed, _) = self.config.set_x_webhook(enabled).await?;
-        if changed {
-            tracing::info!(enabled, "X webhook ingestion changed");
-        }
-        Ok(())
+    pub async fn tenant_config(&self, tenant_id: &crate::tenant::TenantId) -> Result<AppConfig> {
+        let tenant = self
+            .tenants
+            .find(tenant_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Tenant does not exist"))?;
+        let mut config = self.config.get().as_ref().clone();
+        config.server.ingest_stream_key.clear();
+        config.notifications = tenant.notifications;
+        config.targets = tenant.targets;
+        config.chat = tenant.chat;
+        config.overlay = tenant.overlay;
+        Ok(config)
     }
 
-    pub async fn set_kick_webhook(&self, enabled: bool) -> Result<()> {
-        let current = self.config.get();
-        if current.chat.kick_webhook_enabled == enabled {
+    pub async fn save_tenant_form(
+        &self,
+        tenant_id: &crate::tenant::TenantId,
+        form: ConfigForm,
+    ) -> Result<(AppConfig, bool)> {
+        let current = self.tenant_config(tenant_id).await?;
+        let updated = current.merge_form(form)?;
+        updated.validate()?;
+        let chat_changed = current.chat != updated.chat;
+        self.tenants
+            .update_configuration(
+                tenant_id,
+                &updated.notifications,
+                &updated.chat,
+                &updated.overlay,
+                &updated.targets,
+            )
+            .await?;
+        Ok((updated, chat_changed))
+    }
+
+    pub async fn set_youtube_polling(
+        &self,
+        tenant_id: &crate::tenant::TenantId,
+        enabled: bool,
+    ) -> Result<()> {
+        let mut chat = self.tenant_config(tenant_id).await?.chat;
+        if chat.youtube_polling_enabled == enabled {
             return Ok(());
         }
-        crate::chat::kick::set_chat_subscription(&self.http_client, &current.chat, enabled).await?;
-        let (_, changed, _) = self.config.set_kick_webhook(enabled).await?;
-        if changed {
-            tracing::info!(enabled, "Kick webhook ingestion changed");
-        }
+        chat.youtube_polling_enabled = enabled;
+        self.save_chat(tenant_id, chat.clone()).await?;
+        self.tenant_chat(tenant_id)
+            .await?
+            .set_youtube_polling(chat)
+            .await?;
         Ok(())
+    }
+
+    pub async fn set_x_webhook(
+        &self,
+        tenant_id: &crate::tenant::TenantId,
+        enabled: bool,
+    ) -> Result<()> {
+        let mut chat = self.tenant_config(tenant_id).await?.chat;
+        chat.x_webhook_enabled = enabled;
+        self.save_chat(tenant_id, chat).await?;
+        tracing::info!(tenant_id = %tenant_id.as_str(), enabled, "X webhook ingestion changed");
+        Ok(())
+    }
+
+    pub async fn set_kick_webhook(
+        &self,
+        tenant_id: &crate::tenant::TenantId,
+        enabled: bool,
+    ) -> Result<()> {
+        let mut chat = self.tenant_config(tenant_id).await?.chat;
+        if chat.kick_webhook_enabled == enabled {
+            return Ok(());
+        }
+        crate::chat::kick::set_chat_subscription(&self.http_client, &chat, enabled).await?;
+        chat.kick_webhook_enabled = enabled;
+        self.save_chat(tenant_id, chat).await?;
+        tracing::info!(tenant_id = %tenant_id.as_str(), enabled, "Kick webhook ingestion changed");
+        Ok(())
+    }
+
+    async fn save_chat(
+        &self,
+        tenant_id: &crate::tenant::TenantId,
+        chat: crate::config::ChatSettings,
+    ) -> Result<()> {
+        let tenant = self
+            .tenants
+            .find(tenant_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Tenant does not exist"))?;
+        self.tenants
+            .update_configuration(
+                tenant_id,
+                &tenant.notifications,
+                &chat,
+                &tenant.overlay,
+                &tenant.targets,
+            )
+            .await
     }
 }
