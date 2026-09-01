@@ -5,7 +5,9 @@ use crate::notifications::{NotificationDispatcher, NotificationTarget};
 use crate::server::preview::{
     StreamState, StreamStatus, create_preview_dir, valid_preview_file_name,
 };
-use crate::server::relay::{RelayProcess, cancel_relays, run_direct_test, spawn_relay};
+use crate::server::relay::{
+    LocalRelayExecutor, RelayExecutor, RelayProcess, cancel_relays, run_direct_test,
+};
 use crate::tenant::{Tenant, TenantId, TenantRepository};
 use crate::util::stream_key_digest;
 use anyhow::{Context, Result, bail};
@@ -61,10 +63,10 @@ pub struct StreamActor {
     staged: HashMap<String, StagedStream>,
     active_relays: HashMap<String, Vec<RelayProcess>>,
     listen_port: u16,
-    metrics: Arc<Metrics>,
     http_client: Client,
     tenants: TenantRepository,
     usage: UsageRepository,
+    relay_executor: Arc<dyn RelayExecutor>,
     status_tx: watch::Sender<Arc<HashMap<TenantId, StreamStatus>>>,
 }
 
@@ -277,8 +279,7 @@ impl StreamActor {
         let source_url = format!("rtmp://127.0.0.1:{}/live/{stream_key}", self.listen_port);
         let mut relays = Vec::new();
         for target in active_targets {
-            relays.push(spawn_relay(
-                Arc::clone(&self.metrics),
+            relays.push(self.relay_executor.spawn(
                 tenant_id.as_str().to_owned(),
                 source_url.clone(),
                 target,
@@ -439,10 +440,10 @@ impl StreamHandle {
             staged: HashMap::new(),
             active_relays: HashMap::new(),
             listen_port,
-            metrics,
             http_client,
             tenants,
             usage,
+            relay_executor: Arc::new(LocalRelayExecutor::new(Arc::clone(&metrics))),
             status_tx,
         };
 

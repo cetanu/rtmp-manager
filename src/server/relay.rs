@@ -43,6 +43,27 @@ pub struct RelayProcess {
     pub task: JoinHandle<()>,
 }
 
+pub trait RelayExecutor: Send + Sync {
+    fn spawn(&self, tenant_id: String, source_url: String, target: TargetConfig) -> RelayProcess;
+}
+
+#[derive(Clone)]
+pub struct LocalRelayExecutor {
+    metrics: Arc<Metrics>,
+}
+
+impl LocalRelayExecutor {
+    pub fn new(metrics: Arc<Metrics>) -> Self {
+        Self { metrics }
+    }
+}
+
+impl RelayExecutor for LocalRelayExecutor {
+    fn spawn(&self, tenant_id: String, source_url: String, target: TargetConfig) -> RelayProcess {
+        spawn_relay(Arc::clone(&self.metrics), tenant_id, source_url, target)
+    }
+}
+
 pub fn spawn_relay(
     metrics: Arc<Metrics>,
     tenant_id: String,
