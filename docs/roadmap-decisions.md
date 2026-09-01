@@ -186,6 +186,8 @@
 - The authenticated navigation displays an Admin link only for administrator
   sessions, keeping the cross-tenant view discoverable without exposing it to
   ordinary users.
+- The admin stream page refreshes every five seconds, providing bounded live
+  monitoring while keeping the implementation server-rendered and dependency-free.
 
 ## GOAL-301: relay control plane
 
