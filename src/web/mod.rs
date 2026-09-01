@@ -160,6 +160,7 @@ async fn admin_streams_page(cx: &Cx) -> Result {
             <head>
                 <meta charset="utf-8" />
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
+                <meta http-equiv="refresh" content="5" />
                 <title>"Active streams · RTMP Manager"</title>
                 <link rel="stylesheet" href=(TAILWIND_STYLESHEET) />
             </head>
