@@ -6,10 +6,13 @@ use std::collections::HashMap;
 use std::process::Command;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
+
+static RELAY_JOB_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 fn ffmpeg_command(args: &[String]) -> tokio::process::Command {
     let cpu = std::env::var("RELAY_MAX_CPU_SECONDS")
@@ -185,7 +188,12 @@ impl RelayExecutor for RedisRelayExecutor {
                     return;
                 }
             };
-            let job_id = format!("{}-{}", std::process::id(), crate::util::now_unix_ms());
+            let job_id = format!(
+                "{}-{}-{}",
+                std::process::id(),
+                crate::util::now_unix_ms(),
+                RELAY_JOB_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+            );
             let payload = match serde_json::to_string(&serde_json::json!({
                 "kind": "start", "job_id": job_id, "tenant_id": tenant_id, "source_url": source_url, "target": target
             })) {
