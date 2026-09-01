@@ -63,6 +63,9 @@
   `KICK_BOT_OAUTH_TOKEN` and `YOUTUBE_BOT_OAUTH_TOKEN`; selecting a destination
   is done with `CHAT_RELAY_DESTINATION` and source filtering with
   `CHAT_RELAY_SOURCE`.
+- The dispatcher permits at most five relayed messages per destination in a
+  ten-second window, providing a bounded spam guard before provider APIs are
+  called.
 
 ## GOAL-502: observability
 
