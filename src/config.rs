@@ -505,25 +505,40 @@ impl AppConfig {
             config.targets = target_fields
                 .into_iter()
                 .enumerate()
-                .map(|(index, target)| TargetConfig {
-                    name: target.name,
-                    url: target.url,
-                    stream_key: non_empty(target.stream_key).unwrap_or_else(|| {
-                        config
-                            .targets
-                            .get(index)
-                            .map(|target| target.stream_key.clone())
-                            .unwrap_or_default()
-                    }),
-                    public_url: non_empty(target.public_url),
-                    enabled: target.enabled,
-                    encoding: config
-                        .targets
-                        .get(index)
+                .map(|(index, target)| {
+                    let previous = config.targets.get(index);
+                    let previous_encoding = previous
                         .map(|target| target.encoding.clone())
-                        .unwrap_or_default(),
+                        .unwrap_or_default();
+                    let mode = match non_empty(target.encoding_mode) {
+                        Some(mode) if mode == "cpu" => EncodingMode::Cpu,
+                        Some(mode) if mode == "passthrough" => EncodingMode::Passthrough,
+                        Some(mode) => bail!("Unsupported encoding mode '{mode}'"),
+                        None => previous_encoding.mode,
+                    };
+                    Ok(TargetConfig {
+                        name: target.name,
+                        url: target.url,
+                        stream_key: non_empty(target.stream_key).unwrap_or_else(|| {
+                            previous
+                                .map(|target| target.stream_key.clone())
+                                .unwrap_or_default()
+                        }),
+                        public_url: non_empty(target.public_url),
+                        enabled: target.enabled,
+                        encoding: EncodingProfile {
+                            mode,
+                            max_video_bitrate_kbps: target
+                                .max_video_bitrate_kbps
+                                .or(previous_encoding.max_video_bitrate_kbps),
+                            width: target.width.or(previous_encoding.width),
+                            height: target.height.or(previous_encoding.height),
+                            hardware_encoder: non_empty(target.hardware_encoder)
+                                .or(previous_encoding.hardware_encoder),
+                        },
+                    })
                 })
-                .collect();
+                .collect::<Result<Vec<_>>>()?;
         }
 
         let action = form.action.as_deref().unwrap_or_default();
@@ -662,6 +677,16 @@ pub struct TargetForm {
     pub public_url: Option<String>,
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default)]
+    pub encoding_mode: Option<String>,
+    #[serde(default)]
+    pub max_video_bitrate_kbps: Option<u32>,
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+    #[serde(default)]
+    pub hardware_encoder: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1058,6 +1083,30 @@ mod tests {
         let updated = populated_config().merge_form(form).unwrap();
 
         assert!(!updated.targets[0].enabled);
+    }
+
+    #[test]
+    fn target_encoding_profile_is_configurable() {
+        let form: ConfigForm = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str(
+                "targets%5B0%5D%5Bname%5D=Twitch&\
+                 targets%5B0%5D%5Burl%5D=rtmps%3A%2F%2Fexample.test%2Fapp&\
+                 targets%5B0%5D%5Bencoding_mode%5D=cpu&\
+                 targets%5B0%5D%5Bmax_video_bitrate_kbps%5D=4500&\
+                 targets%5B0%5D%5Bwidth%5D=1920&\
+                 targets%5B0%5D%5Bheight%5D=1080&\
+                 targets%5B0%5D%5Bhardware_encoder%5D=nvenc",
+            )
+            .unwrap();
+        let updated = populated_config().merge_form(form).unwrap();
+        let encoding = &updated.targets[0].encoding;
+
+        assert_eq!(encoding.mode, EncodingMode::Cpu);
+        assert_eq!(encoding.max_video_bitrate_kbps, Some(4500));
+        assert_eq!(encoding.width, Some(1920));
+        assert_eq!(encoding.height, Some(1080));
+        assert_eq!(encoding.hardware_encoder.as_deref(), Some("nvenc"));
     }
 
     #[test]
