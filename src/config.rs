@@ -25,6 +25,10 @@ pub struct ServerSettings {
     #[validate(maximum = 86_400)]
     pub test_stream_duration_secs: u64,
 
+    #[serde(default = "default_disconnect_grace_secs")]
+    #[validate(maximum = 300)]
+    pub disconnect_grace_secs: u64,
+
     #[serde(default)]
     #[validate(max_length = 256)]
     #[validate(
@@ -50,6 +54,10 @@ fn default_test_stream_duration_secs() -> u64 {
     15
 }
 
+fn default_disconnect_grace_secs() -> u64 {
+    30
+}
+
 impl Default for ServerSettings {
     fn default() -> Self {
         Self {
@@ -58,6 +66,7 @@ impl Default for ServerSettings {
             srt_listen: default_srt_listen(),
             srt_enabled: true,
             test_stream_duration_secs: default_test_stream_duration_secs(),
+            disconnect_grace_secs: default_disconnect_grace_secs(),
             ingest_stream_key: String::new(),
         }
     }
@@ -410,6 +419,9 @@ impl AppConfig {
                 test_stream_duration_secs: server
                     .test_stream_duration_secs
                     .unwrap_or(config.server.test_stream_duration_secs),
+                disconnect_grace_secs: server
+                    .disconnect_grace_secs
+                    .unwrap_or(config.server.disconnect_grace_secs),
                 ingest_stream_key: non_empty(server.ingest_stream_key)
                     .unwrap_or(config.server.ingest_stream_key),
             };
@@ -618,6 +630,7 @@ pub struct ServerForm {
     #[serde(default)]
     pub srt_enabled: bool,
     pub test_stream_duration_secs: Option<u64>,
+    pub disconnect_grace_secs: Option<u64>,
     pub ingest_stream_key: Option<String>,
 }
 
@@ -884,6 +897,7 @@ mod tests {
                 srt_listen: "10.0.0.1:6000".parse().unwrap(),
                 srt_enabled: true,
                 test_stream_duration_secs: 15,
+                disconnect_grace_secs: 30,
                 ingest_stream_key: "existing-ingest-key".into(),
             },
             notifications: NotificationSettings {

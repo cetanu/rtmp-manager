@@ -53,6 +53,7 @@ impl AppHandle {
 
         let stream = StreamHandle::spawn(
             listen_port,
+            config_handle.get().server.disconnect_grace_secs,
             Arc::clone(&metrics),
             http_client.clone(),
             tenants.clone(),

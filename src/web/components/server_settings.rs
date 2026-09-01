@@ -71,6 +71,19 @@ pub async fn server_settings(cx: &Cx) -> Result {
                         })
                     )
                     form_field(
+                        control_id: "disconnect_grace_secs",
+                        label_text: "Disconnect Grace (seconds)",
+                        input(attrs: attributes! {
+                            type="number"
+                            id="disconnect_grace_secs"
+                            name="server[disconnect_grace_secs]"
+                            value=(config.server.disconnect_grace_secs.to_string())
+                            min="0"
+                            max="300"
+                            step="1"
+                        })
+                    )
+                    form_field(
                         control_id: "ingest_stream_key",
                         label_text: "Ingest Stream Key",
                         secret_input(

@@ -452,11 +452,13 @@ pub struct StreamHandle {
     sender: mpsc::Sender<StreamCommand>,
     status_rx: watch::Receiver<Arc<HashMap<TenantId, StreamStatus>>>,
     preview_dir: PathBuf,
+    disconnect_grace_secs: u64,
 }
 
 impl StreamHandle {
     pub async fn spawn(
         listen_port: u16,
+        disconnect_grace_secs: u64,
         metrics: Arc<Metrics>,
         http_client: Client,
         tenants: TenantRepository,
@@ -474,6 +476,7 @@ impl StreamHandle {
             sender,
             status_rx,
             preview_dir: preview_dir.clone(),
+            disconnect_grace_secs,
         };
 
         let relay_executor: Arc<dyn RelayExecutor> = match std::env::var("RELAY_BROKER_URL") {
@@ -537,13 +540,14 @@ impl StreamHandle {
     pub async fn grace_disconnect(&self, stream_key: &str) {
         let key = stream_key.to_owned();
         let sender = self.sender.clone();
+        let grace_secs = self.disconnect_grace_secs;
         let _ = sender
             .send(StreamCommand::MarkUnpublished {
                 stream_key: key.clone(),
             })
             .await;
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(30)).await;
+            tokio::time::sleep(Duration::from_secs(grace_secs)).await;
             let _ = sender
                 .send(StreamCommand::EndStreamIfUnpublished { stream_key: key })
                 .await;
