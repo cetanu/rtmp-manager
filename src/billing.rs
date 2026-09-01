@@ -178,6 +178,7 @@ impl UsageRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn verifies_provider_signatures_without_accepting_modified_payloads() {
@@ -219,5 +220,43 @@ mod tests {
             "stripe-secret",
             now + 301
         ));
+    }
+
+    #[tokio::test]
+    async fn usage_snapshot_tracks_active_and_recorded_stream_time() {
+        let path = std::env::temp_dir().join(format!(
+            "rtmp-manager-billing-{}-{}.sqlite3",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let database = Database::connect(&crate::database::sqlite_url(&path))
+            .await
+            .unwrap();
+        let usage = UsageRepository::new(database);
+        let started = 1_800_000_000_i64;
+        assert!(
+            usage
+                .begin_stream("tenant-a", "stream-a", started)
+                .await
+                .unwrap()
+        );
+
+        let active = usage.current_usage("tenant-a", started).await.unwrap();
+        assert_eq!(active.plan, "free");
+        assert_eq!(active.stream_seconds, 0);
+        assert_eq!(active.active_streams, 1);
+
+        usage
+            .record_seconds("tenant-a", "stream-a", started, started + 90)
+            .await
+            .unwrap();
+        let finished = usage.current_usage("tenant-a", started + 90).await.unwrap();
+        assert_eq!(finished.stream_seconds, 90);
+        assert_eq!(finished.active_streams, 0);
+
+        std::fs::remove_file(path).unwrap();
     }
 }
