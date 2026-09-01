@@ -95,6 +95,8 @@
 - Authenticated tenants can inspect their current plan, consumed seconds,
   active reservations, and plan limit through `GET /api/billing/usage`; the
   query is scoped by the session tenant ID.
+- Settings renders that snapshot as a tenant-scoped Plan Usage card, keeping
+  quota state visible without exposing provider billing credentials.
 
 ## GOAL-401: YouTube quota partitioning
 
