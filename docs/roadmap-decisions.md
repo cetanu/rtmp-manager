@@ -20,3 +20,9 @@
 - The unified endpoint uses explicit platform paths (`/api/v1/webhooks/kick`
   and `/api/v1/webhooks/x`) so malformed or unknown platform payloads cannot
   select a parser implicitly.
+
+## GOAL-302: relay limits
+
+- Resource limits are opt-in environment settings so existing self-hosted
+  deployments remain portable. Linux workers use `prlimit`; other platforms
+  continue with the supervisor's cancellation and restart guarantees.

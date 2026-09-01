@@ -29,6 +29,8 @@ remuxed into the same relay pipeline as RTMP ingest.
 The `rtmp-manager-data` volume persists the SQLite database. Set
 `MASTER_ENCRYPTION_KEY` to a strong, stable secret; it encrypts destination
 stream keys and OAuth state at rest. Set `HTTP_PORT`,
+On Linux, `RELAY_MAX_CPU_SECONDS` and `RELAY_MAX_MEMORY_MB` optionally apply
+per-relay `prlimit` caps to FFmpeg workers.
 `RTMP_PORT`, `SRT_PORT`, or `RUST_LOG` in the shell or a `.env` file to override
 the corresponding Compose defaults. Set `DATABASE_URL` to a PostgreSQL URL to
 use PostgreSQL instead. Both backends run embedded schema migrations during

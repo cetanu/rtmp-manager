@@ -1,12 +1,42 @@
 use crate::config::{EncodingMode, TargetConfig};
 use crate::metrics::Metrics;
 use crate::util::redact_secrets;
+#[cfg(unix)]
+use std::process::Command;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
+
+fn ffmpeg_command(args: &[String]) -> tokio::process::Command {
+    let cpu = std::env::var("RELAY_MAX_CPU_SECONDS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0);
+    let memory = std::env::var("RELAY_MAX_MEMORY_MB")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0);
+    #[cfg(unix)]
+    if (cpu.is_some() || memory.is_some())
+        && Command::new("prlimit").arg("--version").output().is_ok()
+    {
+        let mut command = tokio::process::Command::new("prlimit");
+        if let Some(cpu) = cpu {
+            command.arg(format!("--cpu={cpu}"));
+        }
+        if let Some(memory) = memory {
+            command.arg(format!("--as={}", memory * 1024 * 1024));
+        }
+        command.arg("--").arg("ffmpeg").args(args);
+        return command;
+    }
+    let mut command = tokio::process::Command::new("ffmpeg");
+    command.args(args);
+    command
+}
 
 pub struct RelayProcess {
     pub cancel: watch::Sender<bool>,
@@ -175,8 +205,7 @@ async fn supervise_relay(
             }
         }
         args.extend(["-f".to_owned(), "flv".to_owned(), destination.clone()]);
-        let child = tokio::process::Command::new("ffmpeg")
-            .args(args)
+        let child = ffmpeg_command(&args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true)
