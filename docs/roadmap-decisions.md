@@ -153,6 +153,9 @@
 - The administrator stream view reads `/api/admin/streams`, which returns
   tenant IDs and current lifecycle states in one authenticated, admin-only
   response; tenant users continue to receive only their own status.
+- Emergency-stop requests append an immutable action record to
+  `admin_audit_log`, including the administrator, action, optional tenant
+  scope, and timestamp before the stop command is dispatched.
 
 ## GOAL-301: relay control plane
 
