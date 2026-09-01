@@ -36,6 +36,7 @@ fn admin_path(path: &str) -> bool {
         || path == "/export"
         || path == "/api/logs"
         || path == "/api/admin/emergency-stop"
+        || path.starts_with("/api/admin/tenants/")
         || path.starts_with("/api/config/import")
 }
 

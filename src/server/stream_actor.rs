@@ -52,6 +52,9 @@ pub enum StreamCommand {
         stream_key: String,
     },
     EmergencyStop,
+    EmergencyStopTenant {
+        tenant_id: TenantId,
+    },
     RunTestStream {
         duration_secs: u64,
         targets: Vec<TargetConfig>,
@@ -106,6 +109,7 @@ impl StreamActor {
                             self.handle_mark_unpublished(&stream_key).await;
                         }
                         StreamCommand::EmergencyStop => self.handle_emergency_stop().await,
+                        StreamCommand::EmergencyStopTenant { tenant_id } => self.handle_emergency_stop_tenant(&tenant_id).await,
                         StreamCommand::RunTestStream { duration_secs, targets } => {
                             run_direct_test(duration_secs, targets);
                         }
@@ -357,6 +361,19 @@ impl StreamActor {
         tracing::warn!("Emergency stop terminated all active streams");
     }
 
+    async fn handle_emergency_stop_tenant(&mut self, tenant_id: &TenantId) {
+        let keys: Vec<String> = self
+            .staged
+            .iter()
+            .filter(|(_, stream)| &stream.tenant_id == tenant_id)
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in keys {
+            self.handle_end_stream(&key).await;
+        }
+        tracing::warn!(tenant_id = %tenant_id.as_str(), "Tenant emergency stop terminated active streams");
+    }
+
     async fn cleanup(&mut self) {
         for (_, mut stream) in self.staged.drain() {
             let _ = stream.preview_process.kill().await;
@@ -512,6 +529,13 @@ impl StreamHandle {
 
     pub async fn emergency_stop(&self) {
         let _ = self.sender.send(StreamCommand::EmergencyStop).await;
+    }
+
+    pub async fn emergency_stop_tenant(&self, tenant_id: TenantId) {
+        let _ = self
+            .sender
+            .send(StreamCommand::EmergencyStopTenant { tenant_id })
+            .await;
     }
 
     pub fn run_test_stream(&self, duration_secs: u64, targets: Vec<TargetConfig>) {

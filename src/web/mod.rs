@@ -295,6 +295,22 @@ async fn emergency_stop(cx: &Cx) -> Result<topcoat::router::Response> {
     topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
 }
 
+#[topcoat::router::path_param]
+struct AdminTenantPath(str);
+
+#[route(POST "/api/admin/tenants/{tenant_id}/emergency-stop")]
+async fn emergency_stop_tenant(cx: &Cx) -> Result<topcoat::router::Response> {
+    let tenant_id =
+        crate::tenant::TenantId::new(topcoat::router::path_param::<AdminTenantPath>(cx))
+            .map_err(|_| bad_request("Invalid tenant ID"))?;
+    let app: &AppHandle = app_context(cx);
+    if app.tenants.find(&tenant_id).await?.is_none() {
+        return Err(not_found().into());
+    }
+    app.stream.emergency_stop_tenant(tenant_id).await;
+    topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
+}
+
 #[derive(Debug, Deserialize)]
 struct AcknowledgeChatMessage {
     id: u64,

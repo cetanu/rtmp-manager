@@ -64,6 +64,12 @@
 - `/api/metrics/prometheus` is the scrape boundary; it emits only the
   authenticated tenant's ingest and outbound bitrate series.
 
+## GOAL-503: moderation
+
+- Administrators have both a global emergency stop and a tenant-scoped
+  `/api/admin/tenants/{tenant_id}/emergency-stop` endpoint, allowing targeted
+  intervention without disrupting unrelated broadcasts.
+
 ## GOAL-301: relay control plane
 
 - Redis Streams is the first broker adapter because it is easy to self-host;
