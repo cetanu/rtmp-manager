@@ -162,6 +162,9 @@
 - Emergency-stop requests append an immutable action record to
   `admin_audit_log`, including the administrator, action, optional tenant
   scope, and timestamp before the stop command is dispatched.
+- Administrators can inspect the newest 1–100 records through
+  `GET /api/admin/audit-log`; the bounded query prevents an audit view from
+  becoming an unbounded database read.
 
 ## GOAL-301: relay control plane
 
