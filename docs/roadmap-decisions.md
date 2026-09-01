@@ -150,6 +150,9 @@
 - Administrators have both a global emergency stop and a tenant-scoped
   `/api/admin/tenants/{tenant_id}/emergency-stop` endpoint, allowing targeted
   intervention without disrupting unrelated broadcasts.
+- The administrator stream view reads `/api/admin/streams`, which returns
+  tenant IDs and current lifecycle states in one authenticated, admin-only
+  response; tenant users continue to receive only their own status.
 
 ## GOAL-301: relay control plane
 
