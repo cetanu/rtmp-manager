@@ -24,6 +24,7 @@ FROM docker.io/library/debian:bookworm-slim AS runtime
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         ca-certificates \
+        curl \
         ffmpeg \
         libsqlite3-0 \
     && rm -rf /var/lib/apt/lists/* \
@@ -39,5 +40,8 @@ ENV DATABASE_URL=sqlite:///data/rtmp-manager.sqlite3?mode=rwc \
 
 VOLUME ["/data"]
 EXPOSE 1935 3000 6000/udp
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["curl", "--fail", "--silent", "http://127.0.0.1:3000/healthz"]
 
 ENTRYPOINT ["/opt/rtmp-manager/rtmp-proxy"]
