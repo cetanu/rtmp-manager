@@ -379,4 +379,42 @@ mod tests {
 
         std::fs::remove_file(path).unwrap();
     }
+
+    #[tokio::test]
+    async fn stripe_customer_linkage_round_trips_for_a_tenant() {
+        let path = std::env::temp_dir().join(format!(
+            "rtmp-manager-stripe-customer-{}-{}.sqlite3",
+            std::process::id(),
+            crate::util::now_unix_ms()
+        ));
+        let database = Database::connect(&crate::database::sqlite_url(&path))
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO tenants (id, name, active, max_concurrent_streams, notifications, chat, overlay) \
+             VALUES ($1, $2, 1, 1, $3, $4, $5)",
+        )
+        .bind("stripe-tenant")
+        .bind("Stripe tenant")
+        .bind(crate::crypto::encrypt("{}" ).unwrap())
+        .bind(crate::crypto::encrypt("{}" ).unwrap())
+        .bind(crate::crypto::encrypt("{}" ).unwrap())
+        .execute(database.pool())
+        .await
+        .unwrap();
+        let usage = UsageRepository::new(database);
+        usage
+            .set_stripe_customer_id("stripe-tenant", "cus_test_123")
+            .await
+            .unwrap();
+        assert_eq!(
+            usage
+                .stripe_customer_id("stripe-tenant")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("cus_test_123")
+        );
+        std::fs::remove_file(path).unwrap();
+    }
 }
