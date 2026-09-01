@@ -115,6 +115,12 @@
   consecutive HTTP 429 responses open a 60-second circuit, suppressing new
   requests until cooldown; a successful response resets the failure count.
 
+## GOAL-402: webhook isolation
+
+- Twitch EventSub secrets are stored in each tenant's encrypted chat settings
+  and selected during webhook verification. `TWITCH_EVENTSUB_SECRET` remains
+  an explicit fallback for the default deployment tenant only.
+
 ## GOAL-403: chat relaying
 
 - The first outbound adapter is Twitch IRC, configured with
