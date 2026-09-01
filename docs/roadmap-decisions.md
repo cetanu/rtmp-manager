@@ -66,6 +66,9 @@
 - The dispatcher permits at most five relayed messages per destination in a
   ten-second window, providing a bounded spam guard before provider APIs are
   called.
+- Relay source/destination settings are stored with each tenant's encrypted
+  chat configuration; environment variables remain an explicit deployment
+  override for installations managed outside the dashboard.
 
 ## GOAL-502: observability
 

@@ -808,11 +808,22 @@ async fn dispatch_configured_relay(
     message: &crate::chat::IncomingChatMessage,
     client: reqwest::Client,
 ) {
-    let Ok(destination) = std::env::var("CHAT_RELAY_DESTINATION") else {
+    if !settings.relay_enabled && std::env::var("CHAT_RELAY_DESTINATION").is_err() {
+        return;
+    }
+    let Some(destination) = settings
+        .relay_destination
+        .clone()
+        .or_else(|| std::env::var("CHAT_RELAY_DESTINATION").ok())
+    else {
         return;
     };
     let rule = crate::chat::relay::RelayRule {
-        source: std::env::var("CHAT_RELAY_SOURCE").unwrap_or_else(|_| message.source.clone()),
+        source: settings
+            .relay_source
+            .clone()
+            .or_else(|| std::env::var("CHAT_RELAY_SOURCE").ok())
+            .unwrap_or_else(|| message.source.clone()),
         destination,
         prefix: "[relay] ".to_owned(),
     };

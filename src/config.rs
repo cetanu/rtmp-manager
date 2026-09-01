@@ -227,6 +227,12 @@ pub struct ChatSettings {
     pub kick_channel: Option<String>,
     #[serde(default)]
     pub kick_webhook_enabled: bool,
+    #[serde(default)]
+    pub relay_enabled: bool,
+    #[serde(default)]
+    pub relay_source: Option<String>,
+    #[serde(default)]
+    pub relay_destination: Option<String>,
 }
 
 fn default_chat_queue_capacity() -> usize {
@@ -262,6 +268,9 @@ impl Default for ChatSettings {
             kick_client_secret: None,
             kick_channel: None,
             kick_webhook_enabled: false,
+            relay_enabled: false,
+            relay_source: None,
+            relay_destination: None,
         }
     }
 }
@@ -486,6 +495,9 @@ impl AppConfig {
                 kick_channel: non_empty(chat.kick_channel)
                     .map(|channel| channel.trim().to_ascii_lowercase()),
                 kick_webhook_enabled: config.chat.kick_webhook_enabled,
+                relay_enabled: config.chat.relay_enabled,
+                relay_source: config.chat.relay_source,
+                relay_destination: config.chat.relay_destination,
             };
         }
         if let Some(target_fields) = form.targets {
