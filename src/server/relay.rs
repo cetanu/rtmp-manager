@@ -316,37 +316,7 @@ fn spawn_standby_relay(
     let target_name = target.name.clone();
     let task = tokio::spawn(async move {
         let bitrate = metrics.register_target(tenant_id.clone(), target_name.clone());
-        let width = target.encoding.width.unwrap_or(1280);
-        let height = target.encoding.height.unwrap_or(720);
-        let encoder = target_encoder(&target);
-        let args = vec![
-            "-loglevel".into(),
-            "warning".into(),
-            "-re".into(),
-            "-f".into(),
-            "lavfi".into(),
-            "-i".into(),
-            format!("color=c=black:s={width}x{height}:r=30"),
-            "-f".into(),
-            "lavfi".into(),
-            "-i".into(),
-            "anullsrc=channel_layout=stereo:sample_rate=48000".into(),
-            "-c:v".into(),
-            encoder.into(),
-            "-preset".into(),
-            "veryfast".into(),
-            "-tune".into(),
-            "zerolatency".into(),
-            "-pix_fmt".into(),
-            "yuv420p".into(),
-            "-c:a".into(),
-            "aac".into(),
-            "-b:a".into(),
-            "128k".into(),
-            "-f".into(),
-            "flv".into(),
-            destination,
-        ];
+        let args = standby_ffmpeg_args(&target, &destination);
         let mut child = match ffmpeg_command(&args)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -380,6 +350,39 @@ fn target_encoder(target: &TargetConfig) -> &'static str {
         Some("videotoolbox") => "h264_videotoolbox",
         _ => "libx264",
     }
+}
+
+fn standby_ffmpeg_args(target: &TargetConfig, destination: &str) -> Vec<String> {
+    let width = target.encoding.width.unwrap_or(1280);
+    let height = target.encoding.height.unwrap_or(720);
+    vec![
+        "-loglevel".into(),
+        "warning".into(),
+        "-re".into(),
+        "-f".into(),
+        "lavfi".into(),
+        "-i".into(),
+        format!("color=c=black:s={width}x{height}:r=30"),
+        "-f".into(),
+        "lavfi".into(),
+        "-i".into(),
+        "anullsrc=channel_layout=stereo:sample_rate=48000".into(),
+        "-c:v".into(),
+        target_encoder(target).into(),
+        "-preset".into(),
+        "veryfast".into(),
+        "-tune".into(),
+        "zerolatency".into(),
+        "-pix_fmt".into(),
+        "yuv420p".into(),
+        "-c:a".into(),
+        "aac".into(),
+        "-b:a".into(),
+        "128k".into(),
+        "-f".into(),
+        "flv".into(),
+        destination.into(),
+    ]
 }
 
 const RELAY_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -751,6 +754,31 @@ mod tests {
             ]
         }));
         assert!(args.windows(2).any(|pair| pair == ["-b:v", "6000k"]));
+    }
+
+    #[test]
+    fn standby_profile_generates_black_silent_video() {
+        let target = TargetConfig {
+            name: "Vertical".into(),
+            url: "rtmp://example.test/app".into(),
+            stream_key: "key".into(),
+            public_url: None,
+            enabled: true,
+            encoding: crate::config::EncodingProfile {
+                width: Some(1080),
+                height: Some(1920),
+                ..Default::default()
+            },
+        };
+        let args = standby_ffmpeg_args(&target, "rtmp://target/key");
+        assert!(
+            args.iter()
+                .any(|arg| arg == "color=c=black:s=1080x1920:r=30")
+        );
+        assert!(
+            args.iter()
+                .any(|arg| arg == "anullsrc=channel_layout=stereo:sample_rate=48000")
+        );
     }
 
     #[test]
