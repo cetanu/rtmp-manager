@@ -174,6 +174,9 @@ impl StreamActor {
         ) {
             bail!("Tenant already has the maximum number of active streams");
         }
+        if self.staged.contains_key(&stream_key) {
+            bail!("This ingest stream is already active");
+        }
         if !self
             .usage
             .begin_stream(
@@ -184,9 +187,6 @@ impl StreamActor {
             .await?
         {
             bail!("Tenant monthly stream quota has been exhausted");
-        }
-        if self.staged.contains_key(&stream_key) {
-            bail!("This ingest stream is already active");
         }
         let preview_dir = self.preview_dir.join(stream_key_digest(tenant.id.as_str()));
         create_preview_dir(&preview_dir)?;
