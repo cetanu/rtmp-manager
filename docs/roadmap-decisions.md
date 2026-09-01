@@ -180,6 +180,9 @@
 - Active previews capture a JPEG thumbnail at most once per 60 seconds from
   the tenant's HLS playlist. Administrators fetch it through
   `/api/admin/tenants/{tenant_id}/thumbnail`; missing snapshots return 404.
+- The `/admin/streams` page renders the cross-tenant status snapshot for
+  administrators and links each tenant to its protected thumbnail endpoint;
+  the existing admin middleware denies the page to ordinary users.
 
 ## GOAL-301: relay control plane
 
