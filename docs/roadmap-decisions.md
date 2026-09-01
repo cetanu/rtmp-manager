@@ -102,6 +102,10 @@
   rejects new streams once the plan's allowance is exhausted. Tenant settings
   reject enabled destination counts above the active plan's limit with an
   actionable upgrade error, so limits are enforced before relay launch.
+- Stripe subscription webhooks persist the provider customer ID on the tenant;
+  authenticated users can create a short-lived Customer Portal session through
+  `/api/billing/stripe/portal`. `STRIPE_SECRET_KEY` and
+  `STRIPE_PORTAL_RETURN_URL` stay server-side deployment settings.
 
 ## GOAL-401: YouTube quota partitioning
 
