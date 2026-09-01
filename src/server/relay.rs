@@ -208,7 +208,9 @@ async fn supervise_relay(
 
         let exit = tokio::select! {
             changed = cancel.changed() => {
-                let _ = child.kill().await;
+                if tokio::time::timeout(Duration::from_secs(5), child.kill()).await.is_err() {
+                    let _ = child.start_kill();
+                }
                 let _ = changed;
                 None
             }
