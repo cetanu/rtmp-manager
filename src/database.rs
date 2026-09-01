@@ -75,6 +75,13 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(audit_count, 1);
+        let stripe_customer_columns: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pragma_table_info('tenants') WHERE name = 'stripe_customer_id'",
+        )
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+        assert_eq!(stripe_customer_columns, 1);
         drop(database);
         std::fs::remove_file(path).unwrap();
     }
