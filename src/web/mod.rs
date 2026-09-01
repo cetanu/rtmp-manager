@@ -571,6 +571,70 @@ async fn stripe_customer_portal(cx: &Cx) -> Result<topcoat::router::Response> {
     )
 }
 
+#[derive(Debug, Deserialize)]
+struct StripeCheckoutRequest {
+    plan: String,
+}
+
+#[route(POST "/api/billing/stripe/checkout")]
+async fn stripe_checkout(
+    cx: &Cx,
+    body: topcoat::router::Bytes,
+) -> Result<topcoat::router::Response> {
+    let request: StripeCheckoutRequest = serde_json::from_slice(&body)
+        .map_err(|_| bad_request("Invalid Stripe checkout request"))?;
+    let price_variable = match request.plan.as_str() {
+        "pro" => "STRIPE_PRO_PRICE_ID",
+        "enterprise" => "STRIPE_ENTERPRISE_PRICE_ID",
+        _ => return Err(bad_request("Stripe checkout supports pro or enterprise plans").into()),
+    };
+    let price = std::env::var(price_variable)
+        .map_err(|_| bad_request("Stripe price is not configured for this plan"))?;
+    let secret = std::env::var("STRIPE_SECRET_KEY")
+        .map_err(|_| bad_request("Stripe billing is not configured"))?;
+    let success_url = std::env::var("STRIPE_CHECKOUT_SUCCESS_URL")
+        .map_err(|_| bad_request("Stripe checkout success URL is not configured"))?;
+    let cancel_url = std::env::var("STRIPE_CHECKOUT_CANCEL_URL")
+        .map_err(|_| bad_request("Stripe checkout cancel URL is not configured"))?;
+    let user = auth::current_user(cx);
+    let tenant_id = user.tenant_id.as_str().to_owned();
+    let app: &AppHandle = app_context(cx);
+    let payload: serde_json::Value = app
+        .http_client
+        .post("https://api.stripe.com/v1/checkout/sessions")
+        .bearer_auth(secret)
+        .form(&[
+            ("mode", "subscription"),
+            ("line_items[0][price]", price.as_str()),
+            ("line_items[0][quantity]", "1"),
+            ("success_url", success_url.as_str()),
+            ("cancel_url", cancel_url.as_str()),
+            ("customer_email", user.email.as_str()),
+            ("client_reference_id", tenant_id.as_str()),
+            ("metadata[tenant_id]", tenant_id.as_str()),
+            ("metadata[plan]", request.plan.as_str()),
+        ])
+        .send()
+        .await?
+        .error_for_status()
+        .map_err(|error| bad_request(format!("Stripe checkout request failed: {error}")))?
+        .json()
+        .await?;
+    let url = payload
+        .get("url")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            internal_server_error(anyhow::anyhow!("Stripe checkout response has no URL"))
+        })?;
+    topcoat::router::IntoResponse::into_response(
+        (
+            topcoat::router::StatusCode::SEE_OTHER,
+            [(topcoat::router::header::LOCATION, url)],
+        ),
+        cx,
+    )
+}
+
 #[route(POST "/api/billing/stripe")]
 async fn stripe_billing_webhook(
     cx: &Cx,
