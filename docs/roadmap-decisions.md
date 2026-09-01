@@ -43,6 +43,9 @@
 - Target settings expose the encoding mode, bitrate cap, dimensions, and
   hardware encoder fields; submitted values are parsed and validated at the
   configuration boundary before relays start.
+- CPU and hardware encoded outputs force AAC at 128 kbps, 48 kHz, stereo so
+  surround or incompatible source audio layouts do not break destination
+  publishing.
 
 ## GOAL-501: usage quotas
 
