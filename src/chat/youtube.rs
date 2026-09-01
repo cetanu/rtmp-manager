@@ -17,6 +17,16 @@ const BROWSER_ACCEPT_LANGUAGE: &str = "en-US,en;q=0.9";
 const REQUESTS_PER_API_KEY: usize = 8;
 static REQUEST_LIMITERS: LazyLock<Mutex<HashMap<String, Arc<Semaphore>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+static QUOTA_CIRCUITS: LazyLock<Mutex<HashMap<String, QuotaCircuit>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+const QUOTA_FAILURE_THRESHOLD: u8 = 3;
+const QUOTA_COOLDOWN: Duration = Duration::from_secs(60);
+
+#[derive(Debug, Default)]
+struct QuotaCircuit {
+    consecutive_rate_limits: u8,
+    open_until: Option<std::time::Instant>,
+}
 
 static API_KEY_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#""INNERTUBE_API_KEY":"([^"]+)""#).unwrap());
@@ -411,6 +421,9 @@ async fn fetch_innertube_page(
     client: &Client,
     session: &LiveChatSession,
 ) -> std::result::Result<InnerTubeFetchResult, PollFailure> {
+    if !quota_gate(&session.api_key) {
+        return Err(PollFailure::RateLimited);
+    }
     let limiter = request_limiter(&session.api_key);
     let _permit = limiter
         .acquire()
@@ -448,12 +461,14 @@ async fn fetch_innertube_page(
         return if status.as_u16() == 404 {
             Err(PollFailure::SessionExpired(error))
         } else if status.as_u16() == 429 {
+            quota_rate_limited(&session.api_key);
             Err(PollFailure::RateLimited)
         } else {
             Err(PollFailure::Retry(error))
         };
     }
 
+    quota_success(&session.api_key);
     let data: serde_json::Value = response
         .json()
         .await
@@ -509,6 +524,40 @@ fn request_limiter(api_key: &str) -> Arc<Semaphore> {
             .entry(api_key.to_owned())
             .or_insert_with(|| Arc::new(Semaphore::new(REQUESTS_PER_API_KEY))),
     )
+}
+
+fn quota_gate(api_key: &str) -> bool {
+    let mut circuits = QUOTA_CIRCUITS.lock().expect("quota circuit lock poisoned");
+    let circuit = circuits.entry(api_key.to_owned()).or_default();
+    match circuit.open_until {
+        Some(until) if until > std::time::Instant::now() => false,
+        Some(_) => {
+            circuit.open_until = None;
+            circuit.consecutive_rate_limits = 0;
+            true
+        }
+        None => true,
+    }
+}
+
+fn quota_success(api_key: &str) {
+    if let Some(circuit) = QUOTA_CIRCUITS
+        .lock()
+        .expect("quota circuit lock poisoned")
+        .get_mut(api_key)
+    {
+        circuit.consecutive_rate_limits = 0;
+        circuit.open_until = None;
+    }
+}
+
+fn quota_rate_limited(api_key: &str) {
+    let mut circuits = QUOTA_CIRCUITS.lock().expect("quota circuit lock poisoned");
+    let circuit = circuits.entry(api_key.to_owned()).or_default();
+    circuit.consecutive_rate_limits = circuit.consecutive_rate_limits.saturating_add(1);
+    if circuit.consecutive_rate_limits >= QUOTA_FAILURE_THRESHOLD {
+        circuit.open_until = Some(std::time::Instant::now() + QUOTA_COOLDOWN);
+    }
 }
 
 pub fn parse_continuations(continuations: &[serde_json::Value]) -> Option<(String, Option<u64>)> {
@@ -901,5 +950,24 @@ mod tests {
         let second = request_limiter("tenant-api-key-b");
         assert!(Arc::ptr_eq(&first, &first_again));
         assert!(!Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn quota_circuit_opens_after_repeated_rate_limits() {
+        let key = format!("quota-circuit-{}", std::process::id());
+        quota_rate_limited(&key);
+        quota_rate_limited(&key);
+        assert!(quota_gate(&key));
+        quota_rate_limited(&key);
+        assert!(!quota_gate(&key));
+
+        QUOTA_CIRCUITS
+            .lock()
+            .unwrap()
+            .get_mut(&key)
+            .unwrap()
+            .open_until = Some(std::time::Instant::now() - Duration::from_secs(1));
+        assert!(quota_gate(&key));
+        quota_success(&key);
     }
 }
