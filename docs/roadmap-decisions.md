@@ -37,6 +37,8 @@
   initial plans are free (10 hours/month), pro (100 hours/month), and
   enterprise (unlimited); a later billing adapter can update the plan column
   without changing stream lifecycle code.
+- Active streams are recorded separately from accumulated seconds so live
+  reservations remain inspectable and are removed on every stream teardown.
 - Provider webhooks use `BILLING_WEBHOOK_SECRET` and a generic signed payload;
   Stripe/LemonSqueezy adapters can translate their events into this contract.
 - Stripe has a dedicated `/api/billing/stripe` adapter using its five-minute

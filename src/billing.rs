@@ -17,7 +17,7 @@ impl UsageRepository {
     }
 
     /// Reserve a stream against the tenant's monthly allowance.
-    pub async fn begin_stream(&self, tenant_id: &str, now: i64) -> Result<bool> {
+    pub async fn begin_stream(&self, tenant_id: &str, stream_id: &str, now: i64) -> Result<bool> {
         let period = now - now.rem_euclid(30 * 24 * 60 * 60);
         let mut tx = self.database.pool().begin().await?;
         sqlx::query("INSERT INTO tenant_usage (tenant_id, period_start) VALUES ($1, $2) ON CONFLICT (tenant_id, period_start) DO NOTHING")
@@ -45,15 +45,30 @@ impl UsageRepository {
             tx.rollback().await?;
             return Ok(false);
         }
+        sqlx::query("INSERT INTO tenant_active_streams (tenant_id, stream_id, started_at) VALUES ($1, $2, $3) ON CONFLICT (stream_id) DO NOTHING")
+            .bind(tenant_id).bind(stream_id).bind(now).execute(&mut *tx).await?;
         tx.commit().await?;
         Ok(true)
     }
 
-    pub async fn record_seconds(&self, tenant_id: &str, started: i64, ended: i64) -> Result<()> {
+    pub async fn record_seconds(
+        &self,
+        tenant_id: &str,
+        stream_id: &str,
+        started: i64,
+        ended: i64,
+    ) -> Result<()> {
         let period = started - started.rem_euclid(30 * 24 * 60 * 60);
         let seconds = ended.saturating_sub(started);
+        let mut tx = self.database.pool().begin().await?;
+        sqlx::query("DELETE FROM tenant_active_streams WHERE tenant_id = $1 AND stream_id = $2")
+            .bind(tenant_id)
+            .bind(stream_id)
+            .execute(&mut *tx)
+            .await?;
         sqlx::query("UPDATE tenant_usage SET stream_seconds = stream_seconds + $1 WHERE tenant_id = $2 AND period_start = $3")
-            .bind(seconds).bind(tenant_id).bind(period).execute(self.database.pool()).await?;
+            .bind(seconds).bind(tenant_id).bind(period).execute(&mut *tx).await?;
+        tx.commit().await?;
         Ok(())
     }
 

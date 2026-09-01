@@ -176,7 +176,11 @@ impl StreamActor {
         }
         if !self
             .usage
-            .begin_stream(tenant.id.as_str(), crate::util::now_unix_secs() as i64)
+            .begin_stream(
+                tenant.id.as_str(),
+                &stream_key,
+                crate::util::now_unix_secs() as i64,
+            )
             .await?
         {
             bail!("Tenant monthly stream quota has been exhausted");
@@ -333,6 +337,7 @@ impl StreamActor {
                 .usage
                 .record_seconds(
                     stream.tenant_id.as_str(),
+                    &stream.stream_key,
                     stream.started_at_unix,
                     crate::util::now_unix_secs() as i64,
                 )
