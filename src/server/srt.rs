@@ -103,6 +103,7 @@ async fn relay_mpeg_ts(
         .spawn()
         .context("Failed to start SRT MPEG-TS relay")?;
     let mut stdin = child.stdin.take().context("FFmpeg stdin was unavailable")?;
+    publish_staged_stream(&app, tenant_id).await;
     tracing::info!(%tenant_id, "Authenticated SRT stream connected");
 
     while let Some(packet) = socket.next().await {
@@ -119,6 +120,22 @@ async fn relay_mpeg_ts(
     }
     tracing::info!("SRT stream disconnected");
     Ok(())
+}
+
+async fn publish_staged_stream(app: &AppHandle, tenant_id: &str) {
+    let Ok(tenant_id) = crate::tenant::TenantId::new(tenant_id) else {
+        return;
+    };
+    for _ in 0..20 {
+        match app.stream.publish_staged_stream(tenant_id.clone()).await {
+            Ok(()) => {
+                tracing::info!(tenant_id = %tenant_id.as_str(), "SRT stream published to configured targets");
+                return;
+            }
+            Err(_) => tokio::time::sleep(std::time::Duration::from_millis(250)).await,
+        }
+    }
+    tracing::warn!(tenant_id = %tenant_id.as_str(), "SRT stream could not be published after staging retries");
 }
 
 #[cfg(test)]
