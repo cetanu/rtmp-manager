@@ -156,4 +156,30 @@ mod tests {
             "secret"
         ));
     }
+
+    #[test]
+    fn stripe_signatures_require_a_fresh_timestamp() {
+        let body = br#"{"type":"customer.subscription.updated"}"#;
+        let now = 1_700_000_000_i64;
+        let timestamp = now - 30;
+        let mut mac = BillingHmac::new_from_slice(b"stripe-secret").unwrap();
+        mac.update(format!("{timestamp}.").as_bytes());
+        mac.update(body);
+        let header = format!(
+            "t={timestamp},v1={}",
+            hex::encode(mac.finalize().into_bytes())
+        );
+        assert!(UsageRepository::verify_stripe_signature(
+            body,
+            &header,
+            "stripe-secret",
+            now
+        ));
+        assert!(!UsageRepository::verify_stripe_signature(
+            body,
+            &header,
+            "stripe-secret",
+            now + 301
+        ));
+    }
 }
