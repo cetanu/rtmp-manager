@@ -86,6 +86,9 @@
   subscriber/collector to export it without hard-coding a vendor SDK.
 - `/api/metrics/prometheus` is the scrape boundary; it emits only the
   authenticated tenant's ingest and outbound bitrate series.
+- Relay progress now records FFmpeg dropped-frame totals and reconnection
+  counts alongside outbound bitrate, and exposes both in the tenant-scoped
+  Prometheus response.
 
 ## GOAL-503: moderation
 
