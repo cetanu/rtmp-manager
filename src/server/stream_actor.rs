@@ -431,8 +431,14 @@ impl StreamActor {
                 .await;
             let _ = stream.preview_process.kill().await;
         }
-        for (_, relays) in self.active_relays.drain() {
-            cancel_relays(relays).await;
+        if std::env::var_os("RELAY_BROKER_URL").is_some_and(|url| !url.is_empty()) {
+            // Redis workers own the media processes; dropping control-plane
+            // handles lets those workers continue across an API restart.
+            self.active_relays.clear();
+        } else {
+            for (_, relays) in self.active_relays.drain() {
+                cancel_relays(relays).await;
+            }
         }
         let _ = tokio::fs::remove_dir_all(&self.preview_dir).await;
     }
