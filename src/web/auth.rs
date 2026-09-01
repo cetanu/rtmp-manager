@@ -34,7 +34,8 @@ fn public_path(path: &str) -> bool {
 }
 
 fn admin_path(path: &str) -> bool {
-    path == "/logs"
+    path == "/admin/streams"
+        || path == "/logs"
         || path == "/export"
         || path == "/api/logs"
         || path == "/api/admin/emergency-stop"

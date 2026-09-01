@@ -150,6 +150,47 @@ async fn home(cx: &Cx) -> Result {
     view! { app_page(active_page: "preview") }
 }
 
+#[page("/admin/streams")]
+async fn admin_streams_page(cx: &Cx) -> Result {
+    let app: &AppHandle = app_context(cx);
+    let statuses = app.stream.all_status();
+    view! {
+        <!DOCTYPE html>
+        <html lang="en" class="dark">
+            <head>
+                <meta charset="utf-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1" />
+                <title>"Active streams · RTMP Manager"</title>
+                <link rel="stylesheet" href=(TAILWIND_STYLESHEET) />
+            </head>
+            <body class="min-h-screen bg-background p-6 text-foreground">
+                <main class="mx-auto max-w-4xl">
+                    <div class="mb-6 flex items-center justify-between">
+                        <h1 class="text-2xl font-semibold">"Active streams"</h1>
+                        <a class="text-sm text-primary underline" href="/">"Back to dashboard"</a>
+                    </div>
+                    <div class="overflow-hidden rounded-xl border border-border">
+                        <table class="w-full text-left text-sm">
+                            <thead class="bg-card text-muted-foreground">
+                                <tr><th class="p-3">"Tenant"</th><th class="p-3">"State"</th><th class="p-3">"Thumbnail"</th></tr>
+                            </thead>
+                            <tbody>
+                                for (tenant_id, status) in statuses.iter() {
+                                    <tr class="border-t border-border">
+                                        <td class="p-3 font-mono">(tenant_id.as_str())</td>
+                                        <td class="p-3">(format!("{:?}", status.state))</td>
+                                        <td class="p-3"><a class="text-primary underline" href=(format!("/api/admin/tenants/{}/thumbnail", tenant_id.as_str())) target="_blank">"Open"</a></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </main>
+            </body>
+        </html>
+    }
+}
+
 #[page("/overview")]
 async fn overview_page() -> Result {
     view! { app_page(active_page: "preview") }
