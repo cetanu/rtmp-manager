@@ -21,8 +21,10 @@ pub fn current_user(cx: &Cx) -> &User {
 }
 
 fn public_path(path: &str) -> bool {
-    matches!(path, "/setup" | "/api/setup" | "/login" | "/register")
-        || path.starts_with("/oauth/")
+    matches!(
+        path,
+        "/setup" | "/api/setup" | "/login" | "/register" | "/healthz"
+    ) || path.starts_with("/oauth/")
         || path == "/api/webhook"
         || path.starts_with("/api/v1/webhooks/")
         || path == "/api/billing/webhook"

@@ -28,6 +28,7 @@ pub use crate::server::preview::{StreamState, StreamStatus};
 /// Unified application handle containing cloneable subsystem handles and lock-free channels.
 #[derive(Clone)]
 pub struct AppHandle {
+    pub database: crate::database::Database,
     pub usage: crate::billing::UsageRepository,
     pub accounts: AccountRepository,
     pub stream: StreamHandle,
@@ -61,6 +62,7 @@ impl AppHandle {
         )
         .await?;
         let handle = Self {
+            database,
             usage,
             accounts,
             stream,

@@ -37,6 +37,11 @@ impl Database {
     pub fn pool(&self) -> &AnyPool {
         &self.pool
     }
+
+    pub async fn health_check(&self) -> Result<()> {
+        sqlx::query("SELECT 1").execute(&self.pool).await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

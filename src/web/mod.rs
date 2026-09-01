@@ -300,6 +300,21 @@ fn prometheus_label(value: &str) -> String {
         .replace('\n', "\\n")
 }
 
+#[route(GET "/healthz")]
+async fn healthz(cx: &Cx) -> Result<topcoat::router::Response> {
+    let app: &AppHandle = app_context(cx);
+    if app.database.health_check().await.is_err() {
+        return topcoat::router::IntoResponse::into_response(
+            (
+                topcoat::router::StatusCode::SERVICE_UNAVAILABLE,
+                "database unavailable",
+            ),
+            cx,
+        );
+    }
+    topcoat::router::IntoResponse::into_response("ok", cx)
+}
+
 #[route(POST "/api/admin/emergency-stop")]
 async fn emergency_stop(cx: &Cx) -> Result<topcoat::router::Response> {
     let app: &AppHandle = app_context(cx);
