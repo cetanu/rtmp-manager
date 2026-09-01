@@ -12,6 +12,7 @@ use tokio::sync::{Mutex, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
 pub mod kick;
+pub mod relay;
 pub mod twitch;
 pub mod twitch_eventsub;
 pub mod x;

@@ -40,6 +40,14 @@
 - Provider webhooks use `BILLING_WEBHOOK_SECRET` and a generic signed payload;
   Stripe/LemonSqueezy adapters can translate their events into this contract.
 
+## GOAL-403: chat relaying
+
+- The first outbound adapter is Twitch IRC, configured with
+  `TWITCH_BOT_OAUTH_TOKEN`, `TWITCH_BOT_USERNAME`, and
+  `CHAT_RELAY_TWITCH_CHANNEL`. Relay messages are prefixed and newline
+  sanitized; messages originating on the destination platform are skipped to
+  prevent loops.
+
 ## GOAL-301: relay control plane
 
 - Redis Streams is the first broker adapter because it is easy to self-host;
