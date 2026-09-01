@@ -236,7 +236,19 @@ async fn get_stream_status(cx: &Cx) -> Result<Json<StreamStatus>> {
 #[route(GET "/api/metrics/history")]
 async fn get_metrics_history(cx: &Cx) -> Result<Json<Vec<crate::metrics::MetricsSample>>> {
     let app: &AppHandle = app_context(cx);
-    Ok(Json(app.metrics.history()))
+    let tenant_id = auth::current_user(cx).tenant_id.as_str().to_owned();
+    let history = app
+        .metrics
+        .history()
+        .into_iter()
+        .map(|mut sample| {
+            sample
+                .targets
+                .retain(|target| target.tenant_id == tenant_id);
+            sample
+        })
+        .collect();
+    Ok(Json(history))
 }
 
 #[route(POST "/api/admin/emergency-stop")]

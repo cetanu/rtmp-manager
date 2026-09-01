@@ -214,7 +214,7 @@ async fn supervise_relay(
         let mut child = match child {
             Ok(child) => child,
             Err(error) => {
-                tracing::error!(name = %target.name, attempt, %error, "Failed to start target relay FFmpeg");
+                tracing::error!(tenant_id = %tenant_id, name = %target.name, attempt, %error, "Failed to start target relay FFmpeg");
                 if wait_for_retry(&mut cancel, retry_seconds).await {
                     break;
                 }
@@ -222,7 +222,7 @@ async fn supervise_relay(
                 continue;
             }
         };
-        tracing::info!(name = %target.name, attempt, "Stream target relay process started");
+        tracing::info!(tenant_id = %tenant_id, name = %target.name, attempt, "Stream target relay process started");
 
         let stdout_task = child.stdout.take().map(|stdout| {
             let bitrate = Arc::clone(&bitrate);
@@ -274,16 +274,16 @@ async fn supervise_relay(
         };
         match exit {
             Ok(status) => {
-                tracing::error!(name = %target.name, %status, "Stream target relay disconnected")
+                tracing::error!(tenant_id = %tenant_id, name = %target.name, %status, "Stream target relay disconnected")
             }
             Err(error) => {
-                tracing::error!(name = %target.name, %error, "Failed while waiting for target relay")
+                tracing::error!(tenant_id = %tenant_id, name = %target.name, %error, "Failed while waiting for target relay")
             }
         }
         if started_at.elapsed() >= Duration::from_secs(30) {
             retry_seconds = 1;
         }
-        tracing::warn!(name = %target.name, retry_seconds, "Target relay will reconnect");
+        tracing::warn!(tenant_id = %tenant_id, name = %target.name, retry_seconds, "Target relay will reconnect");
         if wait_for_retry(&mut cancel, retry_seconds).await {
             break;
         }
@@ -291,7 +291,7 @@ async fn supervise_relay(
     }
 
     metrics.unregister_target(&tenant_id, &target.name);
-    tracing::info!(name = %target.name, "Stream target relay supervisor stopped");
+    tracing::info!(tenant_id = %tenant_id, name = %target.name, "Stream target relay supervisor stopped");
 }
 
 async fn wait_for_retry(cancel: &mut watch::Receiver<bool>, seconds: u64) -> bool {

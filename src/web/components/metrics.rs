@@ -1,4 +1,5 @@
 use crate::server::state::AppHandle;
+use crate::web::auth;
 use crate::web::components::ui::card::{card, card_content, card_header, card_title};
 use std::collections::HashMap;
 use topcoat::{
@@ -20,11 +21,13 @@ fn format_bitrate(bits_per_second: u64) -> String {
 #[component]
 pub async fn metrics_page(cx: &Cx) -> Result {
     let app: &AppHandle = app_context(cx);
+    let tenant_id = auth::current_user(cx).tenant_id.as_str();
     let ingest_bps = app.metrics.current_ingest_bps();
     let current = app
         .metrics
         .current_target_bitrates()
         .into_iter()
+        .filter(|sample| sample.tenant_id == tenant_id)
         .map(|sample| (sample.name.clone(), sample))
         .collect::<HashMap<_, _>>();
     let targets = crate::web::request_config(cx).await?.targets;
