@@ -248,6 +248,18 @@ async fn get_admin_stream_status(cx: &Cx) -> Result<Json<Vec<AdminStreamStatus>>
     ))
 }
 
+#[derive(Debug, Deserialize)]
+struct AuditLogQuery {
+    limit: Option<u32>,
+}
+
+#[route(GET "/api/admin/audit-log")]
+async fn get_admin_audit_log(cx: &Cx) -> Result<Json<Vec<crate::server::state::AdminAuditEntry>>> {
+    let query: AuditLogQuery = parse_query_params(cx).unwrap_or(AuditLogQuery { limit: None });
+    let app: &AppHandle = app_context(cx);
+    Ok(Json(app.admin_audit_log(query.limit.unwrap_or(50)).await?))
+}
+
 #[derive(Debug, Serialize)]
 struct AdminStreamStatus {
     tenant_id: String,

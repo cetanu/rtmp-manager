@@ -6,6 +6,8 @@ use crate::server::stream_actor::StreamHandle;
 use crate::tenant::TenantRepository;
 use anyhow::Result;
 use reqwest::Client;
+use serde::Serialize;
+use sqlx::Row;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -13,6 +15,15 @@ use std::sync::Arc;
 pub struct WebhookEvent {
     pub headers: HashMap<String, String>,
     pub body: topcoat::router::Bytes,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminAuditEntry {
+    pub id: String,
+    pub actor_user_id: String,
+    pub action: String,
+    pub tenant_id: Option<String>,
+    pub created_at: i64,
 }
 
 impl WebhookEvent {
@@ -120,6 +131,28 @@ impl AppHandle {
         .execute(self.database.pool())
         .await?;
         Ok(())
+    }
+
+    pub async fn admin_audit_log(&self, limit: u32) -> Result<Vec<AdminAuditEntry>> {
+        let limit = i64::from(limit.clamp(1, 100));
+        let rows = sqlx::query(
+            "SELECT id, actor_user_id, action, tenant_id, created_at \
+             FROM admin_audit_log ORDER BY created_at DESC LIMIT $1",
+        )
+        .bind(limit)
+        .fetch_all(self.database.pool())
+        .await?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(AdminAuditEntry {
+                    id: row.try_get("id")?,
+                    actor_user_id: row.try_get("actor_user_id")?,
+                    action: row.try_get("action")?,
+                    tenant_id: row.try_get("tenant_id")?,
+                    created_at: row.try_get("created_at")?,
+                })
+            })
+            .collect()
     }
 
     pub async fn tenant_chat(&self, tenant_id: &crate::tenant::TenantId) -> Result<ChatHandle> {
