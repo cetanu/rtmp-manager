@@ -142,6 +142,9 @@
 - Relay progress now records FFmpeg dropped-frame totals and reconnection
   counts alongside outbound bitrate, and exposes both in the tenant-scoped
   Prometheus response.
+- Relay QoS samples and Prometheus series include the effective video codec
+  (`copy`, `libx264`, or the selected hardware encoder), keeping transcoding
+  comparisons queryable without a second metrics stream.
 - The metrics dashboard renders those QoS counters per target and refreshes
   them from the same tenant-filtered history endpoint as bitrate charts.
 
