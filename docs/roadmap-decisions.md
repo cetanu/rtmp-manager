@@ -30,6 +30,10 @@
 - Resource limits are opt-in environment settings so existing self-hosted
   deployments remain portable. Linux workers use `prlimit`; other platforms
   continue with the supervisor's cancellation and restart guarantees.
+- Relay FFmpeg processes are considered stalled after 15 seconds without any
+  `-progress` output. The supervisor terminates the process and reuses its
+  bounded reconnect backoff; this timeout is intentionally fixed until
+  provider-specific stream health signals are available.
 
 ## GOAL-304: hardware encoding
 
