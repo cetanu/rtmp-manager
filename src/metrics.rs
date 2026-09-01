@@ -151,4 +151,17 @@ mod tests {
         metrics.record_sample();
         assert_eq!(metrics.history()[1].ingest_bps, 0);
     }
+
+    #[test]
+    fn target_qos_counters_are_exported_in_samples() {
+        let metrics = Metrics::default();
+        let target = metrics.register_target("tenant-a".into(), "Twitch".into());
+        target.update_dropped_frames(7);
+        target.record_reconnection();
+        metrics.record_sample();
+
+        let sample = &metrics.history()[0].targets[0];
+        assert_eq!(sample.dropped_frames, 7);
+        assert_eq!(sample.reconnections, 1);
+    }
 }
