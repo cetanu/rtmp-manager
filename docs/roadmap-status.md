@@ -14,4 +14,4 @@ draft PR does not imply completion where an external service is still needed.
 | 403 | Twitch/Kick/YouTube outbound adapters and loop prevention | Provider bot credential provisioning and end-to-end relay tests |
 | 501 | Persistent monthly quotas with Free/Pro/Enterprise hour and destination enforcement, tenant usage snapshots, Plan Usage dashboard card, and generic, Stripe, and LemonSqueezy webhooks | Production account/customer lifecycle integration |
 | 502 | Tenant metrics (bitrate, dropped frames, reconnects), Prometheus scrape, dashboard QoS cards, and structured tracing spans | Collector deployment and export configuration |
-| 503 | Global and tenant emergency-stop endpoints, administrator-only authorization, and incident runbook | Production authorization review |
+| 503 | Administrator-only global and tenant emergency-stop endpoints, cross-tenant active stream status API, and incident runbook | Production authorization review and thumbnail snapshot workers |
