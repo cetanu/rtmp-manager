@@ -106,6 +106,9 @@
   authenticated users can create a short-lived Customer Portal session through
   `/api/billing/stripe/portal`. `STRIPE_SECRET_KEY` and
   `STRIPE_PORTAL_RETURN_URL` stay server-side deployment settings.
+- Authenticated tenants can request Stripe Checkout sessions for only the
+  configured `pro` or `enterprise` plans. Server-side price IDs, success and
+  cancel URLs, and tenant metadata are supplied by the deployment.
 
 ## GOAL-401: YouTube quota partitioning
 
