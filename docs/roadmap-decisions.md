@@ -20,6 +20,10 @@
 - The unified endpoint uses explicit platform paths (`/api/v1/webhooks/kick`
   and `/api/v1/webhooks/x`) so malformed or unknown platform payloads cannot
   select a parser implicitly.
+- Twitch EventSub uses `TWITCH_EVENTSUB_SECRET` for HMAC verification and the
+  same `X-Tenant-Stream-Key` routing header; this keeps provider signatures
+  independent from tenant lookup while the control plane has no provider
+  account registry yet.
 
 ## GOAL-302: relay limits
 

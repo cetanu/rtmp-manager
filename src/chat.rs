@@ -13,6 +13,7 @@ use tokio::task::JoinHandle;
 
 pub mod kick;
 pub mod twitch;
+pub mod twitch_eventsub;
 pub mod x;
 pub mod youtube;
 

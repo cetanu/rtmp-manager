@@ -522,6 +522,14 @@ async fn receive_x_webhook(
     receive_webhook_for_platform(cx, body, "x").await
 }
 
+#[route(POST "/api/v1/webhooks/twitch")]
+async fn receive_twitch_webhook(
+    cx: &Cx,
+    body: topcoat::router::Bytes,
+) -> Result<topcoat::router::Response> {
+    receive_webhook_for_platform(cx, body, "twitch").await
+}
+
 async fn receive_webhook_for_platform(
     cx: &Cx,
     body: topcoat::router::Bytes,
@@ -553,7 +561,20 @@ async fn receive_webhook_for_platform(
         .ok_or_else(|| bad_request("Invalid tenant stream key"))?;
     let settings = tenant.chat;
     let chat = app.tenant_chat(&tenant.id).await?;
-    if platform == "kick" {
+    if platform == "twitch" {
+        let secret = std::env::var("TWITCH_EVENTSUB_SECRET")
+            .map_err(|_| bad_request("Twitch EventSub is not configured"))?;
+        let (challenge, message) = crate::chat::twitch_eventsub::parse(&event, &secret)
+            .map_err(|error| bad_request(error.to_string()))?;
+        if let Some(message) = message {
+            chat.enqueue(message).await.map_err(internal_server_error)?;
+        }
+        if let Some(challenge) = challenge {
+            return Ok(topcoat::router::Response::new(topcoat::router::Body::from(
+                challenge,
+            )));
+        }
+    } else if platform == "kick" {
         let message = match crate::chat::kick::process_event(&settings, &event) {
             Ok(message) => message,
             Err(error) => {
