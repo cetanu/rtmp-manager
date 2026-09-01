@@ -74,6 +74,32 @@ struct RelayIntent {
     target: TargetConfig,
 }
 
+fn decode_relay_intent(item: &redis::streams::StreamId) -> anyhow::Result<RelayIntent> {
+    let payload = item
+        .map
+        .get("payload")
+        .and_then(|value| redis::from_redis_value::<String>(value.clone()).ok())
+        .ok_or_else(|| anyhow::anyhow!("relay intent has no payload"))?;
+    Ok(serde_json::from_str(&payload)?)
+}
+
+async fn apply_relay_intent(intent: RelayIntent, active: &mut HashMap<String, RelayProcess>) {
+    if intent.kind == "stop" {
+        if let Some(process) = active.remove(&intent.job_id) {
+            let _ = process.cancel.send(true);
+            let _ = process.task.await;
+        }
+    } else if intent.kind == "start" {
+        let process = spawn_relay(
+            Arc::new(Metrics::default()),
+            intent.tenant_id,
+            intent.source_url,
+            intent.target,
+        );
+        active.insert(intent.job_id, process);
+    }
+}
+
 pub async fn run_redis_worker(url: &str) -> anyhow::Result<()> {
     let client = redis::Client::open(url)?;
     let mut connection = client.get_multiplexed_async_connection().await?;
@@ -90,6 +116,27 @@ pub async fn run_redis_worker(url: &str) -> anyhow::Result<()> {
     let consumer = format!("worker-{}", std::process::id());
     let mut active: HashMap<String, RelayProcess> = HashMap::new();
     loop {
+        let reclaimed: redis::streams::StreamAutoClaimReply = redis::cmd("XAUTOCLAIM")
+            .arg(stream)
+            .arg(group)
+            .arg(&consumer)
+            .arg(30_000)
+            .arg("0-0")
+            .arg("COUNT")
+            .arg(16)
+            .query_async(&mut connection)
+            .await?;
+        for item in reclaimed.claimed {
+            if let Ok(intent) = decode_relay_intent(&item) {
+                apply_relay_intent(intent, &mut active).await;
+            }
+            let _: () = redis::cmd("XACK")
+                .arg(stream)
+                .arg(group)
+                .arg(item.id)
+                .query_async(&mut connection)
+                .await?;
+        }
         let reply: redis::streams::StreamReadReply = redis::cmd("XREADGROUP")
             .arg("GROUP")
             .arg(group)
@@ -105,27 +152,8 @@ pub async fn run_redis_worker(url: &str) -> anyhow::Result<()> {
             .await?;
         for stream in reply.keys {
             for item in stream.ids {
-                let Some(payload) = item
-                    .map
-                    .get("payload")
-                    .and_then(|value| redis::from_redis_value::<String>(value.clone()).ok())
-                else {
-                    continue;
-                };
-                let intent: RelayIntent = serde_json::from_str(&payload)?;
-                if intent.kind == "stop" {
-                    if let Some(process) = active.remove(&intent.job_id) {
-                        let _ = process.cancel.send(true);
-                        let _ = process.task.await;
-                    }
-                } else if intent.kind == "start" {
-                    let process = spawn_relay(
-                        Arc::new(Metrics::default()),
-                        intent.tenant_id,
-                        intent.source_url,
-                        intent.target,
-                    );
-                    active.insert(intent.job_id, process);
+                if let Ok(intent) = decode_relay_intent(&item) {
+                    apply_relay_intent(intent, &mut active).await;
                 }
                 let _: () = redis::cmd("XACK")
                     .arg("rtmp-manager:relay-intents")

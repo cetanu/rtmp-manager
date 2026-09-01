@@ -48,3 +48,5 @@
 - Workers consume through a Redis consumer group and acknowledge intents only
   after starting or stopping the associated relay; this provides redelivery
   after a worker crash without coupling the control plane to one process.
+- Workers reclaim entries idle for 30 seconds with `XAUTOCLAIM`, allowing a
+  replacement worker to recover jobs left pending by a crashed consumer.
