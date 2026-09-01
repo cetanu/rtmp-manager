@@ -23,13 +23,20 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - relay-broker-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   relay-worker:
     image: ghcr.io/cetanu/rtmp-manager:develop
     profiles: [broker]
     command: ["relay-worker", "--broker-url", "redis://relay-broker/"]
+    restart: unless-stopped
     depends_on:
-      - relay-broker
+      relay-broker:
+        condition: service_healthy
 
 volumes:
   rtmp-manager-data:
