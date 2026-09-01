@@ -260,6 +260,31 @@ async fn get_admin_audit_log(cx: &Cx) -> Result<Json<Vec<crate::server::state::A
     Ok(Json(app.admin_audit_log(query.limit.unwrap_or(50)).await?))
 }
 
+#[route(GET "/api/admin/tenants/{tenant_id}/thumbnail")]
+async fn get_admin_thumbnail(cx: &Cx) -> Result<topcoat::router::Response> {
+    let tenant_id =
+        crate::tenant::TenantId::new(topcoat::router::path_param::<AdminTenantPath>(cx))
+            .map_err(|_| bad_request("Invalid tenant ID"))?;
+    let app: &AppHandle = app_context(cx);
+    if app.tenants.find(&tenant_id).await?.is_none() {
+        return Err(not_found().into());
+    }
+    let bytes = match tokio::fs::read(app.stream.thumbnail_file(&tenant_id)).await {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(not_found().into());
+        }
+        Err(error) => return Err(internal_server_error(error).into()),
+    };
+    topcoat::router::IntoResponse::into_response(
+        (
+            [(topcoat::router::header::CONTENT_TYPE, "image/jpeg")],
+            topcoat::router::Body::from(bytes),
+        ),
+        cx,
+    )
+}
+
 #[derive(Debug, Serialize)]
 struct AdminStreamStatus {
     tenant_id: String,

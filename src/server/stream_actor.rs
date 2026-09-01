@@ -67,6 +67,7 @@ pub struct StreamActor {
     staged: HashMap<String, StagedStream>,
     active_relays: HashMap<String, Vec<RelayProcess>>,
     relay_targets: HashMap<String, (TenantId, Vec<TargetConfig>)>,
+    last_snapshot_at: HashMap<String, std::time::Instant>,
     listen_port: u16,
     http_client: Client,
     tenants: TenantRepository,
@@ -139,6 +140,49 @@ impl StreamActor {
                 }
                 Ok(None) => {}
             }
+        }
+        let now = std::time::Instant::now();
+        let snapshots = self
+            .staged
+            .values()
+            .filter(|stream| {
+                !stream.preview_failed
+                    && stream.preview_dir.join("index.m3u8").is_file()
+                    && self
+                        .last_snapshot_at
+                        .get(&stream.stream_key)
+                        .is_none_or(|last| now.duration_since(*last) >= Duration::from_secs(60))
+            })
+            .map(|stream| {
+                (
+                    stream.stream_key.clone(),
+                    stream.preview_dir.join("index.m3u8"),
+                    stream.preview_dir.join("thumbnail.jpg"),
+                )
+            })
+            .collect::<Vec<_>>();
+        for (stream_key, playlist, thumbnail) in snapshots {
+            self.last_snapshot_at.insert(stream_key, now);
+            tokio::spawn(async move {
+                let result = tokio::process::Command::new("ffmpeg")
+                    .args([
+                        "-y",
+                        "-loglevel",
+                        "error",
+                        "-i",
+                        &playlist.to_string_lossy(),
+                        "-frames:v",
+                        "1",
+                        "-q:v",
+                        "3",
+                        &thumbnail.to_string_lossy(),
+                    ])
+                    .status()
+                    .await;
+                if let Err(error) = result {
+                    tracing::warn!(%error, "Failed to create stream thumbnail");
+                }
+            });
         }
         self.update_status();
     }
@@ -382,6 +426,7 @@ impl StreamActor {
             cancel_relays(relays).await;
         }
         self.relay_targets.remove(stream_key);
+        self.last_snapshot_at.remove(stream_key);
         self.update_status();
     }
 
@@ -524,6 +569,7 @@ impl StreamHandle {
             staged: HashMap::new(),
             active_relays: HashMap::new(),
             relay_targets: HashMap::new(),
+            last_snapshot_at: HashMap::new(),
             listen_port,
             http_client,
             tenants,
@@ -637,5 +683,11 @@ impl StreamHandle {
                 .join(stream_key_digest(tenant_id.as_str()))
                 .join(name)
         })
+    }
+
+    pub fn thumbnail_file(&self, tenant_id: &TenantId) -> PathBuf {
+        self.preview_dir
+            .join(stream_key_digest(tenant_id.as_str()))
+            .join("thumbnail.jpg")
     }
 }
