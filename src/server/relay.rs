@@ -807,6 +807,19 @@ mod tests {
     }
 
     #[test]
+    fn redis_stop_intents_decode_without_source_fields() {
+        let intent: RelayIntent = serde_json::from_value(serde_json::json!({
+            "kind": "stop",
+            "job_id": "job-1",
+            "tenant_id": "tenant-a"
+        }))
+        .unwrap();
+        assert_eq!(intent.kind, "stop");
+        assert!(intent.source_url.is_none());
+        assert!(intent.target.is_none());
+    }
+
+    #[test]
     fn ffmpeg_failure_summary_does_not_echo_diagnostics() {
         let stderr = "rtmp://example.test/app/private-key: Connection refused";
         let secrets = vec!["private-key".to_owned()];
