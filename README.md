@@ -41,6 +41,15 @@ For broker-backed media workers, start the optional Redis and worker profile
 with `docker compose --profile broker up` and set
 `RELAY_BROKER_URL=redis://relay-broker/` on the manager service.
 
+## Relay resilience and encoding
+
+Server Settings controls the ingest disconnect grace period (0–300 seconds;
+30 seconds by default). During that window, enabled targets receive a
+profile-aware black/silent standby feed and automatically return to live media
+when ingest republishes. Target settings also support passthrough or encoded
+profiles with bitrate caps, aspect-preserving dimensions, and allow-listed
+hardware encoders (`nvenc`, `vaapi`, `qsv`, or `videotoolbox`).
+
 ## OBS chat overlay
 
 After first-run setup, open Settings and copy the private OBS Browser Source URL
