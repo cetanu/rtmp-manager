@@ -26,3 +26,10 @@
 - Resource limits are opt-in environment settings so existing self-hosted
   deployments remain portable. Linux workers use `prlimit`; other platforms
   continue with the supervisor's cancellation and restart guarantees.
+
+## GOAL-501: usage quotas
+
+- Quotas are enforced independently of payment-provider integrations. The
+  initial plans are free (10 hours/month), pro (100 hours/month), and
+  enterprise (unlimited); a later billing adapter can update the plan column
+  without changing stream lifecycle code.
