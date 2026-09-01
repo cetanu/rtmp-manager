@@ -317,24 +317,39 @@ fn spawn_standby_relay(
     let task = tokio::spawn(async move {
         let bitrate = metrics.register_target(tenant_id.clone(), target_name.clone());
         let args = standby_ffmpeg_args(&target, &destination);
-        let mut child = match ffmpeg_command(&args)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
-        {
-            Ok(child) => child,
-            Err(error) => {
-                tracing::error!(tenant_id = %tenant_id, name = %target_name, %error, "Failed to start standby relay");
-                metrics.unregister_target(&tenant_id, &target_name);
-                return;
+        loop {
+            if *cancel_rx.borrow() {
+                break;
             }
-        };
-        tokio::select! {
-            _ = cancel_rx.changed() => {
-                let _ = tokio::time::timeout(Duration::from_secs(5), child.kill()).await;
+            let mut child = match ffmpeg_command(&args)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .kill_on_drop(true)
+                .spawn()
+            {
+                Ok(child) => child,
+                Err(error) => {
+                    tracing::error!(tenant_id = %tenant_id, name = %target_name, %error, "Failed to start standby relay");
+                    if wait_for_retry(&mut cancel_rx, 1).await {
+                        break;
+                    }
+                    continue;
+                }
+            };
+            tokio::select! {
+                _ = cancel_rx.changed() => {
+                    if tokio::time::timeout(Duration::from_secs(5), child.kill()).await.is_err() {
+                        let _ = child.start_kill();
+                    }
+                    break;
+                }
+                _ = child.wait() => {
+                    tracing::warn!(tenant_id = %tenant_id, name = %target_name, "Standby relay disconnected; retrying");
+                    if wait_for_retry(&mut cancel_rx, 1).await {
+                        break;
+                    }
+                }
             }
-            _ = child.wait() => {}
         }
         bitrate.update_from_ffmpeg(0);
         metrics.unregister_target(&tenant_id, &target_name);
