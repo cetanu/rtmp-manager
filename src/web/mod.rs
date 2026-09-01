@@ -239,6 +239,13 @@ async fn get_metrics_history(cx: &Cx) -> Result<Json<Vec<crate::metrics::Metrics
     Ok(Json(app.metrics.history()))
 }
 
+#[route(POST "/api/admin/emergency-stop")]
+async fn emergency_stop(cx: &Cx) -> Result<topcoat::router::Response> {
+    let app: &AppHandle = app_context(cx);
+    app.stream.emergency_stop().await;
+    topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
+}
+
 #[derive(Debug, Deserialize)]
 struct AcknowledgeChatMessage {
     id: u64,

@@ -46,6 +46,7 @@ pub enum StreamCommand {
     MarkUnpublished {
         stream_key: String,
     },
+    EmergencyStop,
     RunTestStream {
         duration_secs: u64,
         targets: Vec<TargetConfig>,
@@ -98,6 +99,7 @@ impl StreamActor {
                         StreamCommand::MarkUnpublished { stream_key } => {
                             self.handle_mark_unpublished(&stream_key).await;
                         }
+                        StreamCommand::EmergencyStop => self.handle_emergency_stop().await,
                         StreamCommand::RunTestStream { duration_secs, targets } => {
                             run_direct_test(duration_secs, targets);
                         }
@@ -323,6 +325,17 @@ impl StreamActor {
         self.update_status();
     }
 
+    async fn handle_emergency_stop(&mut self) {
+        for (_, mut stream) in self.staged.drain() {
+            let _ = stream.preview_process.kill().await;
+        }
+        for (_, relays) in self.active_relays.drain() {
+            cancel_relays(relays).await;
+        }
+        self.update_status();
+        tracing::warn!("Emergency stop terminated all active streams");
+    }
+
     async fn cleanup(&mut self) {
         for (_, mut stream) in self.staged.drain() {
             let _ = stream.preview_process.kill().await;
@@ -468,6 +481,10 @@ impl StreamHandle {
                 .send(StreamCommand::EndStreamIfUnpublished { stream_key: key })
                 .await;
         });
+    }
+
+    pub async fn emergency_stop(&self) {
+        let _ = self.sender.send(StreamCommand::EmergencyStop).await;
     }
 
     pub fn run_test_stream(&self, duration_secs: u64, targets: Vec<TargetConfig>) {
