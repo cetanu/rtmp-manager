@@ -24,6 +24,13 @@ services:
     volumes:
       - relay-broker-data:/data
 
+  relay-worker:
+    image: ghcr.io/cetanu/rtmp-manager:develop
+    profiles: [broker]
+    command: ["relay-worker", "--broker-url", "redis://relay-broker/"]
+    depends_on:
+      - relay-broker
+
 volumes:
   rtmp-manager-data:
 

@@ -17,6 +17,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use config::ConfigHandle;
 use metrics::Metrics;
+use server::relay::run_redis_worker;
 use server::{run_rtmp_server, state::AppHandle};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -47,6 +48,10 @@ enum Commands {
     InstallSystemd {
         #[arg(long, default_value = "/opt/rtmp-proxy")]
         work_dir: PathBuf,
+    },
+    RelayWorker {
+        #[arg(long, env = "RELAY_BROKER_URL")]
+        broker_url: String,
     },
 }
 
@@ -104,6 +109,9 @@ async fn main() -> Result<()> {
 
     if let Some(Commands::InstallSystemd { work_dir }) = cli.command {
         return install_systemd(&work_dir);
+    }
+    if let Some(Commands::RelayWorker { broker_url }) = cli.command {
+        return run_redis_worker(&broker_url).await;
     }
 
     embedded_assets::install(web::TAILWIND_STYLESHEET)

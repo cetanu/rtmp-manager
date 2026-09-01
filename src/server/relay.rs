@@ -64,6 +64,49 @@ impl RedisRelayExecutor {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct RelayIntent {
+    tenant_id: String,
+    source_url: String,
+    target: TargetConfig,
+}
+
+pub async fn run_redis_worker(url: &str) -> anyhow::Result<()> {
+    let client = redis::Client::open(url)?;
+    let mut connection = client.get_multiplexed_async_connection().await?;
+    loop {
+        let reply: redis::streams::StreamReadReply = redis::cmd("XREAD")
+            .arg("BLOCK")
+            .arg(5000)
+            .arg("COUNT")
+            .arg(16)
+            .arg("STREAMS")
+            .arg("rtmp-manager:relay-intents")
+            .arg("$")
+            .query_async(&mut connection)
+            .await?;
+        for stream in reply.keys {
+            for item in stream.ids {
+                let Some(payload) = item
+                    .map
+                    .get("payload")
+                    .and_then(|value| redis::from_redis_value::<String>(value.clone()).ok())
+                else {
+                    continue;
+                };
+                let intent: RelayIntent = serde_json::from_str(&payload)?;
+                let process = spawn_relay(
+                    Arc::new(Metrics::default()),
+                    intent.tenant_id,
+                    intent.source_url,
+                    intent.target,
+                );
+                std::mem::forget(process.task);
+            }
+        }
+    }
+}
+
 impl RelayExecutor for RedisRelayExecutor {
     fn spawn(&self, tenant_id: String, source_url: String, target: TargetConfig) -> RelayProcess {
         let (cancel, mut cancel_rx) = watch::channel(false);

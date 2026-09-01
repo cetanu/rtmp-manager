@@ -37,8 +37,9 @@ use PostgreSQL instead. Both backends run embedded schema migrations during
 startup. To use a prebuilt image, remove the `build` block or run
 `docker compose pull` after images have been published to GHCR.
 
-For broker-backed media workers, start the optional Redis profile with
-`docker compose --profile broker up` and set `RELAY_BROKER_URL=redis://relay-broker/`.
+For broker-backed media workers, start the optional Redis and worker profile
+with `docker compose --profile broker up` and set
+`RELAY_BROKER_URL=redis://relay-broker/` on the manager service.
 
 ## OBS chat overlay
 
