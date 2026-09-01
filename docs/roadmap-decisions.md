@@ -171,6 +171,9 @@
 - Administrators can inspect the newest 1–100 records through
   `GET /api/admin/audit-log`; the bounded query prevents an audit view from
   becoming an unbounded database read.
+- Active previews capture a JPEG thumbnail at most once per 60 seconds from
+  the tenant's HLS playlist. Administrators fetch it through
+  `/api/admin/tenants/{tenant_id}/thumbnail`; missing snapshots return 404.
 
 ## GOAL-301: relay control plane
 
