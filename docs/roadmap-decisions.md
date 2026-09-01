@@ -20,20 +20,19 @@
 - The unified endpoint uses explicit platform paths (`/api/v1/webhooks/kick`
   and `/api/v1/webhooks/x`) so malformed or unknown platform payloads cannot
   select a parser implicitly.
-- Twitch EventSub uses `TWITCH_EVENTSUB_SECRET` for HMAC verification and the
-  same `X-Tenant-Stream-Key` routing header; this keeps provider signatures
-  independent from tenant lookup while the control plane has no provider
-  account registry yet.
+- Twitch EventSub uses each tenant's encrypted secret for HMAC verification and
+  the same `X-Tenant-Stream-Key` routing header; the deployment secret is only
+  a fallback for the default tenant.
 
 ## GOAL-302: relay limits
 
 - Resource limits are opt-in environment settings so existing self-hosted
   deployments remain portable. Linux workers use `prlimit`; other platforms
   continue with the supervisor's cancellation and restart guarantees.
-- Relay FFmpeg processes are considered stalled after 15 seconds without any
-  `-progress` output. The supervisor terminates the process and reuses its
-  bounded reconnect backoff; this timeout is intentionally fixed until
-  provider-specific stream health signals are available.
+- Relay FFmpeg processes are considered stalled after 5 seconds without any
+  `-progress` output. A one-second watchdog check terminates the process and
+  reuses its bounded reconnect backoff, matching the recovery objective without
+  adding deployment configuration.
 
 ## GOAL-304: hardware encoding
 
