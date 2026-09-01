@@ -64,5 +64,14 @@ Keep the overlay URL private because its query key grants read access to chat.
 Authenticated operators can scrape tenant-scoped Prometheus metrics from
 `/api/metrics/prometheus`.
 
+## Stripe billing (optional)
+
+Set `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRO_PRICE_ID`,
+`STRIPE_ENTERPRISE_PRICE_ID`, `STRIPE_CHECKOUT_SUCCESS_URL`,
+`STRIPE_CHECKOUT_CANCEL_URL`, and `STRIPE_PORTAL_RETURN_URL` to enable hosted
+Checkout and Customer Portal sessions. Configure Stripe to deliver subscription
+events to `/api/billing/stripe`; the webhook metadata must include `tenant_id`
+and `plan` so feature access updates immediately.
+
 Contributors can run the complete local formatting, test, and lint gates with
 `make verify`.
