@@ -55,6 +55,10 @@
 - The disconnect grace period is a validated server setting (0–300 seconds),
   defaulting to 30 seconds and applied by the stream handle when scheduling
   delayed teardown. A zero value intentionally ends a stream immediately.
+- During that window, active targets are swapped to a generated black-video,
+  silent-audio lavfi relay. A successful republish cancels the standby jobs
+  and starts live relays again; explicit stop and expiry still tear everything
+  down.
 
 ## GOAL-501: usage quotas
 
