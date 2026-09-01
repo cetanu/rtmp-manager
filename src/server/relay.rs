@@ -355,7 +355,7 @@ fn target_encoder(target: &TargetConfig) -> &'static str {
 fn standby_ffmpeg_args(target: &TargetConfig, destination: &str) -> Vec<String> {
     let width = target.encoding.width.unwrap_or(1280);
     let height = target.encoding.height.unwrap_or(720);
-    vec![
+    let mut args = vec![
         "-loglevel".into(),
         "warning".into(),
         "-re".into(),
@@ -382,7 +382,15 @@ fn standby_ffmpeg_args(target: &TargetConfig, destination: &str) -> Vec<String> 
         "-f".into(),
         "flv".into(),
         destination.into(),
-    ]
+    ];
+    if let Some(bitrate) = target.encoding.max_video_bitrate_kbps {
+        let output_index = args.len() - 1;
+        args.splice(
+            output_index..output_index,
+            ["-b:v".into(), format!("{bitrate}k")],
+        );
+    }
+    args
 }
 
 const RELAY_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -765,6 +773,7 @@ mod tests {
             public_url: None,
             enabled: true,
             encoding: crate::config::EncodingProfile {
+                max_video_bitrate_kbps: Some(3000),
                 width: Some(1080),
                 height: Some(1920),
                 ..Default::default()
@@ -779,6 +788,7 @@ mod tests {
             args.iter()
                 .any(|arg| arg == "anullsrc=channel_layout=stereo:sample_rate=48000")
         );
+        assert!(args.windows(2).any(|pair| pair == ["-b:v", "3000k"]));
     }
 
     #[test]
