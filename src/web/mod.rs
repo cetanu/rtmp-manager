@@ -454,6 +454,17 @@ async fn billing_webhook(
     topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
 }
 
+#[route(GET "/api/billing/usage")]
+async fn billing_usage(cx: &Cx) -> Result<Json<crate::billing::UsageSnapshot>> {
+    let app: &AppHandle = app_context(cx);
+    let tenant_id = &auth::current_user(cx).tenant_id;
+    Ok(Json(
+        app.usage
+            .current_usage(tenant_id.as_str(), crate::util::now_unix_secs() as i64)
+            .await?,
+    ))
+}
+
 #[route(POST "/api/billing/stripe")]
 async fn stripe_billing_webhook(
     cx: &Cx,

@@ -2,9 +2,18 @@ use crate::database::Database;
 use anyhow::Result;
 use anyhow::bail;
 use hmac::{Hmac, Mac};
+use serde::Serialize;
 use sha2::Sha256;
 
 type BillingHmac = Hmac<Sha256>;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UsageSnapshot {
+    pub plan: String,
+    pub stream_seconds: i64,
+    pub active_streams: i64,
+    pub limit_seconds: Option<i64>,
+}
 
 #[derive(Clone)]
 pub struct UsageRepository {
@@ -80,6 +89,35 @@ impl UsageRepository {
         sqlx::query("INSERT INTO tenant_usage (tenant_id, period_start, plan) VALUES ($1, $2, $3) ON CONFLICT (tenant_id, period_start) DO UPDATE SET plan = excluded.plan")
             .bind(tenant_id).bind(period).bind(plan).execute(self.database.pool()).await?;
         Ok(())
+    }
+
+    pub async fn current_usage(&self, tenant_id: &str, now: i64) -> Result<UsageSnapshot> {
+        let period = now - now.rem_euclid(30 * 24 * 60 * 60);
+        let row = sqlx::query_as::<_, (String, i64)>(
+            "SELECT plan, stream_seconds FROM tenant_usage WHERE tenant_id = $1 AND period_start = $2",
+        )
+        .bind(tenant_id)
+        .bind(period)
+        .fetch_optional(self.database.pool())
+        .await?;
+        let (plan, stream_seconds) = row.unwrap_or_else(|| ("free".to_owned(), 0));
+        let active_streams = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM tenant_active_streams WHERE tenant_id = $1",
+        )
+        .bind(tenant_id)
+        .fetch_one(self.database.pool())
+        .await?;
+        let limit_seconds = match plan.as_str() {
+            "pro" => Some(100 * 60 * 60),
+            "enterprise" => None,
+            _ => Some(10 * 60 * 60),
+        };
+        Ok(UsageSnapshot {
+            plan,
+            stream_seconds,
+            active_streams,
+            limit_seconds,
+        })
     }
 
     pub fn verify_webhook(body: &[u8], signature: &str, secret: &str) -> bool {
