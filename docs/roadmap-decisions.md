@@ -61,6 +61,8 @@
   down.
 - Standby output also honors each target's configured dimensions and video
   bitrate cap, keeping the reconnect feed within the destination profile.
+- Standby jobs retry failed FFmpeg connections once per second until the
+  ingest stream republishes or its grace window expires.
 
 ## GOAL-501: usage quotas
 

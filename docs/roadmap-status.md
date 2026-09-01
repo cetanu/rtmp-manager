@@ -9,7 +9,7 @@ draft PR does not imply completion where an external service is still needed.
 | 101–104 | Docker/Compose, setup, overlay, SRT listener | Live provider/container streaming smoke tests in CI |
 | 201–204 | Tenant repository, accounts/RBAC, AES-GCM, SQLx migrations | Production key-management/KMS integration |
 | 301–302 | RelayExecutor, Redis Streams worker, ACK/claim, prlimit | Multi-node deployment soak and worker fencing |
-| 303–304 | Configurable disconnect grace with profile-aware generated standby slate, validated encoding profiles, aspect-preserving crop, target settings controls, and normalized encoded audio | Platform-specific reconnect/transcode validation |
+| 303–304 | Configurable disconnect grace with profile-aware, retrying generated standby slate, validated encoding profiles, aspect-preserving crop, target settings controls, and normalized encoded audio | Platform-specific reconnect/transcode validation |
 | 401–402 | Adaptive YouTube polling, tenant API-key partitioning, and signed Kick/X/Twitch handlers | Provider quota dashboards and webhook fleet soak |
 | 403 | Twitch/Kick/YouTube outbound adapters and loop prevention | Provider bot credential provisioning and end-to-end relay tests |
 | 501 | Persistent monthly quotas plus generic, Stripe, and LemonSqueezy webhooks | Production account/customer lifecycle integration |
