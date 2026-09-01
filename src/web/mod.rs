@@ -339,6 +339,9 @@ async fn healthz(cx: &Cx) -> Result<topcoat::router::Response> {
 #[route(POST "/api/admin/emergency-stop")]
 async fn emergency_stop(cx: &Cx) -> Result<topcoat::router::Response> {
     let app: &AppHandle = app_context(cx);
+    let user = auth::current_user(cx);
+    app.record_admin_action(&user.id, "emergency_stop_all", None)
+        .await?;
     app.stream.emergency_stop().await;
     topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
 }
@@ -355,6 +358,9 @@ async fn emergency_stop_tenant(cx: &Cx) -> Result<topcoat::router::Response> {
     if app.tenants.find(&tenant_id).await?.is_none() {
         return Err(not_found().into());
     }
+    let user = auth::current_user(cx);
+    app.record_admin_action(&user.id, "emergency_stop_tenant", Some(tenant_id.as_str()))
+        .await?;
     app.stream.emergency_stop_tenant(tenant_id).await;
     topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
 }

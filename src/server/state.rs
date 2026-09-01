@@ -102,6 +102,26 @@ impl AppHandle {
             .await
     }
 
+    pub async fn record_admin_action(
+        &self,
+        actor_user_id: &str,
+        action: &str,
+        tenant_id: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO admin_audit_log (id, actor_user_id, action, tenant_id, created_at) \
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(crate::util::generate_secure_token()?)
+        .bind(actor_user_id)
+        .bind(action)
+        .bind(tenant_id)
+        .bind(crate::util::now_unix_secs() as i64)
+        .execute(self.database.pool())
+        .await?;
+        Ok(())
+    }
+
     pub async fn tenant_chat(&self, tenant_id: &crate::tenant::TenantId) -> Result<ChatHandle> {
         let tenant = self
             .tenants
