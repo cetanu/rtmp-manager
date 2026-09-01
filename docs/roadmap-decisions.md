@@ -1,5 +1,12 @@
 # Roadmap decisions
 
+## GOAL-104: SRT publication
+
+- An authenticated SRT ingest is automatically published after its remuxed
+  RTMP session is staged. The control plane retries publication for up to five
+  seconds to absorb listener startup timing, matching OBS-style ingest behavior
+  without requiring a dashboard click.
+
 ## GOAL-202: accounts and OAuth
 
 - Local registration creates a new tenant and makes the registering account
