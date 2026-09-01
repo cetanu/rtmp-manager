@@ -62,6 +62,8 @@ pub async fn metrics_page(cx: &Cx) -> Result {
                 for target in &targets {
                     let sample = current.get(&target.name);
                     let outbound = sample.map_or(0, |value| value.outbound_bps);
+                    let dropped_frames = sample.map_or(0, |value| value.dropped_frames);
+                    let reconnections = sample.map_or(0, |value| value.reconnections);
                     card(
                         attrs: attributes! { class="!gap-3 !rounded-lg !py-3" data-target-metric=(target.name.clone()) },
                         card_header(
@@ -77,6 +79,16 @@ pub async fn metrics_page(cx: &Cx) -> Result {
                                 <div>
                                     <div class="text-xs uppercase tracking-wide text-muted-foreground">"Outbound bitrate"</div>
                                     <div class="text-base font-semibold" data-bitrate-out="true">(format_bitrate(outbound))</div>
+                                </div>
+                                <div class="mt-2 grid grid-cols-2 gap-2 text-xs">
+                                    <div>
+                                        <div class="uppercase tracking-wide text-muted-foreground">"Dropped frames"</div>
+                                        <div class="font-medium" data-dropped-frames="true">(dropped_frames)</div>
+                                    </div>
+                                    <div>
+                                        <div class="uppercase tracking-wide text-muted-foreground">"Reconnects"</div>
+                                        <div class="font-medium" data-reconnections="true">(reconnections)</div>
+                                    </div>
                                 </div>
                             </div>
                             <canvas class="h-28 w-full" height="112" aria-label=(format!("{} bitrate history", target.name))></canvas>

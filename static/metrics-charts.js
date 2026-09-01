@@ -76,6 +76,8 @@
         const latest = [...samples].reverse().map((sample) =>
           sample.targets.find((target) => target.name === name)).find(Boolean);
         card.querySelector("[data-bitrate-out]").textContent = formatRate(latest?.outbound_bps || 0);
+        card.querySelector("[data-dropped-frames]").textContent = latest?.dropped_frames || 0;
+        card.querySelector("[data-reconnections]").textContent = latest?.reconnections || 0;
         draw(
           card.querySelector("canvas"),
           samples.map((sample) =>
