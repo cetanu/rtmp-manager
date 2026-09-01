@@ -5,7 +5,8 @@ use regex::Regex;
 use reqwest::Client;
 use reqwest::header::{ACCEPT_LANGUAGE, USER_AGENT};
 use serde::Serialize;
-use std::sync::LazyLock;
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
@@ -13,7 +14,9 @@ const DEFAULT_INNERTUBE_API_KEY: &str = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8
 const INNERTUBE_LIVE_CHAT_URL: &str = "https://www.youtube.com/youtubei/v1/live_chat/get_live_chat";
 const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const BROWSER_ACCEPT_LANGUAGE: &str = "en-US,en;q=0.9";
-static REQUEST_LIMITER: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(8));
+const REQUESTS_PER_API_KEY: usize = 8;
+static REQUEST_LIMITERS: LazyLock<Mutex<HashMap<String, Arc<Semaphore>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 static API_KEY_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#""INNERTUBE_API_KEY":"([^"]+)""#).unwrap());
@@ -408,7 +411,8 @@ async fn fetch_innertube_page(
     client: &Client,
     session: &LiveChatSession,
 ) -> std::result::Result<InnerTubeFetchResult, PollFailure> {
-    let _permit = REQUEST_LIMITER
+    let limiter = request_limiter(&session.api_key);
+    let _permit = limiter
         .acquire()
         .await
         .map_err(|_| PollFailure::Retry(anyhow::anyhow!("YouTube request limiter stopped")))?;
@@ -494,6 +498,17 @@ async fn fetch_innertube_page(
         next_continuation_token,
         timeout_millis: timeout_millis.unwrap_or(3000),
     })
+}
+
+fn request_limiter(api_key: &str) -> Arc<Semaphore> {
+    let mut limiters = REQUEST_LIMITERS
+        .lock()
+        .expect("request limiter lock poisoned");
+    Arc::clone(
+        limiters
+            .entry(api_key.to_owned())
+            .or_insert_with(|| Arc::new(Semaphore::new(REQUESTS_PER_API_KEY))),
+    )
 }
 
 pub fn parse_continuations(continuations: &[serde_json::Value]) -> Option<(String, Option<u64>)> {
@@ -877,5 +892,14 @@ mod tests {
         let body = r#"<script>"INNERTUBE_API_KEY":"scraped-key"</script>"#;
         assert_eq!(select_api_key(body, Some("tenant-key")), "tenant-key");
         assert_eq!(select_api_key(body, Some(" ")), "scraped-key");
+    }
+
+    #[test]
+    fn request_limiters_are_partitioned_by_api_key() {
+        let first = request_limiter("tenant-api-key-a");
+        let first_again = request_limiter("tenant-api-key-a");
+        let second = request_limiter("tenant-api-key-b");
+        assert!(Arc::ptr_eq(&first, &first_again));
+        assert!(!Arc::ptr_eq(&first, &second));
     }
 }
