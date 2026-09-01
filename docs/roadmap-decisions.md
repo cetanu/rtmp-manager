@@ -36,6 +36,9 @@
 - Hardware encoders are explicitly allow-listed (`nvenc`, `vaapi`, `qsv`, and
   `videotoolbox`) and map to FFmpeg's native H.264 encoders. The host image is
   responsible for exposing the matching device/runtime.
+- Target settings expose the encoding mode, bitrate cap, dimensions, and
+  hardware encoder fields; submitted values are parsed and validated at the
+  configuration boundary before relays start.
 
 ## GOAL-501: usage quotas
 
