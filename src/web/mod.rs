@@ -294,12 +294,17 @@ async fn update_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
         }
     };
 
-    if chat_changed
-        && user.tenant_id == crate::tenant::TenantId::default_tenant()
-        && let Err(error) = app.apply_chat_config().await
-    {
-        tracing::error!("Failed to apply chat configuration: {error:#}");
-        return Err(internal_server_error(error).into());
+    if chat_changed {
+        let result = if user.tenant_id == crate::tenant::TenantId::default_tenant() {
+            app.apply_chat_config().await
+        } else {
+            let config = app.tenant_config(&user.tenant_id).await?;
+            app.chat.apply_config(&user.tenant_id, config.chat).await
+        };
+        if let Err(error) = result {
+            tracing::error!("Failed to apply chat configuration: {error:#}");
+            return Err(internal_server_error(error).into());
+        }
     }
 
     topcoat::router::IntoResponse::into_response(redirect, cx)

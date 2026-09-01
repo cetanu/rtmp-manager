@@ -26,7 +26,9 @@ SRT ingest listens on UDP port 6000. Configure OBS with
 The access-control stream ID is authenticated before MPEG-TS packets are
 remuxed into the same relay pipeline as RTMP ingest.
 
-The `rtmp-manager-data` volume persists the SQLite database. Set `HTTP_PORT`,
+The `rtmp-manager-data` volume persists the SQLite database. Set
+`MASTER_ENCRYPTION_KEY` to a strong, stable secret; it encrypts destination
+stream keys and OAuth state at rest. Set `HTTP_PORT`,
 `RTMP_PORT`, `SRT_PORT`, or `RUST_LOG` in the shell or a `.env` file to override
 the corresponding Compose defaults. Set `DATABASE_URL` to a PostgreSQL URL to
 use PostgreSQL instead. Both backends run embedded schema migrations during

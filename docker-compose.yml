@@ -7,6 +7,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-sqlite:///data/rtmp-manager.sqlite3?mode=rwc}
       RUST_LOG: ${RUST_LOG:-rtmp_proxy=info,rtmp_rs=off}
+      MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:?Set a strong master encryption key}
     ports:
       - "${RTMP_PORT:-1935}:1935"
       - "${HTTP_PORT:-3000}:3000"
