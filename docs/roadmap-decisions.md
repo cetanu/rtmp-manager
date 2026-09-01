@@ -39,6 +39,8 @@
   without changing stream lifecycle code.
 - Provider webhooks use `BILLING_WEBHOOK_SECRET` and a generic signed payload;
   Stripe/LemonSqueezy adapters can translate their events into this contract.
+- Stripe has a dedicated `/api/billing/stripe` adapter using its five-minute
+  signed-event window and tenant/plan metadata on subscription objects.
 
 ## GOAL-403: chat relaying
 

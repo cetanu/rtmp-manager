@@ -78,4 +78,36 @@ impl UsageRepository {
         let expected = hex::encode(mac.finalize().into_bytes());
         subtle::ConstantTimeEq::ct_eq(expected.as_bytes(), signature.as_bytes()).unwrap_u8() == 1
     }
+
+    pub fn verify_stripe_signature(body: &[u8], header: &str, secret: &str, now: i64) -> bool {
+        let mut timestamp = None;
+        let mut signatures = Vec::new();
+        for part in header.split(',') {
+            let Some((key, value)) = part.trim().split_once('=') else {
+                continue;
+            };
+            if key == "t" {
+                timestamp = value.parse::<i64>().ok();
+            }
+            if key == "v1" {
+                signatures.push(value);
+            }
+        }
+        let Some(timestamp) = timestamp else {
+            return false;
+        };
+        if (now - timestamp).abs() > 300 {
+            return false;
+        }
+        let Ok(mut mac) = BillingHmac::new_from_slice(secret.as_bytes()) else {
+            return false;
+        };
+        mac.update(format!("{timestamp}.").as_bytes());
+        mac.update(body);
+        let expected = hex::encode(mac.finalize().into_bytes());
+        signatures.iter().any(|signature| {
+            subtle::ConstantTimeEq::ct_eq(expected.as_bytes(), signature.as_bytes()).unwrap_u8()
+                == 1
+        })
+    }
 }
