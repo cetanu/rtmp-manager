@@ -24,7 +24,9 @@ service publicly.
 SRT ingest listens on UDP port 6000. Configure OBS with
 `srt://localhost:6000?mode=caller&streamid=#!::r=live,m=publish,u=<stream_key>`.
 The access-control stream ID is authenticated before MPEG-TS packets are
-remuxed into the same relay pipeline as RTMP ingest.
+remuxed into the same relay pipeline as RTMP ingest. Once the remuxed session is
+staged, publication to enabled destinations is retried automatically for up to
+five seconds; no dashboard publish action is required for SRT.
 
 The `rtmp-manager-data` volume persists the SQLite database and generated
 encryption key. Set `MASTER_ENCRYPTION_KEY` to a strong, stable secret when
