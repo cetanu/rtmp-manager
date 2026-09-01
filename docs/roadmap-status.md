@@ -1,0 +1,17 @@
+# Roadmap evidence matrix
+
+This matrix maps each roadmap goal to the current implementation and the
+remaining acceptance work. It is intentionally kept next to the code so the
+draft PR does not imply completion where an external service is still needed.
+
+| Goal | Current evidence | Remaining acceptance work |
+| --- | --- | --- |
+| 101–104 | Docker/Compose, setup, overlay, SRT listener | Live provider/container streaming smoke tests in CI |
+| 201–204 | Tenant repository, accounts/RBAC, AES-GCM, SQLx migrations | Production key-management/KMS integration |
+| 301–302 | RelayExecutor, Redis Streams worker, ACK/claim, prlimit | Multi-node deployment soak and worker fencing |
+| 303–304 | Disconnect grace and encoding profiles | Platform-specific reconnect/transcode validation |
+| 401–402 | Adaptive YouTube polling and signed Kick/X/Twitch handlers | Provider quota dashboards and webhook fleet soak |
+| 403 | Twitch/Kick/YouTube outbound adapters and loop prevention | Provider bot credential provisioning and end-to-end relay tests |
+| 501 | Persistent monthly quotas plus generic, Stripe, and LemonSqueezy webhooks | Production account/customer lifecycle integration |
+| 502 | Tenant metrics, Prometheus scrape, structured tracing spans | Collector deployment and export configuration |
+| 503 | Global and tenant emergency-stop endpoints | Incident-runbook and authorization review |
