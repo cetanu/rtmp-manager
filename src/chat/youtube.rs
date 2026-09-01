@@ -33,6 +33,7 @@ static SHORT_URL_REGEX: LazyLock<Regex> =
 #[derive(Debug, Clone)]
 pub struct YouTubeChatConfig {
     pub target: YouTubeChatTarget,
+    pub api_key: Option<String>,
     pub min_poll_interval: Duration,
     pub adaptive_polling: bool,
 }
@@ -74,7 +75,7 @@ pub async fn run(client: Client, chat: ChatHandle, config: YouTubeChatConfig) {
             None,
             None,
         );
-        match resolve_live_chat_session(&client, &config.target).await {
+        match resolve_live_chat_session(&client, &config.target, config.api_key.as_deref()).await {
             Ok(session) => {
                 chat.update_youtube_status(
                     "connected",
@@ -163,7 +164,9 @@ pub async fn run(client: Client, chat: ChatHandle, config: YouTubeChatConfig) {
                 tracing::warn!("{detail}");
                 chat.update_youtube_status("resolving", detail, None, None);
                 tokio::time::sleep(Duration::from_secs(5)).await;
-                match resolve_live_chat_session(&client, &config.target).await {
+                match resolve_live_chat_session(&client, &config.target, config.api_key.as_deref())
+                    .await
+                {
                     Ok(new_session) => {
                         session = new_session;
                     }
@@ -218,11 +221,12 @@ pub async fn send_message(client: &Client, live_chat_id: &str, text: &str) -> Re
 async fn resolve_live_chat_session(
     client: &Client,
     target: &YouTubeChatTarget,
+    api_key: Option<&str>,
 ) -> Result<LiveChatSession> {
     match target {
         YouTubeChatTarget::LiveChat(chat_id) => {
             if let Some(video_id) = extract_video_id(chat_id) {
-                bootstrap_live_chat_session(client, &video_id).await
+                bootstrap_live_chat_session(client, &video_id, api_key).await
             } else {
                 Ok(LiveChatSession {
                     api_key: DEFAULT_INNERTUBE_API_KEY.to_string(),
@@ -234,11 +238,11 @@ async fn resolve_live_chat_session(
         YouTubeChatTarget::Video(video_input) => {
             let video_id = extract_video_id(video_input)
                 .ok_or_else(|| anyhow::anyhow!("Invalid YouTube video ID or URL: {video_input}"))?;
-            bootstrap_live_chat_session(client, &video_id).await
+            bootstrap_live_chat_session(client, &video_id, api_key).await
         }
         YouTubeChatTarget::Channel(channel_input) => {
             let video_id = resolve_channel_live_video(client, channel_input).await?;
-            bootstrap_live_chat_session(client, &video_id).await
+            bootstrap_live_chat_session(client, &video_id, api_key).await
         }
     }
 }
@@ -318,7 +322,11 @@ async fn resolve_channel_live_video(client: &Client, channel_input: &str) -> Res
     bail!("The selected YouTube channel has no active live stream")
 }
 
-async fn bootstrap_live_chat_session(client: &Client, video_id: &str) -> Result<LiveChatSession> {
+async fn bootstrap_live_chat_session(
+    client: &Client,
+    video_id: &str,
+    configured_api_key: Option<&str>,
+) -> Result<LiveChatSession> {
     let url = format!("https://www.youtube.com/live_chat?v={video_id}");
     let response = client
         .get(&url)
@@ -335,11 +343,7 @@ async fn bootstrap_live_chat_session(client: &Client, video_id: &str) -> Result<
         .await
         .context("Failed to read YouTube live chat HTML response")?;
 
-    let api_key = API_KEY_REGEX
-        .captures(&body)
-        .and_then(|c| c.get(1))
-        .map(|m| m.as_str().to_string())
-        .unwrap_or_else(|| DEFAULT_INNERTUBE_API_KEY.to_string());
+    let api_key = select_api_key(&body, configured_api_key);
 
     let initial_data_raw = YT_INITIAL_DATA_REGEX
         .captures(&body)
@@ -372,6 +376,19 @@ async fn bootstrap_live_chat_session(client: &Client, video_id: &str) -> Result<
         continuation_token,
         video_id: video_id.to_string(),
     })
+}
+
+fn select_api_key(body: &str, configured_api_key: Option<&str>) -> String {
+    configured_api_key
+        .filter(|key| !key.trim().is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            API_KEY_REGEX
+                .captures(body)
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str().to_string())
+        })
+        .unwrap_or_else(|| DEFAULT_INNERTUBE_API_KEY.to_string())
 }
 
 struct InnerTubeFetchResult {
@@ -853,5 +870,12 @@ mod tests {
             parse_continuations(&continuations).expect("should extract continuation");
         assert_eq!(token, "token_abc123");
         assert_eq!(timeout, Some(4500));
+    }
+
+    #[test]
+    fn configured_api_key_takes_precedence_over_scraped_key() {
+        let body = r#"<script>"INNERTUBE_API_KEY":"scraped-key"</script>"#;
+        assert_eq!(select_api_key(body, Some("tenant-key")), "tenant-key");
+        assert_eq!(select_api_key(body, Some(" ")), "scraped-key");
     }
 }

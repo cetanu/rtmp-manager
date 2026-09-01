@@ -565,6 +565,7 @@ impl ChatActor {
             handle_clone,
             YouTubeChatConfig {
                 target,
+                api_key: chat.youtube_api_key.clone(),
                 min_poll_interval: Duration::from_secs(chat.youtube_min_poll_interval_secs),
                 adaptive_polling: chat.youtube_adaptive_polling,
             },
