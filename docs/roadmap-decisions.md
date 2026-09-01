@@ -85,6 +85,8 @@
   takes precedence over the public browser key discovered during chat-page
   bootstrap. The browser key remains the explicit fallback for installations
   that do not provide a tenant credential.
+- Poll requests use independent bounded semaphores per API key, preventing one
+  tenant's credential budget from serializing unrelated tenants.
 
 ## GOAL-403: chat relaying
 
