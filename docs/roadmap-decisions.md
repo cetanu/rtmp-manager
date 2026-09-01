@@ -68,6 +68,13 @@
 - LemonSqueezy has a dedicated `/api/billing/lemonsqueezy` adapter using its
   raw-body `X-Signature` HMAC and `meta.custom_data` tenant metadata.
 
+## GOAL-401: YouTube quota partitioning
+
+- Each tenant's encrypted YouTube API key is passed to the polling worker and
+  takes precedence over the public browser key discovered during chat-page
+  bootstrap. The browser key remains the explicit fallback for installations
+  that do not provide a tenant credential.
+
 ## GOAL-403: chat relaying
 
 - The first outbound adapter is Twitch IRC, configured with
