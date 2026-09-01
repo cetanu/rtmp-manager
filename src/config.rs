@@ -655,14 +655,16 @@ impl ConfigStore {
             .fetch_optional(self.database.pool())
             .await?;
         data.map(|data| {
-            serde_json::from_str(&data).context("Failed to deserialize stored configuration")
+            let plaintext =
+                crate::crypto::decrypt(&data).context("Failed to decrypt stored configuration")?;
+            serde_json::from_str(&plaintext).context("Failed to deserialize stored configuration")
         })
         .transpose()
     }
 
     pub async fn save(&self, config: &AppConfig) -> Result<()> {
         config.validate()?;
-        let data = serde_json::to_string(config)?;
+        let data = crate::crypto::encrypt(&serde_json::to_string(config)?)?;
         sqlx::query(
             "INSERT INTO app_config (id, data) VALUES ($1, $2) \
              ON CONFLICT (id) DO UPDATE SET data = excluded.data",

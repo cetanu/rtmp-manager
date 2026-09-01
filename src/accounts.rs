@@ -319,7 +319,7 @@ impl AccountRepository {
         )
         .bind(stream_key_digest(&state))
         .bind(provider)
-        .bind(verifier)
+        .bind(crate::crypto::encrypt(verifier)?)
         .bind(i64::try_from(now_unix_secs() + 600)?)
         .execute(self.database.pool())
         .await?;
@@ -342,7 +342,9 @@ impl AccountRepository {
             .execute(&mut *transaction)
             .await?;
         transaction.commit().await?;
-        Ok(verifier)
+        verifier
+            .map(|value| crate::crypto::decrypt(&value))
+            .transpose()
     }
 }
 

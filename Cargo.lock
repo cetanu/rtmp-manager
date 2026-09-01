@@ -2127,6 +2127,7 @@ dependencies = [
 name = "rtmp-proxy"
 version = "0.3.5"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "argon2",
  "aws-lc-rs",

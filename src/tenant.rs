@@ -108,9 +108,10 @@ impl TenantRepository {
         };
         let active: i64 = row.try_get("active")?;
         let max_concurrent_streams: i64 = row.try_get("max_concurrent_streams")?;
-        let notifications: String = row.try_get("notifications")?;
-        let chat: String = row.try_get("chat")?;
-        let overlay: String = row.try_get("overlay")?;
+        let notifications: String =
+            crate::crypto::decrypt(&row.try_get::<String, _>("notifications")?)?;
+        let chat: String = crate::crypto::decrypt(&row.try_get::<String, _>("chat")?)?;
+        let overlay: String = crate::crypto::decrypt(&row.try_get::<String, _>("overlay")?)?;
         let target_data: Vec<String> = sqlx::query_scalar(
             "SELECT config FROM tenant_targets WHERE tenant_id = $1 ORDER BY position",
         )
@@ -132,6 +133,7 @@ impl TenantRepository {
             targets: target_data
                 .into_iter()
                 .map(|target| {
+                    let target = crate::crypto::decrypt(&target)?;
                     serde_json::from_str(&target).context("Tenant target configuration is invalid")
                 })
                 .collect::<Result<_>>()?,
@@ -144,7 +146,8 @@ impl TenantRepository {
         }
         let ingest_digest =
             (!definition.stream_key.is_empty()).then(|| stream_key_digest(definition.stream_key));
-        let notifications = serde_json::to_string(definition.notifications)?;
+        let notifications =
+            crate::crypto::encrypt(&serde_json::to_string(definition.notifications)?)?;
         let mut transaction = self.database.pool().begin().await?;
         sqlx::query(
             "INSERT INTO tenants \
@@ -166,8 +169,8 @@ impl TenantRepository {
         .bind(i64::from(definition.active))
         .bind(i64::try_from(definition.max_concurrent_streams)?)
         .bind(notifications)
-        .bind(serde_json::to_string(definition.chat)?)
-        .bind(serde_json::to_string(definition.overlay)?)
+        .bind(crate::crypto::encrypt(&serde_json::to_string(definition.chat)?)?)
+        .bind(crate::crypto::encrypt(&serde_json::to_string(definition.overlay)?)?)
         .bind(
             (!definition.overlay.key.is_empty())
                 .then(|| stream_key_digest(&definition.overlay.key)),
@@ -187,7 +190,7 @@ impl TenantRepository {
             .bind(target_id)
             .bind(definition.id.as_str())
             .bind(i64::try_from(position)?)
-            .bind(serde_json::to_string(target)?)
+            .bind(crate::crypto::encrypt(&serde_json::to_string(target)?)?)
             .execute(&mut *transaction)
             .await?;
         }
@@ -207,9 +210,9 @@ impl TenantRepository {
         let updated = sqlx::query(
             "UPDATE tenants SET notifications = $1, chat = $2, overlay = $3, overlay_key_digest = $4 WHERE id = $5",
         )
-        .bind(serde_json::to_string(notifications)?)
-        .bind(serde_json::to_string(chat)?)
-        .bind(serde_json::to_string(overlay)?)
+        .bind(crate::crypto::encrypt(&serde_json::to_string(notifications)?)?)
+        .bind(crate::crypto::encrypt(&serde_json::to_string(chat)?)?)
+        .bind(crate::crypto::encrypt(&serde_json::to_string(overlay)?)?)
         .bind((!overlay.key.is_empty()).then(|| stream_key_digest(&overlay.key)))
         .bind(tenant_id.as_str())
         .execute(&mut *transaction)
@@ -228,7 +231,7 @@ impl TenantRepository {
             .bind(format!("{}:{position}", tenant_id.as_str()))
             .bind(tenant_id.as_str())
             .bind(i64::try_from(position)?)
-            .bind(serde_json::to_string(target)?)
+            .bind(crate::crypto::encrypt(&serde_json::to_string(target)?)?)
             .execute(&mut *transaction)
             .await?;
         }

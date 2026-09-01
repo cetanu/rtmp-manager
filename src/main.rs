@@ -1,6 +1,7 @@
 mod accounts;
 mod chat;
 mod config;
+mod crypto;
 mod database;
 mod embedded_assets;
 mod log_buffer;
