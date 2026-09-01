@@ -66,6 +66,7 @@ pub struct StreamActor {
     preview_dir: PathBuf,
     staged: HashMap<String, StagedStream>,
     active_relays: HashMap<String, Vec<RelayProcess>>,
+    relay_targets: HashMap<String, (TenantId, Vec<TargetConfig>)>,
     listen_port: u16,
     http_client: Client,
     tenants: TenantRepository,
@@ -286,6 +287,9 @@ impl StreamActor {
             NotificationDispatcher::new(&tenant.notifications, self.http_client.clone());
 
         let source_url = format!("rtmp://127.0.0.1:{}/live/{stream_key}", self.listen_port);
+        if let Some(relays) = self.active_relays.remove(&stream_key) {
+            cancel_relays(relays).await;
+        }
         let mut relays = Vec::new();
         for target in active_targets {
             relays.push(self.relay_executor.spawn(
@@ -296,6 +300,18 @@ impl StreamActor {
         }
 
         self.active_relays.insert(stream_key, relays);
+        self.relay_targets.insert(
+            stream.stream_key.clone(),
+            (
+                tenant_id.clone(),
+                tenant
+                    .targets
+                    .iter()
+                    .filter(|target| target.enabled)
+                    .cloned()
+                    .collect(),
+            ),
+        );
         self.update_status();
 
         tokio::spawn(async move {
@@ -327,6 +343,19 @@ impl StreamActor {
     async fn handle_mark_unpublished(&mut self, stream_key: &str) {
         if let Some(stream) = self.staged.get_mut(stream_key) {
             stream.published = false;
+            if let Some((tenant_id, targets)) = self.relay_targets.get(stream_key).cloned() {
+                if let Some(relays) = self.active_relays.remove(stream_key) {
+                    cancel_relays(relays).await;
+                }
+                let standby = targets
+                    .into_iter()
+                    .map(|target| {
+                        self.relay_executor
+                            .spawn_standby(tenant_id.as_str().to_owned(), target)
+                    })
+                    .collect();
+                self.active_relays.insert(stream_key.to_owned(), standby);
+            }
             self.update_status();
         }
     }
@@ -352,6 +381,7 @@ impl StreamActor {
         if let Some(relays) = self.active_relays.remove(stream_key) {
             cancel_relays(relays).await;
         }
+        self.relay_targets.remove(stream_key);
         self.update_status();
     }
 
@@ -487,6 +517,7 @@ impl StreamHandle {
             preview_dir,
             staged: HashMap::new(),
             active_relays: HashMap::new(),
+            relay_targets: HashMap::new(),
             listen_port,
             http_client,
             tenants,

@@ -49,6 +49,7 @@ pub struct RelayProcess {
 
 pub trait RelayExecutor: Send + Sync {
     fn spawn(&self, tenant_id: String, source_url: String, target: TargetConfig) -> RelayProcess;
+    fn spawn_standby(&self, tenant_id: String, target: TargetConfig) -> RelayProcess;
 }
 
 #[derive(Clone)]
@@ -73,8 +74,8 @@ struct RelayIntent {
     kind: String,
     job_id: String,
     tenant_id: String,
-    source_url: String,
-    target: TargetConfig,
+    source_url: Option<String>,
+    target: Option<TargetConfig>,
 }
 
 fn decode_relay_intent(item: &redis::streams::StreamId) -> anyhow::Result<RelayIntent> {
@@ -93,12 +94,20 @@ async fn apply_relay_intent(intent: RelayIntent, active: &mut HashMap<String, Re
             let _ = process.task.await;
         }
     } else if intent.kind == "start" {
+        let Some(source_url) = intent.source_url else {
+            return;
+        };
+        let Some(target) = intent.target else { return };
         let process = spawn_relay(
             Arc::new(Metrics::default()),
             intent.tenant_id,
-            intent.source_url,
-            intent.target,
+            source_url,
+            target,
         );
+        active.insert(intent.job_id, process);
+    } else if intent.kind == "standby" {
+        let Some(target) = intent.target else { return };
+        let process = spawn_standby_relay(Arc::new(Metrics::default()), intent.tenant_id, target);
         active.insert(intent.job_id, process);
     }
 }
@@ -226,6 +235,46 @@ impl RelayExecutor for RedisRelayExecutor {
         });
         RelayProcess { cancel, task }
     }
+
+    fn spawn_standby(&self, tenant_id: String, target: TargetConfig) -> RelayProcess {
+        let (cancel, mut cancel_rx) = watch::channel(false);
+        let url = self.url.clone();
+        let task = tokio::spawn(async move {
+            let Ok(client) = redis::Client::open(url) else {
+                return;
+            };
+            let Ok(mut connection) = client.get_multiplexed_async_connection().await else {
+                return;
+            };
+            let job_id = format!(
+                "{}-{}-{}",
+                std::process::id(),
+                crate::util::now_unix_ms(),
+                RELAY_JOB_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+            );
+            let payload = serde_json::json!({
+                "kind": "standby", "job_id": job_id, "tenant_id": tenant_id, "target": target
+            })
+            .to_string();
+            let _ = redis::cmd("XADD")
+                .arg("rtmp-manager:relay-intents")
+                .arg("*")
+                .arg("payload")
+                .arg(payload)
+                .query_async::<String>(&mut connection)
+                .await;
+            let _ = cancel_rx.changed().await;
+            let stop = serde_json::json!({ "kind": "stop", "job_id": job_id }).to_string();
+            let _ = redis::cmd("XADD")
+                .arg("rtmp-manager:relay-intents")
+                .arg("*")
+                .arg("payload")
+                .arg(stop)
+                .query_async::<String>(&mut connection)
+                .await;
+        });
+        RelayProcess { cancel, task }
+    }
 }
 
 impl LocalRelayExecutor {
@@ -237,6 +286,10 @@ impl LocalRelayExecutor {
 impl RelayExecutor for LocalRelayExecutor {
     fn spawn(&self, tenant_id: String, source_url: String, target: TargetConfig) -> RelayProcess {
         spawn_relay(Arc::clone(&self.metrics), tenant_id, source_url, target)
+    }
+
+    fn spawn_standby(&self, tenant_id: String, target: TargetConfig) -> RelayProcess {
+        spawn_standby_relay(Arc::clone(&self.metrics), tenant_id, target)
     }
 }
 
@@ -251,6 +304,82 @@ pub fn spawn_relay(
         metrics, tenant_id, source_url, target, cancel_rx,
     ));
     RelayProcess { cancel, task }
+}
+
+fn spawn_standby_relay(
+    metrics: Arc<Metrics>,
+    tenant_id: String,
+    target: TargetConfig,
+) -> RelayProcess {
+    let (cancel, mut cancel_rx) = watch::channel(false);
+    let destination = target_destination(&target);
+    let target_name = target.name.clone();
+    let task = tokio::spawn(async move {
+        let bitrate = metrics.register_target(tenant_id.clone(), target_name.clone());
+        let width = target.encoding.width.unwrap_or(1280);
+        let height = target.encoding.height.unwrap_or(720);
+        let encoder = target_encoder(&target);
+        let args = vec![
+            "-loglevel".into(),
+            "warning".into(),
+            "-re".into(),
+            "-f".into(),
+            "lavfi".into(),
+            "-i".into(),
+            format!("color=c=black:s={width}x{height}:r=30"),
+            "-f".into(),
+            "lavfi".into(),
+            "-i".into(),
+            "anullsrc=channel_layout=stereo:sample_rate=48000".into(),
+            "-c:v".into(),
+            encoder.into(),
+            "-preset".into(),
+            "veryfast".into(),
+            "-tune".into(),
+            "zerolatency".into(),
+            "-pix_fmt".into(),
+            "yuv420p".into(),
+            "-c:a".into(),
+            "aac".into(),
+            "-b:a".into(),
+            "128k".into(),
+            "-f".into(),
+            "flv".into(),
+            destination,
+        ];
+        let mut child = match ffmpeg_command(&args)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(error) => {
+                tracing::error!(tenant_id = %tenant_id, name = %target_name, %error, "Failed to start standby relay");
+                metrics.unregister_target(&tenant_id, &target_name);
+                return;
+            }
+        };
+        tokio::select! {
+            _ = cancel_rx.changed() => {
+                let _ = tokio::time::timeout(Duration::from_secs(5), child.kill()).await;
+            }
+            _ = child.wait() => {}
+        }
+        bitrate.update_from_ffmpeg(0);
+        metrics.unregister_target(&tenant_id, &target_name);
+    });
+    RelayProcess { cancel, task }
+}
+
+fn target_encoder(target: &TargetConfig) -> &'static str {
+    match target.encoding.hardware_encoder.as_deref() {
+        Some("nvenc") => "h264_nvenc",
+        Some("vaapi") => "h264_vaapi",
+        Some("qsv") => "h264_qsv",
+        Some("videotoolbox") => "h264_videotoolbox",
+        _ => "libx264",
+    }
 }
 
 const RELAY_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -510,13 +639,7 @@ fn relay_ffmpeg_args(source_url: &str, destination: &str, target: &TargetConfig)
     if target.encoding.mode == EncodingMode::Passthrough {
         args.extend(["-c", "copy"].into_iter().map(str::to_owned));
     } else {
-        let encoder = match target.encoding.hardware_encoder.as_deref() {
-            Some("nvenc") => "h264_nvenc",
-            Some("vaapi") => "h264_vaapi",
-            Some("qsv") => "h264_qsv",
-            Some("videotoolbox") => "h264_videotoolbox",
-            _ => "libx264",
-        };
+        let encoder = target_encoder(target);
         args.extend(
             [
                 "-c:v", encoder, "-preset", "veryfast", "-c:a", "aac", "-b:a", "128k", "-ar",
