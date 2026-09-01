@@ -16,11 +16,13 @@ const HISTORY_SECONDS: usize = 300;
 
 #[derive(Default)]
 pub struct TargetBitrate {
+    pub tenant_id: String,
     outbound_bps: AtomicU64,
 }
 
 #[derive(Clone, Serialize)]
 pub struct TargetBitrateSample {
+    pub tenant_id: String,
     pub name: String,
     pub outbound_bps: u64,
 }
@@ -45,17 +47,23 @@ impl Default for Metrics {
 }
 
 impl Metrics {
-    pub fn register_target(&self, name: String) -> Arc<TargetBitrate> {
-        let bitrate = Arc::new(TargetBitrate::default());
+    pub fn register_target(&self, tenant_id: String, name: String) -> Arc<TargetBitrate> {
+        let bitrate = Arc::new(TargetBitrate {
+            tenant_id: tenant_id.clone(),
+            ..Default::default()
+        });
         self.target_bitrates
             .write()
             .unwrap()
-            .insert(name, Arc::clone(&bitrate));
+            .insert(format!("{tenant_id}:{name}"), Arc::clone(&bitrate));
         bitrate
     }
 
-    pub fn unregister_target(&self, name: &str) {
-        self.target_bitrates.write().unwrap().remove(name);
+    pub fn unregister_target(&self, tenant_id: &str, name: &str) {
+        self.target_bitrates
+            .write()
+            .unwrap()
+            .remove(&format!("{tenant_id}:{name}"));
     }
 
     pub fn current_target_bitrates(&self) -> Vec<TargetBitrateSample> {
@@ -64,8 +72,11 @@ impl Metrics {
             .read()
             .unwrap()
             .iter()
-            .map(|(name, bitrate)| TargetBitrateSample {
-                name: name.clone(),
+            .map(|(key, bitrate)| TargetBitrateSample {
+                tenant_id: bitrate.tenant_id.clone(),
+                name: key
+                    .split_once(':')
+                    .map_or_else(|| key.clone(), |(_, name)| name.to_owned()),
                 outbound_bps: bitrate.outbound_bps.load(Ordering::Relaxed),
             })
             .collect::<Vec<_>>();

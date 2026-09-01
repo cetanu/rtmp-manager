@@ -15,11 +15,14 @@ pub struct RelayProcess {
 
 pub fn spawn_relay(
     metrics: Arc<Metrics>,
+    tenant_id: String,
     source_url: String,
     target: TargetConfig,
 ) -> RelayProcess {
     let (cancel, cancel_rx) = watch::channel(false);
-    let task = tokio::spawn(supervise_relay(metrics, source_url, target, cancel_rx));
+    let task = tokio::spawn(supervise_relay(
+        metrics, tenant_id, source_url, target, cancel_rx,
+    ));
     RelayProcess { cancel, task }
 }
 
@@ -125,11 +128,12 @@ pub fn run_direct_test(duration_secs: u64, targets: Vec<TargetConfig>) {
 
 async fn supervise_relay(
     metrics: Arc<Metrics>,
+    tenant_id: String,
     source_url: String,
     target: TargetConfig,
     mut cancel: watch::Receiver<bool>,
 ) {
-    let bitrate = metrics.register_target(target.name.clone());
+    let bitrate = metrics.register_target(tenant_id.clone(), target.name.clone());
     let destination = target_destination(&target);
     let secrets = [
         source_url.clone(),
@@ -257,7 +261,7 @@ async fn supervise_relay(
         retry_seconds = (retry_seconds * 2).min(30);
     }
 
-    metrics.unregister_target(&target.name);
+    metrics.unregister_target(&tenant_id, &target.name);
     tracing::info!(name = %target.name, "Stream target relay supervisor stopped");
 }
 

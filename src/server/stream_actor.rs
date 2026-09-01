@@ -266,6 +266,7 @@ impl StreamActor {
         for target in active_targets {
             relays.push(spawn_relay(
                 Arc::clone(&self.metrics),
+                tenant_id.as_str().to_owned(),
                 source_url.clone(),
                 target,
             ));
