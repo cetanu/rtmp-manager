@@ -381,6 +381,15 @@ impl StreamActor {
 
     async fn cleanup(&mut self) {
         for (_, mut stream) in self.staged.drain() {
+            let _ = self
+                .usage
+                .record_seconds(
+                    stream.tenant_id.as_str(),
+                    &stream.stream_key,
+                    stream.started_at_unix,
+                    crate::util::now_unix_secs() as i64,
+                )
+                .await;
             let _ = stream.preview_process.kill().await;
         }
         for (_, relays) in self.active_relays.drain() {
