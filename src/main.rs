@@ -1,4 +1,5 @@
 mod accounts;
+mod billing;
 mod chat;
 mod config;
 mod crypto;

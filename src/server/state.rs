@@ -47,13 +47,14 @@ impl AppHandle {
     ) -> Result<Self> {
         let accounts = AccountRepository::new(database.clone());
         let tenants = TenantRepository::new(database.clone());
-        let chat = ChatHub::new(database, http_client.clone());
+        let chat = ChatHub::new(database.clone(), http_client.clone());
 
         let stream = StreamHandle::spawn(
             listen_port,
             Arc::clone(&metrics),
             http_client.clone(),
             tenants.clone(),
+            crate::billing::UsageRepository::new(database.clone()),
         )
         .await?;
         let handle = Self {

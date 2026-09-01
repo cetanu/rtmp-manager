@@ -1,3 +1,4 @@
+use crate::billing::UsageRepository;
 use crate::config::TargetConfig;
 use crate::metrics::Metrics;
 use crate::notifications::{NotificationDispatcher, NotificationTarget};
@@ -24,6 +25,7 @@ struct StagedStream {
     preview_process: Child,
     preview_failed: bool,
     published: bool,
+    started_at_unix: i64,
 }
 
 pub enum StreamCommand {
@@ -62,6 +64,7 @@ pub struct StreamActor {
     metrics: Arc<Metrics>,
     http_client: Client,
     tenants: TenantRepository,
+    usage: UsageRepository,
     status_tx: watch::Sender<Arc<HashMap<TenantId, StreamStatus>>>,
 }
 
@@ -164,6 +167,13 @@ impl StreamActor {
         ) {
             bail!("Tenant already has the maximum number of active streams");
         }
+        if !self
+            .usage
+            .begin_stream(tenant.id.as_str(), crate::util::now_unix_secs() as i64)
+            .await?
+        {
+            bail!("Tenant monthly stream quota has been exhausted");
+        }
         if self.staged.contains_key(&stream_key) {
             bail!("This ingest stream is already active");
         }
@@ -224,6 +234,7 @@ impl StreamActor {
                 preview_process,
                 preview_failed: false,
                 published: false,
+                started_at_unix: crate::util::now_unix_secs() as i64,
             },
         );
 
@@ -312,6 +323,14 @@ impl StreamActor {
 
     async fn handle_end_stream(&mut self, stream_key: &str) {
         if let Some(mut stream) = self.staged.remove(stream_key) {
+            let _ = self
+                .usage
+                .record_seconds(
+                    stream.tenant_id.as_str(),
+                    stream.started_at_unix,
+                    crate::util::now_unix_secs() as i64,
+                )
+                .await;
             let _ = stream.preview_process.kill().await;
             if let Err(error) = tokio::fs::remove_dir_all(&stream.preview_dir).await
                 && error.kind() != std::io::ErrorKind::NotFound
@@ -399,6 +418,7 @@ impl StreamHandle {
         metrics: Arc<Metrics>,
         http_client: Client,
         tenants: TenantRepository,
+        usage: UsageRepository,
     ) -> Result<Self> {
         let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let preview_dir =
@@ -422,6 +442,7 @@ impl StreamHandle {
             metrics,
             http_client,
             tenants,
+            usage,
             status_tx,
         };
 
