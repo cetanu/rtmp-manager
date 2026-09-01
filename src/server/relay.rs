@@ -315,7 +315,11 @@ fn spawn_standby_relay(
     let destination = target_destination(&target);
     let target_name = target.name.clone();
     let task = tokio::spawn(async move {
-        let bitrate = metrics.register_target(tenant_id.clone(), target_name.clone());
+        let bitrate = metrics.register_target(
+            tenant_id.clone(),
+            target_name.clone(),
+            target_codec(&target),
+        );
         let args = standby_ffmpeg_args(&target, &destination);
         loop {
             if *cancel_rx.borrow() {
@@ -524,7 +528,11 @@ async fn supervise_relay(
         target = %target.name,
     );
     let _span_guard = relay_span.enter();
-    let bitrate = metrics.register_target(tenant_id.clone(), target.name.clone());
+    let bitrate = metrics.register_target(
+        tenant_id.clone(),
+        target.name.clone(),
+        target_codec(&target),
+    );
     let destination = target_destination(&target);
     let secrets = [
         source_url.clone(),
@@ -649,6 +657,18 @@ async fn supervise_relay(
 
     metrics.unregister_target(&tenant_id, &target.name);
     tracing::info!(tenant_id = %tenant_id, name = %target.name, "Stream target relay supervisor stopped");
+}
+
+fn target_codec(target: &TargetConfig) -> String {
+    target
+        .encoding
+        .hardware_encoder
+        .clone()
+        .or_else(|| match target.encoding.mode {
+            EncodingMode::Cpu => Some("libx264".to_owned()),
+            EncodingMode::Passthrough => Some("copy".to_owned()),
+        })
+        .unwrap_or_else(|| "copy".to_owned())
 }
 
 fn relay_ffmpeg_args(source_url: &str, destination: &str, target: &TargetConfig) -> Vec<String> {

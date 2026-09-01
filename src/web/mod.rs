@@ -288,21 +288,24 @@ async fn get_metrics_prometheus(cx: &Cx) -> Result<topcoat::router::Response> {
         .filter(|sample| sample.tenant_id == tenant_id)
     {
         output.push_str(&format!(
-            "rtmp_manager_target_outbound_bps{{tenant_id=\"{}\",target=\"{}\"}} {}\n",
+            "rtmp_manager_target_outbound_bps{{tenant_id=\"{}\",target=\"{}\",codec=\"{}\"}} {}\n",
             prometheus_label(tenant_id),
             prometheus_label(&sample.name),
+            prometheus_label(&sample.codec),
             sample.outbound_bps
         ));
         output.push_str(&format!(
-            "rtmp_manager_target_dropped_frames{{tenant_id=\"{}\",target=\"{}\"}} {}\n",
+            "rtmp_manager_target_dropped_frames{{tenant_id=\"{}\",target=\"{}\",codec=\"{}\"}} {}\n",
             prometheus_label(tenant_id),
             prometheus_label(&sample.name),
+            prometheus_label(&sample.codec),
             sample.dropped_frames
         ));
         output.push_str(&format!(
-            "rtmp_manager_target_reconnections_total{{tenant_id=\"{}\",target=\"{}\"}} {}\n",
+            "rtmp_manager_target_reconnections_total{{tenant_id=\"{}\",target=\"{}\",codec=\"{}\"}} {}\n",
             prometheus_label(tenant_id),
             prometheus_label(&sample.name),
+            prometheus_label(&sample.codec),
             sample.reconnections
         ));
     }

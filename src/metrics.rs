@@ -17,6 +17,7 @@ const HISTORY_SECONDS: usize = 300;
 #[derive(Default)]
 pub struct TargetBitrate {
     pub tenant_id: String,
+    pub codec: String,
     outbound_bps: AtomicU64,
     dropped_frames: AtomicU64,
     reconnections: AtomicU64,
@@ -25,6 +26,7 @@ pub struct TargetBitrate {
 #[derive(Clone, Serialize)]
 pub struct TargetBitrateSample {
     pub tenant_id: String,
+    pub codec: String,
     pub name: String,
     pub outbound_bps: u64,
     pub dropped_frames: u64,
@@ -51,9 +53,15 @@ impl Default for Metrics {
 }
 
 impl Metrics {
-    pub fn register_target(&self, tenant_id: String, name: String) -> Arc<TargetBitrate> {
+    pub fn register_target(
+        &self,
+        tenant_id: String,
+        name: String,
+        codec: String,
+    ) -> Arc<TargetBitrate> {
         let bitrate = Arc::new(TargetBitrate {
             tenant_id: tenant_id.clone(),
+            codec,
             ..Default::default()
         });
         self.target_bitrates
@@ -78,6 +86,7 @@ impl Metrics {
             .iter()
             .map(|(key, bitrate)| TargetBitrateSample {
                 tenant_id: bitrate.tenant_id.clone(),
+                codec: bitrate.codec.clone(),
                 name: key
                     .split_once(':')
                     .map_or_else(|| key.clone(), |(_, name)| name.to_owned()),
@@ -155,7 +164,7 @@ mod tests {
     #[test]
     fn target_qos_counters_are_exported_in_samples() {
         let metrics = Metrics::default();
-        let target = metrics.register_target("tenant-a".into(), "Twitch".into());
+        let target = metrics.register_target("tenant-a".into(), "Twitch".into(), "h264".into());
         target.update_dropped_frames(7);
         target.record_reconnection();
         metrics.record_sample();
@@ -163,5 +172,6 @@ mod tests {
         let sample = &metrics.history()[0].targets[0];
         assert_eq!(sample.dropped_frames, 7);
         assert_eq!(sample.reconnections, 1);
+        assert_eq!(sample.codec, "h264");
     }
 }
