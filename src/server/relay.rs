@@ -412,7 +412,7 @@ fn standby_ffmpeg_args(target: &TargetConfig, destination: &str) -> Vec<String> 
     args
 }
 
-const RELAY_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(15);
+const RELAY_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub async fn cancel_relays(relays: Vec<RelayProcess>) {
     for relay in relays {
@@ -603,7 +603,7 @@ async fn supervise_relay(
             })
         });
 
-        let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
+        let mut heartbeat = tokio::time::interval(Duration::from_secs(1));
         let exit = loop {
             tokio::select! {
                 changed = cancel.changed() => {
