@@ -253,6 +253,8 @@ pub fn spawn_relay(
     RelayProcess { cancel, task }
 }
 
+const RELAY_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(15);
+
 pub async fn cancel_relays(relays: Vec<RelayProcess>) {
     for relay in relays {
         let _ = relay.cancel.send(true);
@@ -435,11 +437,14 @@ async fn supervise_relay(
         };
         tracing::info!(tenant_id = %tenant_id, name = %target.name, attempt, "Stream target relay process started");
 
+        let last_progress = Arc::new(AtomicU64::new(crate::util::now_unix_ms()));
         let stdout_task = child.stdout.take().map(|stdout| {
             let bitrate = Arc::clone(&bitrate);
+            let last_progress = Arc::clone(&last_progress);
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
+                    last_progress.store(crate::util::now_unix_ms(), Ordering::Relaxed);
                     if let Some(value) = line.strip_prefix("bitrate=")
                         && let Some(bps) = parse_ffmpeg_bitrate(value)
                     {
@@ -462,15 +467,27 @@ async fn supervise_relay(
             })
         });
 
-        let exit = tokio::select! {
-            changed = cancel.changed() => {
-                if tokio::time::timeout(Duration::from_secs(5), child.kill()).await.is_err() {
-                    let _ = child.start_kill();
+        let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
+        let exit = loop {
+            tokio::select! {
+                changed = cancel.changed() => {
+                    if tokio::time::timeout(Duration::from_secs(5), child.kill()).await.is_err() {
+                        let _ = child.start_kill();
+                    }
+                    let _ = changed;
+                    break None;
                 }
-                let _ = changed;
-                None
+                result = child.wait() => break Some(result),
+                _ = heartbeat.tick() => {
+                    let elapsed = crate::util::now_unix_ms()
+                        .saturating_sub(last_progress.load(Ordering::Relaxed));
+                    if elapsed >= RELAY_HEARTBEAT_TIMEOUT.as_millis() as u64 {
+                        tracing::error!(tenant_id = %tenant_id, name = %target.name, elapsed_ms = elapsed, "Relay heartbeat timed out; terminating FFmpeg");
+                        let _ = child.start_kill();
+                        break Some(child.wait().await);
+                    }
+                }
             }
-            result = child.wait() => Some(result),
         };
         bitrate.update_from_ffmpeg(0);
         if let Some(task) = stdout_task {
