@@ -40,9 +40,11 @@ pub enum StreamCommand {
         tenant_id: TenantId,
         respond_to: oneshot::Sender<Result<()>>,
     },
-    EndStream {
+    EndStreamIfUnpublished {
         stream_key: String,
-        respond_to: Option<oneshot::Sender<()>>,
+    },
+    MarkUnpublished {
+        stream_key: String,
     },
     RunTestStream {
         duration_secs: u64,
@@ -88,11 +90,13 @@ impl StreamActor {
                             let res = self.handle_stop_publishing(&tenant_id).await;
                             let _ = respond_to.send(res);
                         }
-                        StreamCommand::EndStream { stream_key, respond_to } => {
-                            self.handle_end_stream(&stream_key).await;
-                            if let Some(respond_to) = respond_to {
-                                let _ = respond_to.send(());
+                        StreamCommand::EndStreamIfUnpublished { stream_key } => {
+                            if self.staged.get(&stream_key).is_some_and(|stream| !stream.published) {
+                                self.handle_end_stream(&stream_key).await;
                             }
+                        }
+                        StreamCommand::MarkUnpublished { stream_key } => {
+                            self.handle_mark_unpublished(&stream_key).await;
                         }
                         StreamCommand::RunTestStream { duration_secs, targets } => {
                             run_direct_test(duration_secs, targets);
@@ -296,6 +300,13 @@ impl StreamActor {
         Ok(())
     }
 
+    async fn handle_mark_unpublished(&mut self, stream_key: &str) {
+        if let Some(stream) = self.staged.get_mut(stream_key) {
+            stream.published = false;
+            self.update_status();
+        }
+    }
+
     async fn handle_end_stream(&mut self, stream_key: &str) {
         if let Some(mut stream) = self.staged.remove(stream_key) {
             let _ = stream.preview_process.kill().await;
@@ -442,14 +453,20 @@ impl StreamHandle {
         rx.await.context("Stream actor dropped stop response")?
     }
 
-    pub async fn end_stream(&self, stream_key: &str) {
-        let _ = self
-            .sender
-            .send(StreamCommand::EndStream {
-                stream_key: stream_key.to_string(),
-                respond_to: None,
+    pub async fn grace_disconnect(&self, stream_key: &str) {
+        let key = stream_key.to_owned();
+        let sender = self.sender.clone();
+        let _ = sender
+            .send(StreamCommand::MarkUnpublished {
+                stream_key: key.clone(),
             })
             .await;
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            let _ = sender
+                .send(StreamCommand::EndStreamIfUnpublished { stream_key: key })
+                .await;
+        });
     }
 
     pub fn run_test_stream(&self, duration_secs: u64, targets: Vec<TargetConfig>) {

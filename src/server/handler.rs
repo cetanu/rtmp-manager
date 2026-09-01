@@ -62,7 +62,7 @@ impl RtmpHandler for ProxyHandler {
 
     async fn on_unpublish(&self, ctx: &StreamContext) {
         info!("Stream stopped publishing");
-        self.app.stream.end_stream(&ctx.stream_key).await;
+        self.app.stream.grace_disconnect(&ctx.stream_key).await;
     }
 
     async fn on_disconnect(&self, ctx: &SessionContext) {
