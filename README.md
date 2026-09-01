@@ -60,3 +60,6 @@ Keep the overlay URL private because its query key grants read access to chat.
 
 Authenticated operators can scrape tenant-scoped Prometheus metrics from
 `/api/metrics/prometheus`.
+
+Contributors can run the complete local formatting, test, and lint gates with
+`make verify`.
