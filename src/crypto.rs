@@ -7,15 +7,20 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Digest, Sha256};
 
 fn key() -> [u8; 32] {
-    let value = match std::env::var("MASTER_ENCRYPTION_KEY") {
-        Ok(value) => value,
-        Err(_) => std::env::var("MASTER_ENCRYPTION_KEY_FILE")
-            .ok()
-            .and_then(|path| std::fs::read_to_string(path).ok())
-            .unwrap_or_else(|| "rtmp-manager-development-key-change-me".to_owned()),
-    };
-    let value = value.trim();
+    let value = key_material(
+        std::env::var("MASTER_ENCRYPTION_KEY").ok().as_deref(),
+        std::env::var("MASTER_ENCRYPTION_KEY_FILE").ok().as_deref(),
+    );
     Sha256::digest(value.as_bytes()).into()
+}
+
+fn key_material(master_key: Option<&str>, key_file: Option<&str>) -> String {
+    let value = master_key
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+        .or_else(|| key_file.and_then(|path| std::fs::read_to_string(path).ok()))
+        .unwrap_or_else(|| "rtmp-manager-development-key-change-me".to_owned());
+    value.trim().to_owned()
 }
 
 pub fn encrypt(value: &str) -> Result<String> {
@@ -55,5 +60,16 @@ mod tests {
         let encrypted = encrypt("private-stream-key").unwrap();
         assert!(!encrypted.contains("private-stream-key"));
         assert_eq!(decrypt(&encrypted).unwrap(), "private-stream-key");
+    }
+
+    #[test]
+    fn key_file_is_used_only_when_env_key_is_absent() {
+        let path =
+            std::env::temp_dir().join(format!("rtmp-manager-key-{}", crate::util::now_unix_ms()));
+        std::fs::write(&path, b"file-key\n").unwrap();
+        let path = path.to_str().unwrap();
+        assert_eq!(key_material(None, Some(path)), "file-key");
+        assert_eq!(key_material(Some("env-key"), Some(path)), "env-key");
+        std::fs::remove_file(path).unwrap();
     }
 }
