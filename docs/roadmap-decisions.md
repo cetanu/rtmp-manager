@@ -75,6 +75,8 @@
   omitted, it generates a random key once and persists it in `/data` with
   restrictive permissions so first-run setup remains one-command while
   encrypted data survives restarts.
+- `MASTER_ENCRYPTION_KEY_FILE` is also supported for mounted secret files;
+  direct environment configuration takes precedence when both are present.
 
 ## GOAL-501: usage quotas
 

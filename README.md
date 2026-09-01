@@ -30,7 +30,8 @@ The `rtmp-manager-data` volume persists the SQLite database and generated
 encryption key. Set `MASTER_ENCRYPTION_KEY` to a strong, stable secret when
 you need externally managed key material; otherwise the container generates a
 random key once in the volume. The key encrypts destination stream keys and
-OAuth state at rest. On Linux, `RELAY_MAX_CPU_SECONDS` and
+OAuth state at rest. Secret managers can mount the key and set
+`MASTER_ENCRYPTION_KEY_FILE` instead. On Linux, `RELAY_MAX_CPU_SECONDS` and
 `RELAY_MAX_MEMORY_MB` optionally apply per-relay `prlimit` caps to FFmpeg
 workers. Set `HTTP_PORT`,
 `RTMP_PORT`, `SRT_PORT`, or `RUST_LOG` in the shell or a `.env` file to override
