@@ -18,6 +18,8 @@ const HISTORY_SECONDS: usize = 300;
 pub struct TargetBitrate {
     pub tenant_id: String,
     outbound_bps: AtomicU64,
+    dropped_frames: AtomicU64,
+    reconnections: AtomicU64,
 }
 
 #[derive(Clone, Serialize)]
@@ -25,6 +27,8 @@ pub struct TargetBitrateSample {
     pub tenant_id: String,
     pub name: String,
     pub outbound_bps: u64,
+    pub dropped_frames: u64,
+    pub reconnections: u64,
 }
 
 #[derive(Clone, Serialize)]
@@ -78,6 +82,8 @@ impl Metrics {
                     .split_once(':')
                     .map_or_else(|| key.clone(), |(_, name)| name.to_owned()),
                 outbound_bps: bitrate.outbound_bps.load(Ordering::Relaxed),
+                dropped_frames: bitrate.dropped_frames.load(Ordering::Relaxed),
+                reconnections: bitrate.reconnections.load(Ordering::Relaxed),
             })
             .collect::<Vec<_>>();
         samples.sort_by(|left, right| left.name.cmp(&right.name));
@@ -120,6 +126,14 @@ impl Metrics {
 impl TargetBitrate {
     pub fn update_from_ffmpeg(&self, bits_per_second: u64) {
         self.outbound_bps.store(bits_per_second, Ordering::Relaxed);
+    }
+
+    pub fn update_dropped_frames(&self, dropped_frames: u64) {
+        self.dropped_frames.store(dropped_frames, Ordering::Relaxed);
+    }
+
+    pub fn record_reconnection(&self) {
+        self.reconnections.fetch_add(1, Ordering::Relaxed);
     }
 }
 

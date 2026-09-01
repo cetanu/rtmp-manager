@@ -450,6 +450,11 @@ async fn supervise_relay(
                     {
                         bitrate.update_from_ffmpeg(bps);
                     }
+                    if let Some(value) = line.strip_prefix("drop_frames=")
+                        && let Ok(frames) = value.trim().parse::<u64>()
+                    {
+                        bitrate.update_dropped_frames(frames);
+                    }
                 }
             })
         });
@@ -500,6 +505,7 @@ async fn supervise_relay(
         let Some(exit) = exit else {
             break;
         };
+        bitrate.record_reconnection();
         match exit {
             Ok(status) => {
                 tracing::error!(tenant_id = %tenant_id, name = %target.name, %status, "Stream target relay disconnected")

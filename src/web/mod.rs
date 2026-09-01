@@ -272,6 +272,18 @@ async fn get_metrics_prometheus(cx: &Cx) -> Result<topcoat::router::Response> {
             prometheus_label(&sample.name),
             sample.outbound_bps
         ));
+        output.push_str(&format!(
+            "rtmp_manager_target_dropped_frames{{tenant_id=\"{}\",target=\"{}\"}} {}\n",
+            prometheus_label(tenant_id),
+            prometheus_label(&sample.name),
+            sample.dropped_frames
+        ));
+        output.push_str(&format!(
+            "rtmp_manager_target_reconnections_total{{tenant_id=\"{}\",target=\"{}\"}} {}\n",
+            prometheus_label(tenant_id),
+            prometheus_label(&sample.name),
+            sample.reconnections
+        ));
     }
     let mut response = topcoat::router::Response::new(topcoat::router::Body::from(output));
     response.headers_mut().insert(
