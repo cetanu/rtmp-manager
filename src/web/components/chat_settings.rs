@@ -30,6 +30,13 @@ pub async fn chat_settings(cx: &Cx) -> Result {
                                 value=(chat.twitch_channel.clone().unwrap_or_default())
                             })
                         )
+                        clearable_secret_field(
+                            control_id: "twitch_eventsub_secret",
+                            name: "chat[twitch_eventsub_secret]",
+                            label_text: "Twitch EventSub secret",
+                            empty_placeholder: "Required for tenant webhook verification",
+                            value: chat.twitch_eventsub_secret.clone().unwrap_or_default()
+                        )
                     </div>
 
                     <div class="grid gap-6 md:grid-cols-3">

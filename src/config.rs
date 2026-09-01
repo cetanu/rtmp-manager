@@ -204,6 +204,8 @@ pub struct ChatSettings {
     #[serde(default)]
     pub twitch_channel: Option<String>,
     #[serde(default)]
+    pub twitch_eventsub_secret: Option<String>,
+    #[serde(default)]
     pub youtube_api_key: Option<String>,
     #[serde(default)]
     pub youtube_live_chat_id: Option<String>,
@@ -261,6 +263,7 @@ impl Default for ChatSettings {
         Self {
             queue_capacity: default_chat_queue_capacity(),
             twitch_channel: None,
+            twitch_eventsub_secret: None,
             youtube_api_key: None,
             youtube_live_chat_id: None,
             youtube_video_id: None,
@@ -464,6 +467,11 @@ impl AppConfig {
                 queue_capacity: chat.queue_capacity.unwrap_or(config.chat.queue_capacity),
                 twitch_channel: non_empty(chat.twitch_channel)
                     .map(|channel| channel.trim_start_matches('#').to_ascii_lowercase()),
+                twitch_eventsub_secret: updated_secret(
+                    chat.twitch_eventsub_secret,
+                    chat.clear_twitch_eventsub_secret,
+                    config.chat.twitch_eventsub_secret,
+                ),
                 youtube_api_key: updated_secret(
                     chat.youtube_api_key,
                     chat.clear_youtube_api_key,
@@ -649,6 +657,9 @@ pub struct NotificationsForm {
 pub struct ChatForm {
     pub queue_capacity: Option<usize>,
     pub twitch_channel: Option<String>,
+    pub twitch_eventsub_secret: Option<String>,
+    #[serde(default)]
+    pub clear_twitch_eventsub_secret: bool,
     pub youtube_api_key: Option<String>,
     #[serde(default)]
     pub clear_youtube_api_key: bool,
