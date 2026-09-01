@@ -183,6 +183,9 @@
 - The `/admin/streams` page renders the cross-tenant status snapshot for
   administrators and links each tenant to its protected thumbnail endpoint;
   the existing admin middleware denies the page to ordinary users.
+- The authenticated navigation displays an Admin link only for administrator
+  sessions, keeping the cross-tenant view discoverable without exposing it to
+  ordinary users.
 
 ## GOAL-301: relay control plane
 
