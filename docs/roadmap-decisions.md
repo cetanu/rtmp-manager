@@ -111,6 +111,9 @@
   that do not provide a tenant credential.
 - Poll requests use independent bounded semaphores per API key, preventing one
   tenant's credential budget from serializing unrelated tenants.
+- Each API key also owns a centralized in-process quota circuit. Three
+  consecutive HTTP 429 responses open a 60-second circuit, suppressing new
+  requests until cooldown; a successful response resets the failure count.
 
 ## GOAL-403: chat relaying
 
