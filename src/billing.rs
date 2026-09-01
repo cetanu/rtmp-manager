@@ -118,6 +118,28 @@ impl UsageRepository {
         Ok(())
     }
 
+    pub async fn set_stripe_customer_id(&self, tenant_id: &str, customer_id: &str) -> Result<()> {
+        let updated = sqlx::query("UPDATE tenants SET stripe_customer_id = $1 WHERE id = $2")
+            .bind(customer_id)
+            .bind(tenant_id)
+            .execute(self.database.pool())
+            .await?;
+        if updated.rows_affected() != 1 {
+            bail!("Tenant does not exist");
+        }
+        Ok(())
+    }
+
+    pub async fn stripe_customer_id(&self, tenant_id: &str) -> Result<Option<String>> {
+        Ok(sqlx::query_scalar::<_, Option<String>>(
+            "SELECT stripe_customer_id FROM tenants WHERE id = $1",
+        )
+        .bind(tenant_id)
+        .fetch_optional(self.database.pool())
+        .await?
+        .flatten())
+    }
+
     pub async fn current_usage(&self, tenant_id: &str, now: i64) -> Result<UsageSnapshot> {
         let period = now - now.rem_euclid(30 * 24 * 60 * 60);
         let row = sqlx::query_as::<_, (String, i64)>(

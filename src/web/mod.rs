@@ -532,6 +532,45 @@ async fn billing_usage(cx: &Cx) -> Result<Json<crate::billing::UsageSnapshot>> {
     ))
 }
 
+#[route(POST "/api/billing/stripe/portal")]
+async fn stripe_customer_portal(cx: &Cx) -> Result<topcoat::router::Response> {
+    let app: &AppHandle = app_context(cx);
+    let tenant_id = auth::current_user(cx).tenant_id.as_str();
+    let customer = app
+        .usage
+        .stripe_customer_id(tenant_id)
+        .await?
+        .ok_or_else(|| bad_request("No Stripe customer is linked to this account"))?;
+    let secret = std::env::var("STRIPE_SECRET_KEY")
+        .map_err(|_| bad_request("Stripe billing is not configured"))?;
+    let return_url = std::env::var("STRIPE_PORTAL_RETURN_URL")
+        .map_err(|_| bad_request("Stripe portal return URL is not configured"))?;
+    let payload: serde_json::Value = app
+        .http_client
+        .post("https://api.stripe.com/v1/billing_portal/sessions")
+        .bearer_auth(secret)
+        .form(&[("customer", customer), ("return_url", return_url)])
+        .send()
+        .await?
+        .error_for_status()
+        .map_err(|error| bad_request(format!("Stripe portal request failed: {error}")))?
+        .json()
+        .await?;
+    let url = payload
+        .get("url")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            internal_server_error(anyhow::anyhow!("Stripe portal response has no URL"))
+        })?;
+    topcoat::router::IntoResponse::into_response(
+        (
+            topcoat::router::StatusCode::SEE_OTHER,
+            [(topcoat::router::header::LOCATION, url)],
+        ),
+        cx,
+    )
+}
+
 #[route(POST "/api/billing/stripe")]
 async fn stripe_billing_webhook(
     cx: &Cx,
@@ -574,7 +613,14 @@ async fn stripe_billing_webhook(
             .pointer("/metadata/plan")
             .and_then(serde_json::Value::as_str)
             .unwrap_or("free");
+        let customer_id = object.get("customer").and_then(serde_json::Value::as_str);
         let app: &AppHandle = app_context(cx);
+        if let Some(customer_id) = customer_id {
+            app.usage
+                .set_stripe_customer_id(tenant_id, customer_id)
+                .await
+                .map_err(|error| bad_request(error.to_string()))?;
+        }
         app.usage
             .set_plan(
                 tenant_id,
