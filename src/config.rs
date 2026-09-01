@@ -1063,6 +1063,20 @@ mod tests {
     }
 
     #[test]
+    fn disconnect_grace_period_is_configurable_and_bounded() {
+        let form: ConfigForm = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str("server%5Bdisconnect_grace_secs%5D=90")
+            .unwrap();
+        let updated = populated_config().merge_form(form).unwrap();
+        assert_eq!(updated.server.disconnect_grace_secs, 90);
+
+        let mut invalid = updated;
+        invalid.server.disconnect_grace_secs = 301;
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
     fn blank_ingest_stream_key_preserves_existing_key() {
         let form: ConfigForm = serde_qs::Config::new()
             .use_form_encoding(true)
