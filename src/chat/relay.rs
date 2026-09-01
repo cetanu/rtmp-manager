@@ -17,6 +17,23 @@ pub struct RelayRule {
     pub prefix: String,
 }
 
+async fn allow_delivery(destination: &str) -> bool {
+    let mut limits = RATE_LIMITS.lock().await;
+    let window = limits.entry(destination.to_owned()).or_default();
+    let now = Instant::now();
+    while window
+        .front()
+        .is_some_and(|timestamp| now.duration_since(*timestamp) >= Duration::from_secs(10))
+    {
+        window.pop_front();
+    }
+    if window.len() >= 5 {
+        return false;
+    }
+    window.push_back(now);
+    true
+}
+
 /// Applies a rule and dispatches to the selected authenticated bot adapter.
 pub async fn dispatch(
     rule: &RelayRule,
@@ -27,20 +44,8 @@ pub async fn dispatch(
     if message.source == rule.destination || message.source != rule.source {
         return Ok(());
     }
-    {
-        let mut limits = RATE_LIMITS.lock().await;
-        let window = limits.entry(rule.destination.clone()).or_default();
-        let now = Instant::now();
-        while window
-            .front()
-            .is_some_and(|timestamp| now.duration_since(*timestamp) >= Duration::from_secs(10))
-        {
-            window.pop_front();
-        }
-        if window.len() >= 5 {
-            anyhow::bail!("chat relay rate limit exceeded");
-        }
-        window.push_back(now);
+    if !allow_delivery(&rule.destination).await {
+        anyhow::bail!("chat relay rate limit exceeded");
     }
     let text = format!(
         "{}{}: {}",
@@ -73,5 +78,19 @@ pub async fn dispatch(
             .await
         }
         other => anyhow::bail!("no bot adapter configured for {other}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::allow_delivery;
+
+    #[tokio::test]
+    async fn limits_burst_delivery_per_destination() {
+        let destination = "test-rate-limit-destination";
+        for _ in 0..5 {
+            assert!(allow_delivery(destination).await);
+        }
+        assert!(!allow_delivery(destination).await);
     }
 }
