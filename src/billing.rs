@@ -77,8 +77,12 @@ impl UsageRepository {
             tx.rollback().await?;
             return Ok(false);
         }
-        sqlx::query("INSERT INTO tenant_active_streams (tenant_id, stream_id, started_at) VALUES ($1, $2, $3) ON CONFLICT (stream_id) DO NOTHING")
+        let inserted = sqlx::query("INSERT INTO tenant_active_streams (tenant_id, stream_id, started_at) VALUES ($1, $2, $3) ON CONFLICT (stream_id) DO NOTHING")
             .bind(tenant_id).bind(stream_id).bind(now).execute(&mut *tx).await?;
+        if inserted.rows_affected() == 0 {
+            tx.rollback().await?;
+            return Ok(false);
+        }
         tx.commit().await?;
         Ok(true)
     }
@@ -301,6 +305,12 @@ mod tests {
         let started = 1_800_000_000_i64;
         assert!(
             usage
+                .begin_stream("tenant-a", "stream-a", started)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !usage
                 .begin_stream("tenant-a", "stream-a", started)
                 .await
                 .unwrap()
