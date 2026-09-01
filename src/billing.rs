@@ -121,3 +121,24 @@ impl UsageRepository {
             == 1
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verifies_provider_signatures_without_accepting_modified_payloads() {
+        let body = br#"{"tenant_id":"tenant-a","plan":"pro"}"#;
+        let mut mac = BillingHmac::new_from_slice(b"secret").unwrap();
+        mac.update(body);
+        let signature = hex::encode(mac.finalize().into_bytes());
+        assert!(UsageRepository::verify_hex_signature(
+            body, &signature, "secret"
+        ));
+        assert!(!UsageRepository::verify_hex_signature(
+            b"tampered",
+            &signature,
+            "secret"
+        ));
+    }
+}
