@@ -1,17 +1,15 @@
-use crate::server::state::AppHandle;
 use crate::web::components::ui::card::{card, card_content, card_header, card_title};
-use crate::web::components::ui::form::{form_field, secret_input};
+use crate::web::components::ui::form::{form_field, secret_input, switch_field};
 use crate::web::components::ui::input::input;
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::Cx,
     view::{attributes, component, view},
 };
 
 #[component]
 pub async fn server_settings(cx: &Cx) -> Result {
-    let app: &AppHandle = app_context(cx);
-    let config = app.config.get();
+    let config = crate::web::request_config(cx).await?;
     view! {
         card(
             attrs: attributes! { class="h-full" },
@@ -30,6 +28,23 @@ pub async fn server_settings(cx: &Cx) -> Result {
                             value=(config.server.listen.to_string())
                             placeholder="0.0.0.0:1935"
                         })
+                    )
+                    form_field(
+                        control_id: "srt_listen",
+                        label_text: "SRT Listen Address",
+                        input(attrs: attributes! {
+                            type="text"
+                            id="srt_listen"
+                            name="server[srt_listen]"
+                            value=(config.server.srt_listen.to_string())
+                            placeholder="0.0.0.0:6000"
+                        })
+                    )
+                    switch_field(
+                        control_id: "srt_enabled",
+                        name: "server[srt_enabled]",
+                        label_text: "Enable SRT ingest",
+                        checked: config.server.srt_enabled
                     )
                     form_field(
                         control_id: "api_listen",
@@ -52,6 +67,19 @@ pub async fn server_settings(cx: &Cx) -> Result {
                             value=(config.server.test_stream_duration_secs.to_string())
                             min="1"
                             max="86400"
+                            step="1"
+                        })
+                    )
+                    form_field(
+                        control_id: "disconnect_grace_secs",
+                        label_text: "Disconnect Grace (seconds)",
+                        input(attrs: attributes! {
+                            type="number"
+                            id="disconnect_grace_secs"
+                            name="server[disconnect_grace_secs]"
+                            value=(config.server.disconnect_grace_secs.to_string())
+                            min="0"
+                            max="300"
                             step="1"
                         })
                     )

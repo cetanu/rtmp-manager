@@ -1,10 +1,16 @@
-use crate::config::{AppConfig, TargetConfig};
+use crate::billing::UsageRepository;
+use crate::config::TargetConfig;
 use crate::metrics::Metrics;
 use crate::notifications::{NotificationDispatcher, NotificationTarget};
 use crate::server::preview::{
     StreamState, StreamStatus, create_preview_dir, valid_preview_file_name,
 };
-use crate::server::relay::{RelayProcess, cancel_relays, run_direct_test, spawn_relay};
+use crate::server::relay::{
+    LocalRelayExecutor, RedisRelayExecutor, RelayExecutor, RelayProcess, cancel_relays,
+    run_direct_test,
+};
+use crate::tenant::{Tenant, TenantId, TenantRepository};
+use crate::util::stream_key_digest;
 use anyhow::{Context, Result, bail};
 use reqwest::Client;
 use std::collections::HashMap;
@@ -16,26 +22,38 @@ use tokio::process::Child;
 use tokio::sync::{mpsc, oneshot, watch};
 
 struct StagedStream {
+    tenant_id: TenantId,
     stream_key: String,
+    preview_dir: PathBuf,
     preview_process: Child,
     preview_failed: bool,
     published: bool,
+    started_at_unix: i64,
 }
 
 pub enum StreamCommand {
     StageStream {
+        tenant: Box<Tenant>,
         stream_key: String,
         respond_to: oneshot::Sender<Result<()>>,
     },
     PublishStagedStream {
+        tenant_id: TenantId,
         respond_to: oneshot::Sender<Result<()>>,
     },
     StopPublishing {
+        tenant_id: TenantId,
         respond_to: oneshot::Sender<Result<()>>,
     },
-    EndStream {
+    EndStreamIfUnpublished {
         stream_key: String,
-        respond_to: Option<oneshot::Sender<()>>,
+    },
+    MarkUnpublished {
+        stream_key: String,
+    },
+    EmergencyStop,
+    EmergencyStopTenant {
+        tenant_id: TenantId,
     },
     RunTestStream {
         duration_secs: u64,
@@ -46,13 +64,16 @@ pub enum StreamCommand {
 /// Actor exclusively managing HLS preview FFmpeg processes, RTMP target relays, and lifecycle state.
 pub struct StreamActor {
     preview_dir: PathBuf,
-    staged: Option<StagedStream>,
+    staged: HashMap<String, StagedStream>,
     active_relays: HashMap<String, Vec<RelayProcess>>,
+    relay_targets: HashMap<String, (TenantId, Vec<TargetConfig>)>,
+    last_snapshot_at: HashMap<String, std::time::Instant>,
     listen_port: u16,
-    metrics: Arc<Metrics>,
     http_client: Client,
-    config_rx: watch::Receiver<Arc<AppConfig>>,
-    status_tx: watch::Sender<StreamStatus>,
+    tenants: TenantRepository,
+    usage: UsageRepository,
+    relay_executor: Arc<dyn RelayExecutor>,
+    status_tx: watch::Sender<Arc<HashMap<TenantId, StreamStatus>>>,
 }
 
 impl StreamActor {
@@ -69,24 +90,28 @@ impl StreamActor {
                         break;
                     };
                     match cmd {
-                        StreamCommand::StageStream { stream_key, respond_to } => {
-                            let res = self.handle_stage_stream(stream_key).await;
+                        StreamCommand::StageStream { tenant, stream_key, respond_to } => {
+                            let res = self.handle_stage_stream(*tenant, stream_key).await;
                             let _ = respond_to.send(res);
                         }
-                        StreamCommand::PublishStagedStream { respond_to } => {
-                            let res = self.handle_publish_staged().await;
+                        StreamCommand::PublishStagedStream { tenant_id, respond_to } => {
+                            let res = self.handle_publish_staged(&tenant_id).await;
                             let _ = respond_to.send(res);
                         }
-                        StreamCommand::StopPublishing { respond_to } => {
-                            let res = self.handle_stop_publishing().await;
+                        StreamCommand::StopPublishing { tenant_id, respond_to } => {
+                            let res = self.handle_stop_publishing(&tenant_id).await;
                             let _ = respond_to.send(res);
                         }
-                        StreamCommand::EndStream { stream_key, respond_to } => {
-                            self.handle_end_stream(&stream_key).await;
-                            if let Some(respond_to) = respond_to {
-                                let _ = respond_to.send(());
+                        StreamCommand::EndStreamIfUnpublished { stream_key } => {
+                            if self.staged.get(&stream_key).is_some_and(|stream| !stream.published) {
+                                self.handle_end_stream(&stream_key).await;
                             }
                         }
+                        StreamCommand::MarkUnpublished { stream_key } => {
+                            self.handle_mark_unpublished(&stream_key).await;
+                        }
+                        StreamCommand::EmergencyStop => self.handle_emergency_stop().await,
+                        StreamCommand::EmergencyStopTenant { tenant_id } => self.handle_emergency_stop_tenant(&tenant_id).await,
                         StreamCommand::RunTestStream { duration_secs, targets } => {
                             run_direct_test(duration_secs, targets);
                         }
@@ -99,8 +124,10 @@ impl StreamActor {
     }
 
     fn check_preview_process_health(&mut self) {
-        if let Some(stream) = self.staged.as_mut()
-            && !stream.preview_failed
+        for stream in self
+            .staged
+            .values_mut()
+            .filter(|stream| !stream.preview_failed)
         {
             match stream.preview_process.try_wait() {
                 Ok(Some(status)) => {
@@ -111,37 +138,107 @@ impl StreamActor {
                     tracing::error!(%error, "Failed to inspect HLS preview process");
                     stream.preview_failed = true;
                 }
-                _ => {}
+                Ok(None) => {}
             }
+        }
+        let now = std::time::Instant::now();
+        let snapshots = self
+            .staged
+            .values()
+            .filter(|stream| {
+                !stream.preview_failed
+                    && stream.preview_dir.join("index.m3u8").is_file()
+                    && self
+                        .last_snapshot_at
+                        .get(&stream.stream_key)
+                        .is_none_or(|last| now.duration_since(*last) >= Duration::from_secs(60))
+            })
+            .map(|stream| {
+                (
+                    stream.stream_key.clone(),
+                    stream.preview_dir.join("index.m3u8"),
+                    stream.preview_dir.join("thumbnail.jpg"),
+                )
+            })
+            .collect::<Vec<_>>();
+        for (stream_key, playlist, thumbnail) in snapshots {
+            self.last_snapshot_at.insert(stream_key, now);
+            tokio::spawn(async move {
+                let result = tokio::process::Command::new("ffmpeg")
+                    .args([
+                        "-y",
+                        "-loglevel",
+                        "error",
+                        "-i",
+                        &playlist.to_string_lossy(),
+                        "-frames:v",
+                        "1",
+                        "-q:v",
+                        "3",
+                        &thumbnail.to_string_lossy(),
+                    ])
+                    .status()
+                    .await;
+                if let Err(error) = result {
+                    tracing::warn!(%error, "Failed to create stream thumbnail");
+                }
+            });
         }
         self.update_status();
     }
 
-    fn compute_status(&self) -> StreamStatus {
-        let state = match self.staged.as_ref() {
-            None => StreamState::Offline,
-            Some(stream) if stream.published => StreamState::Live,
-            Some(stream) if stream.preview_failed => StreamState::PreviewFailed,
-            Some(_) if self.preview_dir.join("index.m3u8").is_file() => StreamState::PreviewReady,
-            Some(_) => StreamState::Preparing,
-        };
-        StreamStatus { state }
+    fn compute_statuses(&self) -> HashMap<TenantId, StreamStatus> {
+        self.staged
+            .values()
+            .map(|stream| {
+                let state = if stream.published {
+                    StreamState::Live
+                } else if stream.preview_failed {
+                    StreamState::PreviewFailed
+                } else if stream.preview_dir.join("index.m3u8").is_file() {
+                    StreamState::PreviewReady
+                } else {
+                    StreamState::Preparing
+                };
+                (stream.tenant_id.clone(), StreamStatus { state })
+            })
+            .collect()
     }
 
     fn update_status(&mut self) {
-        let status = self.compute_status();
-        if *self.status_tx.borrow() != status {
-            self.status_tx.send_replace(status);
+        let statuses = Arc::new(self.compute_statuses());
+        if *self.status_tx.borrow() != statuses {
+            self.status_tx.send_replace(statuses);
         }
     }
 
-    async fn handle_stage_stream(&mut self, stream_key: String) -> Result<()> {
-        self.end_current_stream().await;
-        create_preview_dir(&self.preview_dir)?;
+    async fn handle_stage_stream(&mut self, tenant: Tenant, stream_key: String) -> Result<()> {
+        if !tenant_has_capacity(
+            &tenant,
+            self.staged.values().map(|stream| &stream.tenant_id),
+        ) {
+            bail!("Tenant already has the maximum number of active streams");
+        }
+        if self.staged.contains_key(&stream_key) {
+            bail!("This ingest stream is already active");
+        }
+        if !self
+            .usage
+            .begin_stream(
+                tenant.id.as_str(),
+                &stream_key,
+                crate::util::now_unix_secs() as i64,
+            )
+            .await?
+        {
+            bail!("Tenant monthly stream quota has been exhausted");
+        }
+        let preview_dir = self.preview_dir.join(stream_key_digest(tenant.id.as_str()));
+        create_preview_dir(&preview_dir)?;
 
         let source_url = format!("rtmp://127.0.0.1:{}/live/{stream_key}", self.listen_port);
-        let playlist = self.preview_dir.join("index.m3u8");
-        let segments = self.preview_dir.join("segment_%06d.ts");
+        let playlist = preview_dir.join("index.m3u8");
+        let segments = preview_dir.join("segment_%06d.ts");
         let playlist = playlist.to_string_lossy().into_owned();
         let segments = segments.to_string_lossy().into_owned();
 
@@ -184,31 +281,43 @@ impl StreamActor {
             .kill_on_drop(true)
             .spawn()?;
 
-        self.staged = Some(StagedStream {
-            stream_key,
-            preview_process,
-            preview_failed: false,
-            published: false,
-        });
+        self.staged.insert(
+            stream_key.clone(),
+            StagedStream {
+                tenant_id: tenant.id,
+                stream_key,
+                preview_dir,
+                preview_process,
+                preview_failed: false,
+                published: false,
+                started_at_unix: crate::util::now_unix_secs() as i64,
+            },
+        );
 
         self.update_status();
         tracing::info!("Stream staged with local HLS preview");
         Ok(())
     }
 
-    async fn handle_publish_staged(&mut self) -> Result<()> {
+    async fn handle_publish_staged(&mut self, tenant_id: &TenantId) -> Result<()> {
         let stream = self
             .staged
-            .as_mut()
-            .ok_or_else(|| anyhow::anyhow!("No stream is currently staged"))?;
+            .values_mut()
+            .find(|stream| &stream.tenant_id == tenant_id)
+            .ok_or_else(|| anyhow::anyhow!("No stream is currently staged for this tenant"))?;
         if stream.published {
             bail!("The staged stream is already published");
         }
-        stream.published = true;
         let stream_key = stream.stream_key.clone();
 
-        let config = self.config_rx.borrow().clone();
-        let active_targets = config
+        let tenant = self
+            .tenants
+            .find(tenant_id)
+            .await?
+            .filter(|tenant| tenant.active)
+            .ok_or_else(|| anyhow::anyhow!("Tenant is inactive"))?;
+        stream.published = true;
+        let active_targets = tenant
             .targets
             .iter()
             .filter(|target| target.enabled)
@@ -219,34 +328,50 @@ impl StreamActor {
             .map(NotificationTarget::from)
             .collect::<Vec<_>>();
         let dispatcher =
-            NotificationDispatcher::new(&config.notifications, self.http_client.clone());
+            NotificationDispatcher::new(&tenant.notifications, self.http_client.clone());
 
         let source_url = format!("rtmp://127.0.0.1:{}/live/{stream_key}", self.listen_port);
+        if let Some(relays) = self.active_relays.remove(&stream_key) {
+            cancel_relays(relays).await;
+        }
         let mut relays = Vec::new();
         for target in active_targets {
-            relays.push(spawn_relay(
-                Arc::clone(&self.metrics),
+            relays.push(self.relay_executor.spawn(
+                tenant_id.as_str().to_owned(),
                 source_url.clone(),
                 target,
             ));
         }
 
         self.active_relays.insert(stream_key, relays);
+        self.relay_targets.insert(
+            stream.stream_key.clone(),
+            (
+                tenant_id.clone(),
+                tenant
+                    .targets
+                    .iter()
+                    .filter(|target| target.enabled)
+                    .cloned()
+                    .collect(),
+            ),
+        );
         self.update_status();
 
         tokio::spawn(async move {
             dispatcher.dispatch(&notification_targets).await;
         });
 
-        tracing::info!("Staged stream published to enabled targets");
+        tracing::info!(tenant_id = %tenant_id.as_str(), "Staged stream published to enabled targets");
         Ok(())
     }
 
-    async fn handle_stop_publishing(&mut self) -> Result<()> {
+    async fn handle_stop_publishing(&mut self, tenant_id: &TenantId) -> Result<()> {
         let stream = self
             .staged
-            .as_mut()
-            .ok_or_else(|| anyhow::anyhow!("No stream is currently staged"))?;
+            .values_mut()
+            .find(|stream| &stream.tenant_id == tenant_id)
+            .ok_or_else(|| anyhow::anyhow!("No stream is currently staged for this tenant"))?;
         stream.published = false;
         let stream_key = stream.stream_key.clone();
 
@@ -259,41 +384,146 @@ impl StreamActor {
         Ok(())
     }
 
-    async fn handle_end_stream(&mut self, stream_key: &str) {
-        let is_current = self
-            .staged
-            .as_ref()
-            .is_some_and(|stream| stream.stream_key == stream_key);
-        if is_current {
-            self.end_current_stream().await;
-        } else if let Some(relays) = self.active_relays.remove(stream_key) {
-            cancel_relays(relays).await;
+    async fn handle_mark_unpublished(&mut self, stream_key: &str) {
+        if let Some(stream) = self.staged.get_mut(stream_key) {
+            stream.published = false;
+            if let Some((tenant_id, targets)) = self.relay_targets.get(stream_key).cloned() {
+                if let Some(relays) = self.active_relays.remove(stream_key) {
+                    cancel_relays(relays).await;
+                }
+                let standby = targets
+                    .into_iter()
+                    .map(|target| {
+                        self.relay_executor
+                            .spawn_standby(tenant_id.as_str().to_owned(), target)
+                    })
+                    .collect();
+                self.active_relays.insert(stream_key.to_owned(), standby);
+            }
+            self.update_status();
         }
     }
 
-    async fn end_current_stream(&mut self) {
-        if let Some(mut stream) = self.staged.take() {
+    async fn handle_end_stream(&mut self, stream_key: &str) {
+        if let Some(mut stream) = self.staged.remove(stream_key) {
+            let _ = self
+                .usage
+                .record_seconds(
+                    stream.tenant_id.as_str(),
+                    &stream.stream_key,
+                    stream.started_at_unix,
+                    crate::util::now_unix_secs() as i64,
+                )
+                .await;
             let _ = stream.preview_process.kill().await;
-            if let Some(relays) = self.active_relays.remove(&stream.stream_key) {
-                cancel_relays(relays).await;
+            if let Err(error) = tokio::fs::remove_dir_all(&stream.preview_dir).await
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::warn!(%error, "Failed to remove HLS preview files");
             }
         }
-        if let Err(error) = tokio::fs::remove_dir_all(&self.preview_dir).await
-            && error.kind() != std::io::ErrorKind::NotFound
-        {
-            tracing::warn!(%error, "Failed to remove HLS preview files");
+        if let Some(relays) = self.active_relays.remove(stream_key) {
+            cancel_relays(relays).await;
         }
+        self.relay_targets.remove(stream_key);
+        self.last_snapshot_at.remove(stream_key);
         self.update_status();
     }
 
-    async fn cleanup(&mut self) {
-        if let Some(mut stream) = self.staged.take() {
+    async fn handle_emergency_stop(&mut self) {
+        for (_, mut stream) in self.staged.drain() {
+            let _ = self
+                .usage
+                .record_seconds(
+                    stream.tenant_id.as_str(),
+                    &stream.stream_key,
+                    stream.started_at_unix,
+                    crate::util::now_unix_secs() as i64,
+                )
+                .await;
             let _ = stream.preview_process.kill().await;
         }
         for (_, relays) in self.active_relays.drain() {
             cancel_relays(relays).await;
         }
+        self.update_status();
+        tracing::warn!("Emergency stop terminated all active streams");
+    }
+
+    async fn handle_emergency_stop_tenant(&mut self, tenant_id: &TenantId) {
+        let keys: Vec<String> = self
+            .staged
+            .iter()
+            .filter(|(_, stream)| &stream.tenant_id == tenant_id)
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in keys {
+            self.handle_end_stream(&key).await;
+        }
+        tracing::warn!(tenant_id = %tenant_id.as_str(), "Tenant emergency stop terminated active streams");
+    }
+
+    async fn cleanup(&mut self) {
+        for (_, mut stream) in self.staged.drain() {
+            let _ = self
+                .usage
+                .record_seconds(
+                    stream.tenant_id.as_str(),
+                    &stream.stream_key,
+                    stream.started_at_unix,
+                    crate::util::now_unix_secs() as i64,
+                )
+                .await;
+            let _ = stream.preview_process.kill().await;
+        }
+        if std::env::var_os("RELAY_BROKER_URL").is_some_and(|url| !url.is_empty()) {
+            // Redis workers own the media processes; dropping control-plane
+            // handles lets those workers continue across an API restart.
+            self.active_relays.clear();
+        } else {
+            for (_, relays) in self.active_relays.drain() {
+                cancel_relays(relays).await;
+            }
+        }
         let _ = tokio::fs::remove_dir_all(&self.preview_dir).await;
+    }
+}
+
+fn tenant_has_capacity<'a>(
+    tenant: &Tenant,
+    active_tenants: impl Iterator<Item = &'a TenantId>,
+) -> bool {
+    active_tenants
+        .filter(|active| *active == &tenant.id)
+        .count()
+        < tenant.max_concurrent_streams
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::NotificationSettings;
+
+    fn tenant(id: &str, max_concurrent_streams: usize) -> Tenant {
+        Tenant {
+            id: TenantId::new(id).unwrap(),
+            name: id.to_owned(),
+            active: true,
+            max_concurrent_streams,
+            notifications: NotificationSettings::default(),
+            chat: crate::config::ChatSettings::default(),
+            overlay: crate::config::OverlaySettings::default(),
+            targets: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn concurrency_limits_are_isolated_per_tenant() {
+        let alpha = tenant("alpha", 1);
+        let beta = tenant("beta", 1);
+        let active = [alpha.id.clone()];
+        assert!(!tenant_has_capacity(&alpha, active.iter()));
+        assert!(tenant_has_capacity(&beta, active.iter()));
     }
 }
 
@@ -301,41 +531,50 @@ impl StreamActor {
 #[derive(Clone)]
 pub struct StreamHandle {
     sender: mpsc::Sender<StreamCommand>,
-    status_rx: watch::Receiver<StreamStatus>,
+    status_rx: watch::Receiver<Arc<HashMap<TenantId, StreamStatus>>>,
     preview_dir: PathBuf,
+    disconnect_grace_secs: u64,
 }
 
 impl StreamHandle {
     pub async fn spawn(
         listen_port: u16,
+        disconnect_grace_secs: u64,
         metrics: Arc<Metrics>,
         http_client: Client,
-        config_rx: watch::Receiver<Arc<AppConfig>>,
+        tenants: TenantRepository,
+        usage: UsageRepository,
     ) -> Result<Self> {
         let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let preview_dir =
             std::env::temp_dir().join(format!("rtmp-manager-hls-{}-{unique}", std::process::id()));
         create_preview_dir(&preview_dir)?;
 
-        let (status_tx, status_rx) = watch::channel(StreamStatus {
-            state: StreamState::Offline,
-        });
+        let (status_tx, status_rx) = watch::channel(Arc::new(HashMap::new()));
         let (sender, receiver) = mpsc::channel(64);
 
         let handle = Self {
             sender,
             status_rx,
             preview_dir: preview_dir.clone(),
+            disconnect_grace_secs,
         };
 
+        let relay_executor: Arc<dyn RelayExecutor> = match std::env::var("RELAY_BROKER_URL") {
+            Ok(url) if !url.trim().is_empty() => Arc::new(RedisRelayExecutor::new(url)),
+            _ => Arc::new(LocalRelayExecutor::new(Arc::clone(&metrics))),
+        };
         let actor = StreamActor {
             preview_dir,
-            staged: None,
+            staged: HashMap::new(),
             active_relays: HashMap::new(),
+            relay_targets: HashMap::new(),
+            last_snapshot_at: HashMap::new(),
             listen_port,
-            metrics,
             http_client,
-            config_rx,
+            tenants,
+            usage,
+            relay_executor,
             status_tx,
         };
 
@@ -344,10 +583,11 @@ impl StreamHandle {
         Ok(handle)
     }
 
-    pub async fn stage_stream(&self, stream_key: String) -> Result<()> {
+    pub async fn stage_stream(&self, tenant: Tenant, stream_key: String) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(StreamCommand::StageStream {
+                tenant: Box::new(tenant),
                 stream_key,
                 respond_to: tx,
             })
@@ -356,31 +596,55 @@ impl StreamHandle {
         rx.await.context("Stream actor dropped stage response")?
     }
 
-    pub async fn publish_staged_stream(&self) -> Result<()> {
+    pub async fn publish_staged_stream(&self, tenant_id: TenantId) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.sender
-            .send(StreamCommand::PublishStagedStream { respond_to: tx })
+            .send(StreamCommand::PublishStagedStream {
+                tenant_id,
+                respond_to: tx,
+            })
             .await
             .map_err(|_| anyhow::anyhow!("Stream actor stopped"))?;
         rx.await.context("Stream actor dropped publish response")?
     }
 
-    pub async fn stop_publishing(&self) -> Result<()> {
+    pub async fn stop_publishing(&self, tenant_id: TenantId) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.sender
-            .send(StreamCommand::StopPublishing { respond_to: tx })
+            .send(StreamCommand::StopPublishing {
+                tenant_id,
+                respond_to: tx,
+            })
             .await
             .map_err(|_| anyhow::anyhow!("Stream actor stopped"))?;
         rx.await.context("Stream actor dropped stop response")?
     }
 
-    pub async fn end_stream(&self, stream_key: &str) {
+    pub async fn grace_disconnect(&self, stream_key: &str) {
+        let key = stream_key.to_owned();
+        let sender = self.sender.clone();
+        let grace_secs = self.disconnect_grace_secs;
+        let _ = sender
+            .send(StreamCommand::MarkUnpublished {
+                stream_key: key.clone(),
+            })
+            .await;
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(grace_secs)).await;
+            let _ = sender
+                .send(StreamCommand::EndStreamIfUnpublished { stream_key: key })
+                .await;
+        });
+    }
+
+    pub async fn emergency_stop(&self) {
+        let _ = self.sender.send(StreamCommand::EmergencyStop).await;
+    }
+
+    pub async fn emergency_stop_tenant(&self, tenant_id: TenantId) {
         let _ = self
             .sender
-            .send(StreamCommand::EndStream {
-                stream_key: stream_key.to_string(),
-                respond_to: None,
-            })
+            .send(StreamCommand::EmergencyStopTenant { tenant_id })
             .await;
     }
 
@@ -392,17 +656,38 @@ impl StreamHandle {
     }
 
     /// Returns the current stream status instantly with zero locks.
-    pub fn status(&self) -> StreamStatus {
-        *self.status_rx.borrow()
+    pub fn status(&self, tenant_id: &TenantId) -> StreamStatus {
+        self.status_rx
+            .borrow()
+            .get(tenant_id)
+            .copied()
+            .unwrap_or(StreamStatus {
+                state: StreamState::Offline,
+            })
+    }
+
+    /// Returns every tenant's current status for administrator views.
+    pub fn all_status(&self) -> Arc<HashMap<TenantId, StreamStatus>> {
+        self.status_rx.borrow().clone()
     }
 
     /// Subscribes to stream status change events.
-    pub fn subscribe_status(&self) -> watch::Receiver<StreamStatus> {
+    pub fn subscribe_status(&self) -> watch::Receiver<Arc<HashMap<TenantId, StreamStatus>>> {
         self.status_rx.clone()
     }
 
     /// Returns an allowlisted preview file path for HTTP serving.
-    pub fn preview_file(&self, name: &str) -> Option<PathBuf> {
-        valid_preview_file_name(name).then(|| self.preview_dir.join(name))
+    pub fn preview_file(&self, tenant_id: &TenantId, name: &str) -> Option<PathBuf> {
+        valid_preview_file_name(name).then(|| {
+            self.preview_dir
+                .join(stream_key_digest(tenant_id.as_str()))
+                .join(name)
+        })
+    }
+
+    pub fn thumbnail_file(&self, tenant_id: &TenantId) -> PathBuf {
+        self.preview_dir
+            .join(stream_key_digest(tenant_id.as_str()))
+            .join("thumbnail.jpg")
     }
 }

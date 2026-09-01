@@ -1,5 +1,6 @@
 pub mod actions_panel;
 pub mod app_navigation;
+pub mod billing_usage;
 pub mod chat_inbox;
 pub mod chat_settings;
 pub mod config_transfer;
@@ -7,9 +8,9 @@ pub mod configuration_form;
 pub mod log_viewer;
 pub mod metrics;
 pub mod notifications;
+pub mod overlay_settings;
 pub mod publishing_controls;
 pub mod server_settings;
 pub mod stream_preview;
 pub mod targets;
 pub mod ui;
-pub mod web_auth;

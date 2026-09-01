@@ -1,10 +1,13 @@
+use crate::accounts::Role;
 use crate::config::ConfigForm;
-use crate::server::state::{AppHandle, StreamStatus};
+use crate::server::state::{AppHandle, StreamState, StreamStatus};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use topcoat::asset::{AssetBundle, RouterBuilderAssetExt};
+use topcoat::cookie::RouterBuilderCookieExt;
+use topcoat::session::{RouterBuilderSessionExt, SessionConfig};
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -23,6 +26,9 @@ use topcoat::{
 
 pub mod auth;
 pub mod components;
+mod oauth;
+mod overlay;
+mod setup;
 use components::{
     app_navigation::app_navigation, chat_inbox::chat_inbox, config_transfer::config_transfer,
     configuration_form::configuration_form, log_viewer::log_viewer, metrics::metrics_page,
@@ -46,6 +52,18 @@ pub(crate) const METRICS_CHARTS_SCRIPT: topcoat::asset::Asset =
     topcoat::asset::asset!("static/metrics-charts.js");
 pub(crate) const SECRET_FIELDS_SCRIPT: topcoat::asset::Asset =
     topcoat::asset::asset!("static/secret-fields.js");
+pub(crate) const CHAT_OVERLAY_SCRIPT: topcoat::asset::Asset =
+    topcoat::asset::asset!("static/chat-overlay.js");
+
+pub async fn request_config(cx: &Cx) -> anyhow::Result<crate::config::AppConfig> {
+    let app: &AppHandle = app_context(cx);
+    app.tenant_config(&auth::current_user(cx).tenant_id).await
+}
+
+pub async fn request_chat(cx: &Cx) -> anyhow::Result<crate::chat::ChatHandle> {
+    let app: &AppHandle = app_context(cx);
+    app.tenant_chat(&auth::current_user(cx).tenant_id).await
+}
 
 pub async fn run_web_server(
     app_handle: AppHandle,
@@ -56,6 +74,8 @@ pub async fn run_web_server(
         .discover()
         .assets(AssetBundle::load()?)
         .app_context(app_handle)
+        .cookies()
+        .sessions(SessionConfig::default())
         .build();
 
     tokio::spawn(async move {
@@ -122,8 +142,54 @@ async fn app_page(active_page: &'static str) -> Result {
 }
 
 #[page("/")]
-async fn home() -> Result {
+async fn home(cx: &Cx) -> Result {
+    let app: &AppHandle = app_context(cx);
+    if !app.config.get().initialized {
+        return Err(topcoat::router::error::redirect("/setup").into());
+    }
     view! { app_page(active_page: "preview") }
+}
+
+#[page("/admin/streams")]
+async fn admin_streams_page(cx: &Cx) -> Result {
+    let app: &AppHandle = app_context(cx);
+    let statuses = app.stream.all_status();
+    view! {
+        <!DOCTYPE html>
+        <html lang="en" class="dark">
+            <head>
+                <meta charset="utf-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1" />
+                <meta http-equiv="refresh" content="5" />
+                <title>"Active streams · RTMP Manager"</title>
+                <link rel="stylesheet" href=(TAILWIND_STYLESHEET) />
+            </head>
+            <body class="min-h-screen bg-background p-6 text-foreground">
+                <main class="mx-auto max-w-4xl">
+                    <div class="mb-6 flex items-center justify-between">
+                        <h1 class="text-2xl font-semibold">"Active streams"</h1>
+                        <a class="text-sm text-primary underline" href="/">"Back to dashboard"</a>
+                    </div>
+                    <div class="overflow-hidden rounded-xl border border-border">
+                        <table class="w-full text-left text-sm">
+                            <thead class="bg-card text-muted-foreground">
+                                <tr><th class="p-3">"Tenant"</th><th class="p-3">"State"</th><th class="p-3">"Thumbnail"</th></tr>
+                            </thead>
+                            <tbody>
+                                for (tenant_id, status) in statuses.iter() {
+                                    <tr class="border-t border-border">
+                                        <td class="p-3 font-mono">(tenant_id.as_str())</td>
+                                        <td class="p-3">(format!("{:?}", status.state))</td>
+                                        <td class="p-3"><a class="text-primary underline" href=(format!("/api/admin/tenants/{}/thumbnail", tenant_id.as_str())) target="_blank">"Open"</a></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </main>
+            </body>
+        </html>
+    }
 }
 
 #[page("/overview")]
@@ -173,7 +239,10 @@ struct PreviewFile(str);
 async fn get_preview_file(cx: &Cx) -> Result<topcoat::router::Response> {
     let app: &AppHandle = app_context(cx);
     let name = topcoat::router::path_param::<PreviewFile>(cx);
-    let Some(path) = app.stream.preview_file(name) else {
+    let Some(path) = app
+        .stream
+        .preview_file(&auth::current_user(cx).tenant_id, name)
+    else {
         return Err(not_found().into());
     };
     let bytes = match tokio::fs::read(path).await {
@@ -203,13 +272,179 @@ async fn get_preview_file(cx: &Cx) -> Result<topcoat::router::Response> {
 #[route(GET "/api/stream/status")]
 async fn get_stream_status(cx: &Cx) -> Result<Json<StreamStatus>> {
     let app: &AppHandle = app_context(cx);
-    Ok(Json(app.stream.status()))
+    Ok(Json(app.stream.status(&auth::current_user(cx).tenant_id)))
+}
+
+#[route(GET "/api/admin/streams")]
+async fn get_admin_stream_status(cx: &Cx) -> Result<Json<Vec<AdminStreamStatus>>> {
+    let app: &AppHandle = app_context(cx);
+    Ok(Json(
+        app.stream
+            .all_status()
+            .iter()
+            .map(|(tenant_id, status)| AdminStreamStatus {
+                tenant_id: tenant_id.as_str().to_owned(),
+                status: *status,
+            })
+            .collect(),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct AuditLogQuery {
+    limit: Option<u32>,
+}
+
+#[route(GET "/api/admin/audit-log")]
+async fn get_admin_audit_log(cx: &Cx) -> Result<Json<Vec<crate::server::state::AdminAuditEntry>>> {
+    let query: AuditLogQuery = parse_query_params(cx).unwrap_or(AuditLogQuery { limit: None });
+    let app: &AppHandle = app_context(cx);
+    Ok(Json(app.admin_audit_log(query.limit.unwrap_or(50)).await?))
+}
+
+#[route(GET "/api/admin/tenants/{tenant_id}/thumbnail")]
+async fn get_admin_thumbnail(cx: &Cx) -> Result<topcoat::router::Response> {
+    let tenant_id =
+        crate::tenant::TenantId::new(topcoat::router::path_param::<AdminTenantPath>(cx))
+            .map_err(|_| bad_request("Invalid tenant ID"))?;
+    let app: &AppHandle = app_context(cx);
+    if app.tenants.find(&tenant_id).await?.is_none() {
+        return Err(not_found().into());
+    }
+    let bytes = match tokio::fs::read(app.stream.thumbnail_file(&tenant_id)).await {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(not_found().into());
+        }
+        Err(error) => return Err(internal_server_error(error).into()),
+    };
+    topcoat::router::IntoResponse::into_response(
+        (
+            [(topcoat::router::header::CONTENT_TYPE, "image/jpeg")],
+            topcoat::router::Body::from(bytes),
+        ),
+        cx,
+    )
+}
+
+#[derive(Debug, Serialize)]
+struct AdminStreamStatus {
+    tenant_id: String,
+    status: StreamStatus,
 }
 
 #[route(GET "/api/metrics/history")]
 async fn get_metrics_history(cx: &Cx) -> Result<Json<Vec<crate::metrics::MetricsSample>>> {
     let app: &AppHandle = app_context(cx);
-    Ok(Json(app.metrics.history()))
+    let tenant_id = auth::current_user(cx).tenant_id.as_str().to_owned();
+    let history = app
+        .metrics
+        .history()
+        .into_iter()
+        .map(|mut sample| {
+            sample
+                .targets
+                .retain(|target| target.tenant_id == tenant_id);
+            sample
+        })
+        .collect();
+    Ok(Json(history))
+}
+
+#[route(GET "/api/metrics/prometheus")]
+async fn get_metrics_prometheus(cx: &Cx) -> Result<topcoat::router::Response> {
+    let app: &AppHandle = app_context(cx);
+    let tenant_id = auth::current_user(cx).tenant_id.as_str();
+    let mut output = format!(
+        "# TYPE rtmp_manager_ingest_bps gauge\nrtmp_manager_ingest_bps{{tenant_id=\"{}\"}} {}\n",
+        prometheus_label(tenant_id),
+        app.metrics.current_ingest_bps()
+    );
+    for sample in app
+        .metrics
+        .current_target_bitrates()
+        .into_iter()
+        .filter(|sample| sample.tenant_id == tenant_id)
+    {
+        output.push_str(&format!(
+            "rtmp_manager_target_outbound_bps{{tenant_id=\"{}\",target=\"{}\",codec=\"{}\"}} {}\n",
+            prometheus_label(tenant_id),
+            prometheus_label(&sample.name),
+            prometheus_label(&sample.codec),
+            sample.outbound_bps
+        ));
+        output.push_str(&format!(
+            "rtmp_manager_target_dropped_frames{{tenant_id=\"{}\",target=\"{}\",codec=\"{}\"}} {}\n",
+            prometheus_label(tenant_id),
+            prometheus_label(&sample.name),
+            prometheus_label(&sample.codec),
+            sample.dropped_frames
+        ));
+        output.push_str(&format!(
+            "rtmp_manager_target_reconnections_total{{tenant_id=\"{}\",target=\"{}\",codec=\"{}\"}} {}\n",
+            prometheus_label(tenant_id),
+            prometheus_label(&sample.name),
+            prometheus_label(&sample.codec),
+            sample.reconnections
+        ));
+    }
+    let mut response = topcoat::router::Response::new(topcoat::router::Body::from(output));
+    response.headers_mut().insert(
+        topcoat::router::header::CONTENT_TYPE,
+        topcoat::router::HeaderValue::from_static("text/plain; version=0.0.4"),
+    );
+    Ok(response)
+}
+
+fn prometheus_label(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+}
+
+#[route(GET "/healthz")]
+async fn healthz(cx: &Cx) -> Result<topcoat::router::Response> {
+    let app: &AppHandle = app_context(cx);
+    if app.database.health_check().await.is_err() {
+        return topcoat::router::IntoResponse::into_response(
+            (
+                topcoat::router::StatusCode::SERVICE_UNAVAILABLE,
+                "database unavailable",
+            ),
+            cx,
+        );
+    }
+    topcoat::router::IntoResponse::into_response("ok", cx)
+}
+
+#[route(POST "/api/admin/emergency-stop")]
+async fn emergency_stop(cx: &Cx) -> Result<topcoat::router::Response> {
+    let app: &AppHandle = app_context(cx);
+    let user = auth::current_user(cx);
+    app.record_admin_action(&user.id, "emergency_stop_all", None)
+        .await?;
+    app.stream.emergency_stop().await;
+    topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
+}
+
+#[topcoat::router::path_param]
+struct AdminTenantPath(str);
+
+#[route(POST "/api/admin/tenants/{tenant_id}/emergency-stop")]
+async fn emergency_stop_tenant(cx: &Cx) -> Result<topcoat::router::Response> {
+    let tenant_id =
+        crate::tenant::TenantId::new(topcoat::router::path_param::<AdminTenantPath>(cx))
+            .map_err(|_| bad_request("Invalid tenant ID"))?;
+    let app: &AppHandle = app_context(cx);
+    if app.tenants.find(&tenant_id).await?.is_none() {
+        return Err(not_found().into());
+    }
+    let user = auth::current_user(cx);
+    app.record_admin_action(&user.id, "emergency_stop_tenant", Some(tenant_id.as_str()))
+        .await?;
+    app.stream.emergency_stop_tenant(tenant_id).await;
+    topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
 }
 
 #[derive(Debug, Deserialize)]
@@ -249,14 +484,35 @@ async fn update_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
         [(topcoat::router::header::LOCATION, return_to)],
     );
 
-    let (_, _changed, chat_changed) = match app.config.save_form(form).await {
-        Ok(res) => res,
-        Err(error) => return Err(bad_request(error.to_string()).into()),
+    let user = auth::current_user(cx);
+    let chat_changed = if user.role == Role::Admin
+        && user.tenant_id == crate::tenant::TenantId::default_tenant()
+    {
+        match app.config.save_form(form).await {
+            Ok((_, _, chat_changed)) => chat_changed,
+            Err(error) => return Err(bad_request(error.to_string()).into()),
+        }
+    } else {
+        if form.server.is_some() {
+            return Err(bad_request("Only administrators can change server settings").into());
+        }
+        match app.save_tenant_form(&user.tenant_id, form).await {
+            Ok((_, chat_changed)) => chat_changed,
+            Err(error) => return Err(bad_request(error.to_string()).into()),
+        }
     };
 
-    if chat_changed && let Err(error) = app.apply_chat_config().await {
-        tracing::error!("Failed to apply chat configuration: {error:#}");
-        return Err(internal_server_error(error).into());
+    if chat_changed {
+        let result = if user.tenant_id == crate::tenant::TenantId::default_tenant() {
+            app.apply_chat_config().await
+        } else {
+            let config = app.tenant_config(&user.tenant_id).await?;
+            app.chat.apply_config(&user.tenant_id, config.chat).await
+        };
+        if let Err(error) = result {
+            tracing::error!("Failed to apply chat configuration: {error:#}");
+            return Err(internal_server_error(error).into());
+        }
     }
 
     topcoat::router::IntoResponse::into_response(redirect, cx)
@@ -264,14 +520,285 @@ async fn update_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
 
 #[route(GET "/api/config")]
 async fn get_config(cx: &Cx) -> Result<topcoat::router::Response> {
-    let app: &AppHandle = app_context(cx);
     topcoat::router::IntoResponse::into_response(
         (
             [(topcoat::router::header::CACHE_CONTROL, "no-store, private")],
-            Json(app.config.get().as_ref().clone()),
+            Json(request_config(cx).await?),
         ),
         cx,
     )
+}
+
+#[derive(Deserialize)]
+struct BillingPlanUpdate {
+    tenant_id: String,
+    plan: String,
+}
+
+#[route(POST "/api/billing/webhook")]
+async fn billing_webhook(
+    cx: &Cx,
+    body: topcoat::router::Bytes,
+) -> Result<topcoat::router::Response> {
+    let secret = std::env::var("BILLING_WEBHOOK_SECRET")
+        .map_err(|_| bad_request("Billing webhook is not configured"))?;
+    let signature = topcoat::router::headers(cx)
+        .get("x-billing-signature")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| bad_request("Missing billing webhook signature"))?;
+    if !crate::billing::UsageRepository::verify_webhook(&body, signature, &secret) {
+        return Err(bad_request("Invalid billing webhook signature").into());
+    }
+    let update: BillingPlanUpdate = serde_json::from_slice(&body)
+        .map_err(|_| bad_request("Invalid billing webhook payload"))?;
+    let app: &AppHandle = app_context(cx);
+    app.usage
+        .set_plan(
+            &update.tenant_id,
+            &update.plan,
+            crate::util::now_unix_secs() as i64,
+        )
+        .await
+        .map_err(|error| bad_request(error.to_string()))?;
+    topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
+}
+
+#[route(GET "/api/billing/usage")]
+async fn billing_usage(cx: &Cx) -> Result<Json<crate::billing::UsageSnapshot>> {
+    let app: &AppHandle = app_context(cx);
+    let tenant_id = &auth::current_user(cx).tenant_id;
+    Ok(Json(
+        app.usage
+            .current_usage(tenant_id.as_str(), crate::util::now_unix_secs() as i64)
+            .await?,
+    ))
+}
+
+#[route(POST "/api/billing/stripe/portal")]
+async fn stripe_customer_portal(cx: &Cx) -> Result<topcoat::router::Response> {
+    let app: &AppHandle = app_context(cx);
+    let tenant_id = auth::current_user(cx).tenant_id.as_str();
+    let customer = app
+        .usage
+        .stripe_customer_id(tenant_id)
+        .await?
+        .ok_or_else(|| bad_request("No Stripe customer is linked to this account"))?;
+    let secret = std::env::var("STRIPE_SECRET_KEY")
+        .map_err(|_| bad_request("Stripe billing is not configured"))?;
+    let return_url = std::env::var("STRIPE_PORTAL_RETURN_URL")
+        .map_err(|_| bad_request("Stripe portal return URL is not configured"))?;
+    let payload: serde_json::Value = app
+        .http_client
+        .post("https://api.stripe.com/v1/billing_portal/sessions")
+        .bearer_auth(secret)
+        .form(&[("customer", customer), ("return_url", return_url)])
+        .send()
+        .await?
+        .error_for_status()
+        .map_err(|error| bad_request(format!("Stripe portal request failed: {error}")))?
+        .json()
+        .await?;
+    let url = payload
+        .get("url")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            internal_server_error(anyhow::anyhow!("Stripe portal response has no URL"))
+        })?;
+    topcoat::router::IntoResponse::into_response(
+        (
+            topcoat::router::StatusCode::SEE_OTHER,
+            [(topcoat::router::header::LOCATION, url)],
+        ),
+        cx,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct StripeCheckoutRequest {
+    plan: String,
+}
+
+#[route(POST "/api/billing/stripe/checkout")]
+async fn stripe_checkout(
+    cx: &Cx,
+    body: topcoat::router::Bytes,
+) -> Result<topcoat::router::Response> {
+    if body.len() > 16 * 1024 {
+        return Err(bad_request("Stripe checkout request exceeds 16 KiB").into());
+    }
+    let request: StripeCheckoutRequest = serde_json::from_slice(&body)
+        .map_err(|_| bad_request("Invalid Stripe checkout request"))?;
+    let price_variable = match request.plan.as_str() {
+        "pro" => "STRIPE_PRO_PRICE_ID",
+        "enterprise" => "STRIPE_ENTERPRISE_PRICE_ID",
+        _ => return Err(bad_request("Stripe checkout supports pro or enterprise plans").into()),
+    };
+    let price = std::env::var(price_variable)
+        .map_err(|_| bad_request("Stripe price is not configured for this plan"))?;
+    let secret = std::env::var("STRIPE_SECRET_KEY")
+        .map_err(|_| bad_request("Stripe billing is not configured"))?;
+    let success_url = std::env::var("STRIPE_CHECKOUT_SUCCESS_URL")
+        .map_err(|_| bad_request("Stripe checkout success URL is not configured"))?;
+    let cancel_url = std::env::var("STRIPE_CHECKOUT_CANCEL_URL")
+        .map_err(|_| bad_request("Stripe checkout cancel URL is not configured"))?;
+    let user = auth::current_user(cx);
+    let tenant_id = user.tenant_id.as_str().to_owned();
+    let app: &AppHandle = app_context(cx);
+    let payload: serde_json::Value = app
+        .http_client
+        .post("https://api.stripe.com/v1/checkout/sessions")
+        .bearer_auth(secret)
+        .form(&[
+            ("mode", "subscription"),
+            ("line_items[0][price]", price.as_str()),
+            ("line_items[0][quantity]", "1"),
+            ("success_url", success_url.as_str()),
+            ("cancel_url", cancel_url.as_str()),
+            ("customer_email", user.email.as_str()),
+            ("client_reference_id", tenant_id.as_str()),
+            ("metadata[tenant_id]", tenant_id.as_str()),
+            ("metadata[plan]", request.plan.as_str()),
+        ])
+        .send()
+        .await?
+        .error_for_status()
+        .map_err(|error| bad_request(format!("Stripe checkout request failed: {error}")))?
+        .json()
+        .await?;
+    let url = payload
+        .get("url")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            internal_server_error(anyhow::anyhow!("Stripe checkout response has no URL"))
+        })?;
+    topcoat::router::IntoResponse::into_response(
+        (
+            topcoat::router::StatusCode::SEE_OTHER,
+            [(topcoat::router::header::LOCATION, url)],
+        ),
+        cx,
+    )
+}
+
+#[route(POST "/api/billing/stripe")]
+async fn stripe_billing_webhook(
+    cx: &Cx,
+    body: topcoat::router::Bytes,
+) -> Result<topcoat::router::Response> {
+    let secret = std::env::var("STRIPE_WEBHOOK_SECRET")
+        .map_err(|_| bad_request("Stripe billing is not configured"))?;
+    let signature = topcoat::router::headers(cx)
+        .get("stripe-signature")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| bad_request("Missing Stripe signature"))?;
+    if !crate::billing::UsageRepository::verify_stripe_signature(
+        &body,
+        signature,
+        &secret,
+        crate::util::now_unix_secs() as i64,
+    ) {
+        return Err(bad_request("Invalid Stripe signature").into());
+    }
+    let payload: serde_json::Value =
+        serde_json::from_slice(&body).map_err(|_| bad_request("Invalid Stripe event"))?;
+    let event_type = payload
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if matches!(
+        event_type,
+        "customer.subscription.created"
+            | "customer.subscription.updated"
+            | "customer.subscription.deleted"
+    ) {
+        let object = payload
+            .pointer("/data/object")
+            .ok_or_else(|| bad_request("Stripe event has no subscription"))?;
+        let tenant_id = object
+            .pointer("/metadata/tenant_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| bad_request("Stripe subscription is missing tenant metadata"))?;
+        let plan = object
+            .pointer("/metadata/plan")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("free");
+        let customer_id = object.get("customer").and_then(serde_json::Value::as_str);
+        let app: &AppHandle = app_context(cx);
+        if let Some(customer_id) = customer_id {
+            app.usage
+                .set_stripe_customer_id(tenant_id, customer_id)
+                .await
+                .map_err(|error| bad_request(error.to_string()))?;
+        }
+        app.usage
+            .set_plan(
+                tenant_id,
+                if event_type.ends_with("deleted") {
+                    "free"
+                } else {
+                    plan
+                },
+                crate::util::now_unix_secs() as i64,
+            )
+            .await
+            .map_err(|error| bad_request(error.to_string()))?;
+    }
+    topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
+}
+
+#[route(POST "/api/billing/lemonsqueezy")]
+async fn lemonsqueezy_billing_webhook(
+    cx: &Cx,
+    body: topcoat::router::Bytes,
+) -> Result<topcoat::router::Response> {
+    let secret = std::env::var("LEMONSQUEEZY_WEBHOOK_SECRET")
+        .map_err(|_| bad_request("LemonSqueezy billing is not configured"))?;
+    let signature = topcoat::router::headers(cx)
+        .get("x-signature")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| bad_request("Missing LemonSqueezy signature"))?;
+    if !crate::billing::UsageRepository::verify_hex_signature(&body, signature, &secret) {
+        return Err(bad_request("Invalid LemonSqueezy signature").into());
+    }
+    let payload: serde_json::Value =
+        serde_json::from_slice(&body).map_err(|_| bad_request("Invalid LemonSqueezy event"))?;
+    let event = payload
+        .pointer("/meta/event_name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if matches!(
+        event,
+        "subscription_created"
+            | "subscription_updated"
+            | "subscription_cancelled"
+            | "subscription_expired"
+    ) {
+        let custom = payload
+            .pointer("/meta/custom_data")
+            .ok_or_else(|| bad_request("LemonSqueezy event is missing custom data"))?;
+        let tenant_id = custom
+            .get("tenant_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| bad_request("LemonSqueezy event is missing tenant metadata"))?;
+        let plan = custom
+            .get("plan")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("free");
+        let app: &AppHandle = app_context(cx);
+        app.usage
+            .set_plan(
+                tenant_id,
+                if event.ends_with("cancelled") || event.ends_with("expired") {
+                    "free"
+                } else {
+                    plan
+                },
+                crate::util::now_unix_secs() as i64,
+            )
+            .await
+            .map_err(|error| bad_request(error.to_string()))?;
+    }
+    topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
 }
 
 #[route(POST "/api/config/import")]
@@ -335,8 +862,7 @@ fn redirect_to(cx: &Cx, location: &'static str) -> Result<topcoat::router::Respo
 
 #[route(GET "/api/chat")]
 async fn get_chat_inbox(cx: &Cx) -> Result<topcoat::router::Response> {
-    let app: &AppHandle = app_context(cx);
-    let snapshot = app.chat.snapshot().await?;
+    let snapshot = request_chat(cx).await?.snapshot().await?;
     topcoat::router::IntoResponse::into_response(
         (
             [(topcoat::router::header::CACHE_CONTROL, "no-store")],
@@ -351,8 +877,8 @@ async fn acknowledge_chat_message(
     cx: &Cx,
     Json(request): Json<AcknowledgeChatMessage>,
 ) -> Result<topcoat::router::Response> {
-    let app: &AppHandle = app_context(cx);
-    if !app.chat.acknowledge(request.id).await? {
+    let chat = request_chat(cx).await?;
+    if !chat.acknowledge(request.id).await? {
         return topcoat::router::IntoResponse::into_response(
             (
                 topcoat::router::StatusCode::CONFLICT,
@@ -362,7 +888,7 @@ async fn acknowledge_chat_message(
         );
     }
 
-    topcoat::router::IntoResponse::into_response(Json(app.chat.snapshot().await?), cx)
+    topcoat::router::IntoResponse::into_response(Json(chat.snapshot().await?), cx)
 }
 
 #[route(GET "/api/events")]
@@ -371,29 +897,34 @@ async fn server_events(
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<SseEvent>> + use<>>> {
     let app: &AppHandle = app_context(cx);
     let status_rx = app.stream.subscribe_status();
-    let chat_changes = app.chat.subscribe_changes();
+    let tenant_id = auth::current_user(cx).tenant_id.clone();
+    let chat_changes = request_chat(cx).await?.subscribe_changes();
 
     let initial_status = SseEvent::new()
         .event("stream_status")
-        .json_data(&*status_rx.borrow())?;
+        .json_data(&app.stream.status(&tenant_id))?;
     let initial_events = futures_util::stream::iter([
         Ok(initial_status),
         Ok(SseEvent::new().event("chat_changed").data("changed")),
     ]);
 
     let changes = futures_util::stream::unfold(
-        (status_rx, chat_changes),
-        |(mut status_rx, mut chat_changes)| async move {
+        (status_rx, chat_changes, tenant_id),
+        |(mut status_rx, mut chat_changes, tenant_id)| async move {
             tokio::select! {
                 changed = status_rx.changed() => {
                     if changed.is_err() {
                         return None;
                     }
-                    let status = *status_rx.borrow();
+                    let status = status_rx
+                        .borrow()
+                        .get(&tenant_id)
+                        .copied()
+                        .unwrap_or(StreamStatus { state: StreamState::Offline });
                     let event = SseEvent::new()
                         .event("stream_status")
                         .json_data(&status);
-                    Some((event, (status_rx, chat_changes)))
+                    Some((event, (status_rx, chat_changes, tenant_id)))
                 }
                 changed = chat_changes.changed() => {
                     if changed.is_err() {
@@ -401,7 +932,7 @@ async fn server_events(
                     }
                     Some((
                         Ok(SseEvent::new().event("chat_changed").data("changed")),
-                        (status_rx, chat_changes),
+                        (status_rx, chat_changes, tenant_id),
                     ))
                 }
             }
@@ -436,10 +967,34 @@ async fn service_logs(
     Ok(Sse::new(initial.chain(live)).keep_alive(KeepAlive::new()))
 }
 
-#[route(POST "/api/webhook")]
-async fn receive_webhook(
+#[route(POST "/api/v1/webhooks/kick")]
+async fn receive_kick_webhook(
     cx: &Cx,
     body: topcoat::router::Bytes,
+) -> Result<topcoat::router::Response> {
+    receive_webhook_for_platform(cx, body, "kick").await
+}
+
+#[route(POST "/api/v1/webhooks/x")]
+async fn receive_x_webhook(
+    cx: &Cx,
+    body: topcoat::router::Bytes,
+) -> Result<topcoat::router::Response> {
+    receive_webhook_for_platform(cx, body, "x").await
+}
+
+#[route(POST "/api/v1/webhooks/twitch")]
+async fn receive_twitch_webhook(
+    cx: &Cx,
+    body: topcoat::router::Bytes,
+) -> Result<topcoat::router::Response> {
+    receive_webhook_for_platform(cx, body, "twitch").await
+}
+
+async fn receive_webhook_for_platform(
+    cx: &Cx,
+    body: topcoat::router::Bytes,
+    platform: &str,
 ) -> Result<topcoat::router::Response> {
     const MAX_WEBHOOK_SIZE: usize = 128 * 1024;
     if body.len() > MAX_WEBHOOK_SIZE {
@@ -457,8 +1012,41 @@ async fn receive_webhook(
         .collect();
     let body_bytes = body.len();
     let event = crate::server::state::WebhookEvent { headers, body };
-    let settings = app.config.get().chat.clone();
-    let platform = if event.header("kick-event-signature").is_some() {
+    let stream_key = event
+        .header("x-tenant-stream-key")
+        .ok_or_else(|| bad_request("X-Tenant-Stream-Key header is required"))?;
+    let tenant = app
+        .tenants
+        .authenticate(stream_key)
+        .await?
+        .ok_or_else(|| bad_request("Invalid tenant stream key"))?;
+    let settings = tenant.chat;
+    let chat = app.tenant_chat(&tenant.id).await?;
+    if platform == "twitch" {
+        let secret = settings
+            .twitch_eventsub_secret
+            .as_deref()
+            .filter(|secret| !secret.is_empty())
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                (tenant.id == crate::tenant::TenantId::default_tenant())
+                    .then(|| std::env::var("TWITCH_EVENTSUB_SECRET").ok())
+                    .flatten()
+            })
+            .ok_or_else(|| bad_request("Twitch EventSub is not configured"))?;
+        let (challenge, message) = crate::chat::twitch_eventsub::parse(&event, &secret)
+            .map_err(|error| bad_request(error.to_string()))?;
+        if let Some(message) = message {
+            dispatch_configured_relay(&tenant.id, &settings, &message, app.http_client.clone())
+                .await;
+            chat.enqueue(message).await.map_err(internal_server_error)?;
+        }
+        if let Some(challenge) = challenge {
+            return Ok(topcoat::router::Response::new(topcoat::router::Body::from(
+                challenge,
+            )));
+        }
+    } else if platform == "kick" {
         let message = match crate::chat::kick::process_event(&settings, &event) {
             Ok(message) => message,
             Err(error) => {
@@ -466,12 +1054,9 @@ async fn receive_webhook(
                 return Err(bad_request("Rejected Kick webhook").into());
             }
         };
-        app.chat
-            .enqueue(message)
-            .await
-            .map_err(internal_server_error)?;
-        "kick"
-    } else if event.header("x-twitter-webhooks-signature").is_some() {
+        dispatch_configured_relay(&tenant.id, &settings, &message, app.http_client.clone()).await;
+        chat.enqueue(message).await.map_err(internal_server_error)?;
+    } else {
         let message = match crate::chat::x::process_event(&settings, &event) {
             Ok(message) => message,
             Err(error) => {
@@ -480,18 +1065,44 @@ async fn receive_webhook(
             }
         };
         if let Some(message) = message {
-            app.chat
-                .enqueue(message)
-                .await
-                .map_err(internal_server_error)?;
+            dispatch_configured_relay(&tenant.id, &settings, &message, app.http_client.clone())
+                .await;
+            chat.enqueue(message).await.map_err(internal_server_error)?;
         }
-        "x"
-    } else {
-        tracing::warn!("Rejected webhook without a recognized platform signature");
-        return Err(bad_request("Webhook signature is missing").into());
-    };
+    }
     tracing::info!(platform, body_bytes, "Webhook accepted");
     topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
+}
+
+async fn dispatch_configured_relay(
+    tenant_id: &crate::tenant::TenantId,
+    settings: &crate::config::ChatSettings,
+    message: &crate::chat::IncomingChatMessage,
+    client: reqwest::Client,
+) {
+    if !settings.relay_enabled && std::env::var("CHAT_RELAY_DESTINATION").is_err() {
+        return;
+    }
+    let Some(destination) = settings
+        .relay_destination
+        .clone()
+        .or_else(|| std::env::var("CHAT_RELAY_DESTINATION").ok())
+    else {
+        return;
+    };
+    let rule = crate::chat::relay::RelayRule {
+        tenant_id: tenant_id.as_str().to_owned(),
+        source: settings
+            .relay_source
+            .clone()
+            .or_else(|| std::env::var("CHAT_RELAY_SOURCE").ok())
+            .unwrap_or_else(|| message.source.clone()),
+        destination,
+        prefix: "[relay] ".to_owned(),
+    };
+    if let Err(error) = crate::chat::relay::dispatch(&rule, message, settings, &client).await {
+        tracing::warn!(%error, "Chat relay dispatch failed");
+    }
 }
 
 #[derive(Deserialize)]

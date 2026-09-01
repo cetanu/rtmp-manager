@@ -4,14 +4,17 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_valid::Validate;
-use std::path::Path;
+use sqlx::{Any, Row, Transaction};
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
-use toasty::Executor;
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{Mutex, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
 pub mod kick;
+pub mod relay;
 pub mod twitch;
+pub mod twitch_eventsub;
 pub mod x;
 pub mod youtube;
 
@@ -68,37 +71,16 @@ pub struct ChatMessage {
     pub received_at_unix_ms: u64,
 }
 
-#[derive(Debug, toasty::Model)]
-#[table = "chat_messages"]
+#[derive(Debug)]
 struct StoredChatMessage {
-    #[key]
-    #[auto]
-    id: u64,
+    id: i64,
     source: String,
     external_id: String,
     author: String,
     text: String,
     avatar_url: Option<String>,
     sent_at: Option<String>,
-    received_at_unix_ms: u64,
-}
-
-#[derive(Debug, toasty::Model)]
-#[table = "chat_seen"]
-struct StoredChatSeen {
-    #[key]
-    #[auto]
-    id: u64,
-    source: String,
-    external_id: String,
-}
-
-#[derive(Debug, toasty::Model)]
-#[table = "chat_state"]
-struct StoredChatState {
-    #[key]
-    id: u64,
-    dropped: u64,
+    received_at_unix_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -115,127 +97,129 @@ pub enum EnqueueOutcome {
     Dropped,
 }
 
-/// SQLite-backed persistent chat inbox with bounded queue capacity and deduplication.
+/// Database-backed persistent chat inbox with bounded queue capacity and deduplication.
 pub struct ChatInbox {
+    tenant_id: crate::tenant::TenantId,
     capacity: usize,
-    database: toasty::Db,
+    database: crate::database::Database,
 }
 
 impl ChatInbox {
-    pub async fn open(path: &Path, capacity: usize) -> Result<Self> {
+    pub async fn open(
+        database: crate::database::Database,
+        tenant_id: crate::tenant::TenantId,
+        capacity: usize,
+    ) -> Result<Self> {
         assert!(capacity > 0, "chat queue capacity must be positive");
-        let database = toasty::Db::builder()
-            .models(toasty::models!(
-                StoredChatMessage,
-                StoredChatSeen,
-                StoredChatState
-            ))
-            .connect(&format!("sqlite:{}", path.display()))
-            .await
-            .with_context(|| format!("Failed to open chat inbox database '{}'", path.display()))?;
-        Self::from_database(database, capacity).await
-    }
-
-    async fn from_database(database: toasty::Db, capacity: usize) -> Result<Self> {
-        let mut database = database.clone();
-        let state = StoredChatState::filter(StoredChatState::fields().id().eq(1_u64))
-            .first()
-            .exec(&mut database)
-            .await;
-        let state = if state.is_err() {
-            database.push_schema().await?;
-            StoredChatState::filter(StoredChatState::fields().id().eq(1_u64))
-                .first()
-                .exec(&mut database)
-                .await?
-        } else {
-            state?
+        sqlx::query(
+            "INSERT INTO chat_state (tenant_id, dropped) VALUES ($1, $2) \
+             ON CONFLICT (tenant_id) DO NOTHING",
+        )
+        .bind(tenant_id.as_str())
+        .bind(0_i64)
+        .execute(database.pool())
+        .await?;
+        let mut inbox = Self {
+            tenant_id,
+            capacity,
+            database,
         };
-        if state.is_none() {
-            toasty::create!(StoredChatState { id: 1, dropped: 0 })
-                .exec(&mut database)
-                .await?;
-        }
-
-        let mut inbox = Self { capacity, database };
         inbox.trim_to_capacity().await?;
         Ok(inbox)
     }
 
     pub async fn enqueue(&mut self, incoming: IncomingChatMessage) -> Result<EnqueueOutcome> {
         let incoming = incoming.normalized()?;
-        let mut database = self.database.clone();
-        let mut transaction = database.transaction().await?;
+        let mut transaction = self.database.pool().begin().await?;
 
-        let seen = StoredChatSeen::filter(
-            StoredChatSeen::fields().source().eq(&incoming.source).and(
-                StoredChatSeen::fields()
-                    .external_id()
-                    .eq(&incoming.external_id),
-            ),
+        let seen: Option<i64> = sqlx::query_scalar(
+            "SELECT id FROM chat_seen \
+                 WHERE tenant_id = $1 AND source = $2 AND external_id = $3",
         )
-        .first()
-        .exec(&mut transaction)
+        .bind(self.tenant_id.as_str())
+        .bind(&incoming.source)
+        .bind(&incoming.external_id)
+        .fetch_optional(&mut *transaction)
         .await?;
         if seen.is_some() {
             return Ok(EnqueueOutcome::Duplicate);
         }
-        toasty::create!(StoredChatSeen {
-            source: incoming.source.clone(),
-            external_id: incoming.external_id.clone(),
-        })
-        .exec(&mut transaction)
+        let seen_id = next_seen_id(&mut transaction).await?;
+        sqlx::query(
+            "INSERT INTO chat_seen (id, tenant_id, source, external_id) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(seen_id)
+        .bind(self.tenant_id.as_str())
+        .bind(&incoming.source)
+        .bind(&incoming.external_id)
+        .execute(&mut *transaction)
         .await?;
-        trim_seen(&mut transaction, self.capacity.saturating_mul(4)).await?;
+        trim_seen(
+            &mut transaction,
+            &self.tenant_id,
+            self.capacity.saturating_mul(4),
+        )
+        .await?;
 
-        let mut messages = ordered_messages(&mut transaction).await?;
+        let mut messages = ordered_messages(&mut transaction, &self.tenant_id).await?;
         let message_count = messages.len();
         if message_count >= self.capacity {
-            increment_dropped(&mut transaction, 1).await?;
+            increment_dropped(&mut transaction, &self.tenant_id, 1).await?;
             if self.capacity == 1 {
                 transaction.commit().await?;
                 return Ok(EnqueueOutcome::Dropped);
             }
-            messages.remove(1).delete().exec(&mut transaction).await?;
+            delete_message(&mut transaction, &self.tenant_id, messages.remove(1).id).await?;
         }
 
-        toasty::create!(StoredChatMessage {
-            source: incoming.source,
-            external_id: incoming.external_id,
-            author: incoming.author,
-            text: incoming.text,
-            avatar_url: incoming.avatar_url,
-            sent_at: incoming.sent_at,
-            received_at_unix_ms: now_unix_ms(),
-        })
-        .exec(&mut transaction)
+        let message_id = next_message_id(&mut transaction).await?;
+        sqlx::query(
+            "INSERT INTO chat_messages \
+             (id, tenant_id, source, external_id, author, text, avatar_url, sent_at, received_at_unix_ms) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        )
+        .bind(message_id)
+        .bind(self.tenant_id.as_str())
+        .bind(incoming.source)
+        .bind(incoming.external_id)
+        .bind(incoming.author)
+        .bind(incoming.text)
+        .bind(incoming.avatar_url)
+        .bind(incoming.sent_at)
+        .bind(now_unix_ms() as i64)
+        .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
         Ok(EnqueueOutcome::Accepted)
     }
 
     pub async fn acknowledge(&mut self, expected_id: u64) -> Result<bool> {
-        let mut database = self.database.clone();
-        let Some(message) = ordered_messages(&mut database).await?.into_iter().next() else {
+        let mut transaction = self.database.pool().begin().await?;
+        let Some(message) = ordered_messages(&mut transaction, &self.tenant_id)
+            .await?
+            .into_iter()
+            .next()
+        else {
             return Ok(false);
         };
-        if message.id != expected_id {
+        if message.id != expected_id as i64 {
             return Ok(false);
         }
-        message.delete().exec(&mut database).await?;
+        delete_message(&mut transaction, &self.tenant_id, message.id).await?;
+        transaction.commit().await?;
         Ok(true)
     }
 
     pub async fn snapshot(&self) -> Result<ChatInboxSnapshot> {
-        let mut database = self.database.clone();
-        let messages = ordered_messages(&mut database).await?;
+        let mut transaction = self.database.pool().begin().await?;
+        let messages = ordered_messages(&mut transaction, &self.tenant_id).await?;
         let queued = messages.len();
         let messages = messages
             .iter()
             .take(10)
             .map(chat_message_from_model)
             .collect::<Result<_>>()?;
-        let dropped = load_state(&mut database).await?.dropped;
+        let dropped = load_dropped(&mut transaction, &self.tenant_id).await?;
 
         Ok(ChatInboxSnapshot {
             messages,
@@ -251,17 +235,21 @@ impl ChatInbox {
     }
 
     async fn trim_to_capacity(&mut self) -> Result<()> {
-        let mut database = self.database.clone();
-        let mut transaction = database.transaction().await?;
-        let mut messages = ordered_messages(&mut transaction).await?;
+        let mut transaction = self.database.pool().begin().await?;
+        let mut messages = ordered_messages(&mut transaction, &self.tenant_id).await?;
         let excess = messages.len().saturating_sub(self.capacity);
         for _ in 0..excess {
-            messages.remove(1).delete().exec(&mut transaction).await?;
+            delete_message(&mut transaction, &self.tenant_id, messages.remove(1).id).await?;
         }
         if excess > 0 {
-            increment_dropped(&mut transaction, excess).await?;
+            increment_dropped(&mut transaction, &self.tenant_id, excess).await?;
         }
-        trim_seen(&mut transaction, self.capacity.saturating_mul(4)).await?;
+        trim_seen(
+            &mut transaction,
+            &self.tenant_id,
+            self.capacity.saturating_mul(4),
+        )
+        .await?;
         transaction.commit().await?;
         Ok(())
     }
@@ -269,48 +257,124 @@ impl ChatInbox {
 
 fn chat_message_from_model(message: &StoredChatMessage) -> Result<ChatMessage> {
     Ok(ChatMessage {
-        id: message.id,
+        id: message
+            .id
+            .try_into()
+            .context("Stored chat ID is negative")?,
         source: message.source.clone(),
         external_id: message.external_id.clone(),
         author: message.author.clone(),
         text: message.text.clone(),
         avatar_url: message.avatar_url.clone(),
         sent_at: message.sent_at.clone(),
-        received_at_unix_ms: message.received_at_unix_ms,
+        received_at_unix_ms: message
+            .received_at_unix_ms
+            .try_into()
+            .context("Stored chat timestamp is negative")?,
     })
 }
 
-async fn ordered_messages(executor: &mut dyn Executor) -> Result<Vec<StoredChatMessage>> {
-    Ok(StoredChatMessage::all()
-        .order_by(StoredChatMessage::fields().id().asc())
-        .exec(executor)
-        .await?)
+async fn ordered_messages(
+    transaction: &mut Transaction<'_, Any>,
+    tenant_id: &crate::tenant::TenantId,
+) -> Result<Vec<StoredChatMessage>> {
+    let rows = sqlx::query(
+        "SELECT id, source, external_id, author, text, avatar_url, sent_at, received_at_unix_ms \
+         FROM chat_messages WHERE tenant_id = $1 ORDER BY id ASC",
+    )
+    .bind(tenant_id.as_str())
+    .fetch_all(&mut **transaction)
+    .await?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(StoredChatMessage {
+                id: row.try_get("id")?,
+                source: row.try_get("source")?,
+                external_id: row.try_get("external_id")?,
+                author: row.try_get("author")?,
+                text: row.try_get("text")?,
+                avatar_url: row.try_get("avatar_url")?,
+                sent_at: row.try_get("sent_at")?,
+                received_at_unix_ms: row.try_get("received_at_unix_ms")?,
+            })
+        })
+        .collect()
 }
 
-async fn increment_dropped(executor: &mut dyn Executor, amount: usize) -> Result<()> {
-    let mut state = load_state(executor).await?;
-    let dropped = state.dropped.saturating_add(amount as u64);
-    state.update().dropped(dropped).exec(executor).await?;
+async fn increment_dropped(
+    transaction: &mut Transaction<'_, Any>,
+    tenant_id: &crate::tenant::TenantId,
+    amount: usize,
+) -> Result<()> {
+    sqlx::query("UPDATE chat_state SET dropped = dropped + $1 WHERE tenant_id = $2")
+        .bind(amount as i64)
+        .bind(tenant_id.as_str())
+        .execute(&mut **transaction)
+        .await?;
     Ok(())
 }
 
-async fn trim_seen(executor: &mut dyn Executor, capacity: usize) -> Result<()> {
-    let mut seen = StoredChatSeen::all()
-        .order_by(StoredChatSeen::fields().id().asc())
-        .exec(executor)
-        .await?;
-    while seen.len() > capacity {
-        seen.remove(0).delete().exec(executor).await?;
+async fn trim_seen(
+    transaction: &mut Transaction<'_, Any>,
+    tenant_id: &crate::tenant::TenantId,
+    capacity: usize,
+) -> Result<()> {
+    let ids: Vec<i64> =
+        sqlx::query_scalar("SELECT id FROM chat_seen WHERE tenant_id = $1 ORDER BY id ASC")
+            .bind(tenant_id.as_str())
+            .fetch_all(&mut **transaction)
+            .await?;
+    let excess = ids.len().saturating_sub(capacity);
+    for id in ids.into_iter().take(excess) {
+        sqlx::query("DELETE FROM chat_seen WHERE tenant_id = $1 AND id = $2")
+            .bind(tenant_id.as_str())
+            .bind(id)
+            .execute(&mut **transaction)
+            .await?;
     }
     Ok(())
 }
 
-async fn load_state(executor: &mut dyn Executor) -> Result<StoredChatState> {
-    StoredChatState::filter(StoredChatState::fields().id().eq(1_u64))
-        .first()
-        .exec(executor)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("chat state row is missing"))
+async fn load_dropped(
+    transaction: &mut Transaction<'_, Any>,
+    tenant_id: &crate::tenant::TenantId,
+) -> Result<u64> {
+    let dropped: i64 = sqlx::query_scalar("SELECT dropped FROM chat_state WHERE tenant_id = $1")
+        .bind(tenant_id.as_str())
+        .fetch_one(&mut **transaction)
+        .await?;
+    dropped
+        .try_into()
+        .context("Stored dropped count is negative")
+}
+
+async fn next_seen_id(transaction: &mut Transaction<'_, Any>) -> Result<i64> {
+    Ok(
+        sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) + 1 FROM chat_seen")
+            .fetch_one(&mut **transaction)
+            .await?,
+    )
+}
+
+async fn next_message_id(transaction: &mut Transaction<'_, Any>) -> Result<i64> {
+    Ok(
+        sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) + 1 FROM chat_messages")
+            .fetch_one(&mut **transaction)
+            .await?,
+    )
+}
+
+async fn delete_message(
+    transaction: &mut Transaction<'_, Any>,
+    tenant_id: &crate::tenant::TenantId,
+    id: i64,
+) -> Result<()> {
+    sqlx::query("DELETE FROM chat_messages WHERE tenant_id = $1 AND id = $2")
+        .bind(tenant_id.as_str())
+        .bind(id)
+        .execute(&mut **transaction)
+        .await?;
+    Ok(())
 }
 
 enum ChatCommand {
@@ -501,6 +565,7 @@ impl ChatActor {
             handle_clone,
             YouTubeChatConfig {
                 target,
+                api_key: chat.youtube_api_key.clone(),
                 min_poll_interval: Duration::from_secs(chat.youtube_min_poll_interval_secs),
                 adaptive_polling: chat.youtube_adaptive_polling,
             },
@@ -520,8 +585,13 @@ pub struct ChatHandle {
 }
 
 impl ChatHandle {
-    pub async fn spawn(path: &Path, capacity: usize, http_client: Client) -> Result<Self> {
-        let inbox = ChatInbox::open(path, capacity).await?;
+    pub async fn spawn(
+        database: crate::database::Database,
+        tenant_id: crate::tenant::TenantId,
+        capacity: usize,
+        http_client: Client,
+    ) -> Result<Self> {
+        let inbox = ChatInbox::open(database, tenant_id, capacity).await?;
         let (revision_tx, revision_rx) = watch::channel(0);
         let (youtube_status_tx, youtube_status_rx) = watch::channel(None);
         let (sender, receiver) = mpsc::channel(64);
@@ -636,6 +706,55 @@ impl ChatHandle {
     }
 }
 
+/// Lazily owns one isolated chat actor per tenant.
+#[derive(Clone)]
+pub struct ChatHub {
+    database: crate::database::Database,
+    http_client: Client,
+    handles: Arc<Mutex<HashMap<crate::tenant::TenantId, ChatHandle>>>,
+}
+
+impl ChatHub {
+    pub fn new(database: crate::database::Database, http_client: Client) -> Self {
+        Self {
+            database,
+            http_client,
+            handles: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub async fn tenant(
+        &self,
+        tenant_id: &crate::tenant::TenantId,
+        capacity: usize,
+    ) -> Result<ChatHandle> {
+        let mut handles = self.handles.lock().await;
+        if let Some(handle) = handles.get(tenant_id) {
+            return Ok(handle.clone());
+        }
+        let handle = ChatHandle::spawn(
+            self.database.clone(),
+            tenant_id.clone(),
+            capacity,
+            self.http_client.clone(),
+        )
+        .await?;
+        handles.insert(tenant_id.clone(), handle.clone());
+        Ok(handle)
+    }
+
+    pub async fn apply_config(
+        &self,
+        tenant_id: &crate::tenant::TenantId,
+        config: ChatSettings,
+    ) -> Result<()> {
+        self.tenant(tenant_id, config.queue_capacity)
+            .await?
+            .apply_config(config)
+            .await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -645,7 +764,19 @@ mod tests {
 
     async fn inbox(capacity: usize) -> ChatInbox {
         let path = database_path();
-        ChatInbox::open(&path, capacity).await.unwrap()
+        ChatInbox::open(
+            database(&path).await,
+            crate::tenant::TenantId::default_tenant(),
+            capacity,
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn database(path: &std::path::Path) -> crate::database::Database {
+        crate::database::Database::connect(&crate::database::sqlite_url(path))
+            .await
+            .unwrap()
     }
 
     fn message(source: &str, external_id: &str, text: &str) -> IncomingChatMessage {
@@ -669,6 +800,44 @@ mod tests {
                 .unwrap()
                 .as_nanos(),
         ))
+    }
+
+    #[tokio::test]
+    async fn tenant_inboxes_do_not_share_messages_or_deduplication() {
+        let path = database_path();
+        let database = database(&path).await;
+        let mut alpha = ChatInbox::open(
+            database.clone(),
+            crate::tenant::TenantId::new("alpha").unwrap(),
+            10,
+        )
+        .await
+        .unwrap();
+        let mut beta = ChatInbox::open(database, crate::tenant::TenantId::new("beta").unwrap(), 10)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            alpha
+                .enqueue(message("twitch", "same-id", "alpha message"))
+                .await
+                .unwrap(),
+            EnqueueOutcome::Accepted
+        );
+        assert_eq!(
+            beta.enqueue(message("twitch", "same-id", "beta message"))
+                .await
+                .unwrap(),
+            EnqueueOutcome::Accepted
+        );
+        assert_eq!(
+            alpha.snapshot().await.unwrap().messages[0].text,
+            "alpha message"
+        );
+        assert_eq!(
+            beta.snapshot().await.unwrap().messages[0].text,
+            "beta message"
+        );
     }
 
     #[tokio::test]
@@ -696,7 +865,13 @@ mod tests {
     #[tokio::test]
     async fn snapshot_shows_the_first_ten_messages() {
         let path = database_path();
-        let mut inbox = ChatInbox::open(&path, 12).await.unwrap();
+        let mut inbox = ChatInbox::open(
+            database(&path).await,
+            crate::tenant::TenantId::default_tenant(),
+            12,
+        )
+        .await
+        .unwrap();
         for id in 1..=11 {
             inbox
                 .enqueue(message("twitch", &id.to_string(), &format!("message {id}")))
@@ -789,14 +964,26 @@ mod tests {
     async fn sqlite_queue_survives_reopening() {
         let path = database_path();
         {
-            let mut inbox = ChatInbox::open(&path, 3).await.unwrap();
+            let mut inbox = ChatInbox::open(
+                database(&path).await,
+                crate::tenant::TenantId::default_tenant(),
+                3,
+            )
+            .await
+            .unwrap();
             inbox
                 .enqueue(message("youtube", "persisted", "still here"))
                 .await
                 .unwrap();
         }
         {
-            let inbox = ChatInbox::open(&path, 3).await.unwrap();
+            let inbox = ChatInbox::open(
+                database(&path).await,
+                crate::tenant::TenantId::default_tenant(),
+                3,
+            )
+            .await
+            .unwrap();
             assert_eq!(
                 inbox.snapshot().await.unwrap().messages[0].text,
                 "still here"
@@ -809,7 +996,13 @@ mod tests {
     async fn reducing_capacity_preserves_current_and_newest_waiting_messages() {
         let path = database_path();
         {
-            let mut inbox = ChatInbox::open(&path, 4).await.unwrap();
+            let mut inbox = ChatInbox::open(
+                database(&path).await,
+                crate::tenant::TenantId::default_tenant(),
+                4,
+            )
+            .await
+            .unwrap();
             inbox
                 .enqueue(message("twitch", "1", "current"))
                 .await
@@ -828,7 +1021,13 @@ mod tests {
                 .unwrap();
         }
         {
-            let mut inbox = ChatInbox::open(&path, 2).await.unwrap();
+            let mut inbox = ChatInbox::open(
+                database(&path).await,
+                crate::tenant::TenantId::default_tenant(),
+                2,
+            )
+            .await
+            .unwrap();
             let snapshot = inbox.snapshot().await.unwrap();
             assert_eq!(snapshot.messages[0].text, "current");
             assert_eq!(snapshot.queued, 2);
@@ -842,8 +1041,13 @@ mod tests {
     #[tokio::test]
     async fn opens_after_the_configuration_store_on_the_same_database() {
         let path = database_path();
-        let _ = crate::config::ConfigStore::open(&path).await.unwrap();
-        let mut inbox = ChatInbox::open(&path, 2).await.unwrap();
+        let database = database(&path).await;
+        let _ = crate::config::ConfigStore::open(database.clone())
+            .await
+            .unwrap();
+        let mut inbox = ChatInbox::open(database, crate::tenant::TenantId::default_tenant(), 2)
+            .await
+            .unwrap();
         assert_eq!(
             inbox
                 .enqueue(message("twitch", "shared-db", "works"))
@@ -858,7 +1062,14 @@ mod tests {
     #[tokio::test]
     async fn chat_handle_actor_processes_commands() {
         let path = database_path();
-        let handle = ChatHandle::spawn(&path, 5, Client::new()).await.unwrap();
+        let handle = ChatHandle::spawn(
+            database(&path).await,
+            crate::tenant::TenantId::default_tenant(),
+            5,
+            Client::new(),
+        )
+        .await
+        .unwrap();
         let mut rev_rx = handle.subscribe_changes();
 
         let outcome = handle
@@ -898,12 +1109,23 @@ mod tests {
     async fn youtube_control_does_not_restart_twitch() {
         let actor_path = database_path();
         let handle_path = database_path();
-        let inbox = ChatInbox::open(&actor_path, 5).await.unwrap();
+        let inbox = ChatInbox::open(
+            database(&actor_path).await,
+            crate::tenant::TenantId::default_tenant(),
+            5,
+        )
+        .await
+        .unwrap();
         let (revision_tx, _) = watch::channel(0);
         let (youtube_status_tx, _) = watch::channel(None);
-        let handle = ChatHandle::spawn(&handle_path, 5, Client::new())
-            .await
-            .unwrap();
+        let handle = ChatHandle::spawn(
+            database(&handle_path).await,
+            crate::tenant::TenantId::default_tenant(),
+            5,
+            Client::new(),
+        )
+        .await
+        .unwrap();
         let mut actor = ChatActor {
             inbox,
             twitch_task: None,

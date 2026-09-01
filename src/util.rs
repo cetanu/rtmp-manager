@@ -1,28 +1,18 @@
+use aws_lc_rs::rand::{SecureRandom, SystemRandom};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Compares two byte slices in constant time.
-pub fn constant_time_eq(expected: impl AsRef<[u8]>, submitted: impl AsRef<[u8]>) -> bool {
-    let expected = expected.as_ref();
-    let submitted = submitted.as_ref();
-    if expected.len() != submitted.len() {
-        return false;
-    }
-    expected
-        .iter()
-        .zip(submitted)
-        .fold(0_u8, |difference, (left, right)| {
-            difference | (left ^ right)
-        })
-        == 0
+pub fn generate_secure_token() -> anyhow::Result<String> {
+    let mut bytes = [0_u8; 24];
+    SystemRandom::new()
+        .fill(&mut bytes)
+        .map_err(|_| anyhow::anyhow!("Failed to generate a secure token"))?;
+    Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 
-/// Constant-time comparison for authentication tokens and stream keys.
-/// Returns `false` if the expected token is empty or length differs.
-pub fn secure_token_matches(expected: &str, submitted: &str) -> bool {
-    if expected.is_empty() {
-        return false;
-    }
-    constant_time_eq(expected.as_bytes(), submitted.as_bytes())
+pub fn stream_key_digest(stream_key: &str) -> String {
+    URL_SAFE_NO_PAD.encode(Sha256::digest(stream_key.as_bytes()))
 }
 
 /// Redacts sensitive stream keys and URLs from strings (e.g. process logs, stderr).
@@ -75,21 +65,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn constant_time_comparison_works() {
-        assert!(constant_time_eq(b"same", b"same"));
-        assert!(!constant_time_eq(b"same", b"diff"));
-        assert!(!constant_time_eq(b"short", b"longer"));
-    }
-
-    #[test]
-    fn secure_token_matching_requires_nonempty_and_exact() {
-        assert!(secure_token_matches("private-key", "private-key"));
-        assert!(!secure_token_matches("private-key", "wrong-key"));
-        assert!(!secure_token_matches("private-key", "private-key-extra"));
-        assert!(!secure_token_matches("", ""));
-    }
-
-    #[test]
     fn secret_redaction_removes_keys_and_urls() {
         let secrets = vec!["local-key".to_owned(), "twitch-key".to_owned()];
         let line = "rtmp://localhost/live/local-key -> rtmp://twitch/app/twitch-key";
@@ -105,5 +80,25 @@ mod tests {
             Some("hello".to_string())
         );
         assert_eq!(non_empty(None), None);
+    }
+
+    #[test]
+    fn generated_tokens_are_url_safe_and_unique() {
+        let first = generate_secure_token().unwrap();
+        let second = generate_secure_token().unwrap();
+        assert_ne!(first, second);
+        assert!(
+            first
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "_-".contains(character))
+        );
+    }
+
+    #[test]
+    fn stream_key_digests_are_stable_without_exposing_the_key() {
+        let digest = stream_key_digest("private-key");
+        assert_eq!(digest, stream_key_digest("private-key"));
+        assert_ne!(digest, stream_key_digest("different-key"));
+        assert!(!digest.contains("private-key"));
     }
 }

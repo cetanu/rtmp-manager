@@ -1,0 +1,44 @@
+services:
+  rtmp-manager:
+    build:
+      context: .
+    image: ghcr.io/cetanu/rtmp-manager:develop
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-sqlite:///data/rtmp-manager.sqlite3?mode=rwc}
+      RUST_LOG: ${RUST_LOG:-rtmp_proxy=info,rtmp_rs=off}
+      MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:-}
+      RELAY_BROKER_URL: ${RELAY_BROKER_URL:-}
+    ports:
+      - "${RTMP_PORT:-1935}:1935"
+      - "${HTTP_PORT:-3000}:3000"
+      - "${SRT_PORT:-6000}:6000/udp"
+    volumes:
+      - rtmp-manager-data:/data
+
+  # Optional control-plane broker for distributed relay workers.
+  relay-broker:
+    image: redis:7-alpine
+    profiles: [broker]
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - relay-broker-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  relay-worker:
+    image: ghcr.io/cetanu/rtmp-manager:develop
+    profiles: [broker]
+    command: ["relay-worker", "--broker-url", "redis://relay-broker/"]
+    restart: unless-stopped
+    depends_on:
+      relay-broker:
+        condition: service_healthy
+
+volumes:
+  rtmp-manager-data:
+
+  relay-broker-data:

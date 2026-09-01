@@ -2,9 +2,7 @@ use crate::util::non_empty;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_valid::Validate;
-use std::fs;
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{Mutex, watch};
 
@@ -16,10 +14,20 @@ pub struct ServerSettings {
     #[serde(default = "default_api_listen")]
     pub api_listen: SocketAddr,
 
+    #[serde(default = "default_srt_listen")]
+    pub srt_listen: SocketAddr,
+
+    #[serde(default = "default_true")]
+    pub srt_enabled: bool,
+
     #[serde(default = "default_test_stream_duration_secs")]
     #[validate(minimum = 1)]
     #[validate(maximum = 86_400)]
     pub test_stream_duration_secs: u64,
+
+    #[serde(default = "default_disconnect_grace_secs")]
+    #[validate(maximum = 300)]
+    pub disconnect_grace_secs: u64,
 
     #[serde(default)]
     #[validate(max_length = 256)]
@@ -38,8 +46,16 @@ fn default_api_listen() -> SocketAddr {
     "0.0.0.0:3000".parse().unwrap()
 }
 
+fn default_srt_listen() -> SocketAddr {
+    "0.0.0.0:6000".parse().unwrap()
+}
+
 fn default_test_stream_duration_secs() -> u64 {
     15
+}
+
+fn default_disconnect_grace_secs() -> u64 {
+    30
 }
 
 impl Default for ServerSettings {
@@ -47,7 +63,10 @@ impl Default for ServerSettings {
         Self {
             listen: default_listen(),
             api_listen: default_api_listen(),
+            srt_listen: default_srt_listen(),
+            srt_enabled: true,
             test_stream_duration_secs: default_test_stream_duration_secs(),
+            disconnect_grace_secs: default_disconnect_grace_secs(),
             ingest_stream_key: String::new(),
         }
     }
@@ -85,14 +104,96 @@ pub struct TargetConfig {
     pub public_url: Option<String>,
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default)]
+    pub encoding: EncodingProfile,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq)]
-pub struct WebAuthSettings {
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+pub struct EncodingProfile {
     #[serde(default)]
-    pub username: String,
+    pub mode: EncodingMode,
     #[serde(default)]
-    pub password: String,
+    pub max_video_bitrate_kbps: Option<u32>,
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+    #[serde(default)]
+    pub hardware_encoder: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum EncodingMode {
+    #[default]
+    Passthrough,
+    Cpu,
+}
+
+impl Default for EncodingProfile {
+    fn default() -> Self {
+        Self {
+            mode: EncodingMode::Passthrough,
+            max_video_bitrate_kbps: None,
+            width: None,
+            height: None,
+            hardware_encoder: None,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Validate)]
+pub struct OverlaySettings {
+    #[serde(default)]
+    #[validate(max_length = 256)]
+    #[validate(pattern = r"^[A-Za-z0-9_-]*$")]
+    pub key: String,
+    #[serde(default = "default_overlay_theme")]
+    pub theme: String,
+    #[serde(default = "default_overlay_font_size")]
+    #[validate(minimum = 12)]
+    #[validate(maximum = 72)]
+    pub font_size_px: u8,
+    #[serde(default = "default_overlay_opacity")]
+    #[validate(maximum = 100)]
+    pub background_opacity_percent: u8,
+    #[serde(default = "default_true")]
+    pub show_badges: bool,
+    #[serde(default = "default_true")]
+    pub show_avatars: bool,
+    #[serde(default = "default_true")]
+    pub show_emotes: bool,
+    #[serde(default = "default_overlay_fade_duration")]
+    #[validate(maximum = 300)]
+    pub fade_duration_secs: u16,
+}
+
+fn default_overlay_theme() -> String {
+    "dark".to_owned()
+}
+fn default_overlay_font_size() -> u8 {
+    24
+}
+fn default_overlay_opacity() -> u8 {
+    70
+}
+fn default_overlay_fade_duration() -> u16 {
+    15
+}
+
+impl Default for OverlaySettings {
+    fn default() -> Self {
+        Self {
+            key: String::new(),
+            theme: default_overlay_theme(),
+            font_size_px: default_overlay_font_size(),
+            background_opacity_percent: default_overlay_opacity(),
+            show_badges: true,
+            show_avatars: true,
+            show_emotes: true,
+            fade_duration_secs: default_overlay_fade_duration(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Validate)]
@@ -102,6 +203,8 @@ pub struct ChatSettings {
     pub queue_capacity: usize,
     #[serde(default)]
     pub twitch_channel: Option<String>,
+    #[serde(default)]
+    pub twitch_eventsub_secret: Option<String>,
     #[serde(default)]
     pub youtube_api_key: Option<String>,
     #[serde(default)]
@@ -135,6 +238,12 @@ pub struct ChatSettings {
     pub kick_channel: Option<String>,
     #[serde(default)]
     pub kick_webhook_enabled: bool,
+    #[serde(default)]
+    pub relay_enabled: bool,
+    #[serde(default)]
+    pub relay_source: Option<String>,
+    #[serde(default)]
+    pub relay_destination: Option<String>,
 }
 
 fn default_chat_queue_capacity() -> usize {
@@ -154,6 +263,7 @@ impl Default for ChatSettings {
         Self {
             queue_capacity: default_chat_queue_capacity(),
             twitch_channel: None,
+            twitch_eventsub_secret: None,
             youtube_api_key: None,
             youtube_live_chat_id: None,
             youtube_video_id: None,
@@ -170,12 +280,18 @@ impl Default for ChatSettings {
             kick_client_secret: None,
             kick_channel: None,
             kick_webhook_enabled: false,
+            relay_enabled: false,
+            relay_source: None,
+            relay_destination: None,
         }
     }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq)]
 pub struct AppConfig {
+    #[serde(default)]
+    pub initialized: bool,
+
     #[serde(default)]
     pub server: ServerSettings,
 
@@ -186,7 +302,7 @@ pub struct AppConfig {
     pub targets: Vec<TargetConfig>,
 
     #[serde(default)]
-    pub web_auth: WebAuthSettings,
+    pub overlay: OverlaySettings,
 
     #[serde(default)]
     pub chat: ChatSettings,
@@ -201,20 +317,16 @@ impl AppConfig {
         self.chat
             .validate()
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        self.overlay
+            .validate()
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        if !matches!(
+            self.overlay.theme.as_str(),
+            "dark" | "minimal" | "comic" | "transparent-box"
+        ) {
+            bail!("Overlay theme must be Dark, Minimal, Comic, or Transparent Box");
+        }
 
-        let username_set = !self.web_auth.username.trim().is_empty();
-        let password_set = !self.web_auth.password.is_empty();
-        if username_set != password_set {
-            bail!(
-                "Web authentication username and password must either both be set or both be empty"
-            );
-        }
-        if password_set && self.web_auth.password.len() < 12 {
-            bail!("Web authentication password must be at least 12 characters");
-        }
-        if username_set && self.web_auth.username.contains(':') {
-            bail!("Web authentication username must not contain ':'");
-        }
         if self.chat.twitch_channel.as_ref().is_some_and(|channel| {
             let channel = channel.trim().trim_start_matches('#');
             channel.is_empty()
@@ -265,6 +377,14 @@ impl AppConfig {
             bail!("Kick channel must be 1-25 ASCII letters, numbers, hyphens, or underscores");
         }
         for target in &self.targets {
+            if let Some(encoder) = target.encoding.hardware_encoder.as_deref()
+                && !matches!(encoder, "nvenc" | "vaapi" | "qsv" | "videotoolbox")
+            {
+                bail!(
+                    "Target '{}' has an unsupported hardware encoder",
+                    target.name
+                );
+            }
             if target.enabled {
                 let url = target.url.trim();
                 if url.is_empty() {
@@ -293,9 +413,18 @@ impl AppConfig {
                     config.server.api_listen,
                     "API listen",
                 )?,
+                srt_listen: parse_address(
+                    server.srt_listen,
+                    config.server.srt_listen,
+                    "SRT listen",
+                )?,
+                srt_enabled: server.srt_enabled,
                 test_stream_duration_secs: server
                     .test_stream_duration_secs
                     .unwrap_or(config.server.test_stream_duration_secs),
+                disconnect_grace_secs: server
+                    .disconnect_grace_secs
+                    .unwrap_or(config.server.disconnect_grace_secs),
                 ingest_stream_key: non_empty(server.ingest_stream_key)
                     .unwrap_or(config.server.ingest_stream_key),
             };
@@ -317,14 +446,20 @@ impl AppConfig {
                 ),
             };
         }
-        if let Some(auth_fields) = form.web_auth {
-            config.web_auth = WebAuthSettings {
-                username: auth_fields
-                    .username
-                    .unwrap_or(config.web_auth.username)
-                    .trim()
-                    .to_string(),
-                password: non_empty(auth_fields.password).unwrap_or(config.web_auth.password),
+        if let Some(overlay) = form.overlay {
+            config.overlay = OverlaySettings {
+                key: non_empty(overlay.key).unwrap_or(config.overlay.key),
+                theme: overlay.theme.unwrap_or(config.overlay.theme),
+                font_size_px: overlay.font_size_px.unwrap_or(config.overlay.font_size_px),
+                background_opacity_percent: overlay
+                    .background_opacity_percent
+                    .unwrap_or(config.overlay.background_opacity_percent),
+                show_badges: overlay.show_badges,
+                show_avatars: overlay.show_avatars,
+                show_emotes: overlay.show_emotes,
+                fade_duration_secs: overlay
+                    .fade_duration_secs
+                    .unwrap_or(config.overlay.fade_duration_secs),
             };
         }
         if let Some(chat) = form.chat {
@@ -332,6 +467,11 @@ impl AppConfig {
                 queue_capacity: chat.queue_capacity.unwrap_or(config.chat.queue_capacity),
                 twitch_channel: non_empty(chat.twitch_channel)
                     .map(|channel| channel.trim_start_matches('#').to_ascii_lowercase()),
+                twitch_eventsub_secret: updated_secret(
+                    chat.twitch_eventsub_secret,
+                    chat.clear_twitch_eventsub_secret,
+                    config.chat.twitch_eventsub_secret,
+                ),
                 youtube_api_key: updated_secret(
                     chat.youtube_api_key,
                     chat.clear_youtube_api_key,
@@ -375,26 +515,50 @@ impl AppConfig {
                 kick_channel: non_empty(chat.kick_channel)
                     .map(|channel| channel.trim().to_ascii_lowercase()),
                 kick_webhook_enabled: config.chat.kick_webhook_enabled,
+                relay_enabled: chat.relay_enabled.unwrap_or(config.chat.relay_enabled),
+                relay_source: non_empty(chat.relay_source).or(config.chat.relay_source),
+                relay_destination: non_empty(chat.relay_destination)
+                    .or(config.chat.relay_destination),
             };
         }
         if let Some(target_fields) = form.targets {
             config.targets = target_fields
                 .into_iter()
                 .enumerate()
-                .map(|(index, target)| TargetConfig {
-                    name: target.name,
-                    url: target.url,
-                    stream_key: non_empty(target.stream_key).unwrap_or_else(|| {
-                        config
-                            .targets
-                            .get(index)
-                            .map(|target| target.stream_key.clone())
-                            .unwrap_or_default()
-                    }),
-                    public_url: non_empty(target.public_url),
-                    enabled: target.enabled,
+                .map(|(index, target)| {
+                    let previous = config.targets.get(index);
+                    let previous_encoding = previous
+                        .map(|target| target.encoding.clone())
+                        .unwrap_or_default();
+                    let mode = match non_empty(target.encoding_mode) {
+                        Some(mode) if mode == "cpu" => EncodingMode::Cpu,
+                        Some(mode) if mode == "passthrough" => EncodingMode::Passthrough,
+                        Some(mode) => bail!("Unsupported encoding mode '{mode}'"),
+                        None => previous_encoding.mode,
+                    };
+                    Ok(TargetConfig {
+                        name: target.name,
+                        url: target.url,
+                        stream_key: non_empty(target.stream_key).unwrap_or_else(|| {
+                            previous
+                                .map(|target| target.stream_key.clone())
+                                .unwrap_or_default()
+                        }),
+                        public_url: non_empty(target.public_url),
+                        enabled: target.enabled,
+                        encoding: EncodingProfile {
+                            mode,
+                            max_video_bitrate_kbps: target
+                                .max_video_bitrate_kbps
+                                .or(previous_encoding.max_video_bitrate_kbps),
+                            width: target.width.or(previous_encoding.width),
+                            height: target.height.or(previous_encoding.height),
+                            hardware_encoder: non_empty(target.hardware_encoder)
+                                .or(previous_encoding.hardware_encoder),
+                        },
+                    })
                 })
-                .collect();
+                .collect::<Result<Vec<_>>>()?;
         }
 
         let action = form.action.as_deref().unwrap_or_default();
@@ -405,6 +569,7 @@ impl AppConfig {
                 stream_key: "".to_string(),
                 public_url: None,
                 enabled: false,
+                encoding: EncodingProfile::default(),
             });
         } else if action.starts_with("remove_target:")
             && let Some(idx_str) = action.split(':').nth(1)
@@ -425,7 +590,7 @@ impl AppConfig {
             .as_object()
             .context("The JSON configuration must be an object")?;
 
-        for field in ["server", "notifications", "targets", "web_auth", "chat"] {
+        for field in ["server", "notifications", "targets", "chat"] {
             if !object.contains_key(field) {
                 bail!("JSON configuration is missing required field '{field}'");
             }
@@ -469,7 +634,11 @@ fn parse_address(
 pub struct ServerForm {
     pub listen: Option<String>,
     pub api_listen: Option<String>,
+    pub srt_listen: Option<String>,
+    #[serde(default)]
+    pub srt_enabled: bool,
     pub test_stream_duration_secs: Option<u64>,
+    pub disconnect_grace_secs: Option<u64>,
     pub ingest_stream_key: Option<String>,
 }
 
@@ -485,15 +654,12 @@ pub struct NotificationsForm {
 }
 
 #[derive(Debug, Default, Deserialize)]
-pub struct WebAuthForm {
-    pub username: Option<String>,
-    pub password: Option<String>,
-}
-
-#[derive(Debug, Default, Deserialize)]
 pub struct ChatForm {
     pub queue_capacity: Option<usize>,
     pub twitch_channel: Option<String>,
+    pub twitch_eventsub_secret: Option<String>,
+    #[serde(default)]
+    pub clear_twitch_eventsub_secret: bool,
     pub youtube_api_key: Option<String>,
     #[serde(default)]
     pub clear_youtube_api_key: bool,
@@ -520,6 +686,10 @@ pub struct ChatForm {
     #[serde(default)]
     pub clear_kick_client_secret: bool,
     pub kick_channel: Option<String>,
+    #[serde(default)]
+    pub relay_enabled: Option<bool>,
+    pub relay_source: Option<String>,
+    pub relay_destination: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -531,12 +701,22 @@ pub struct TargetForm {
     pub public_url: Option<String>,
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default)]
+    pub encoding_mode: Option<String>,
+    #[serde(default)]
+    pub max_video_bitrate_kbps: Option<u32>,
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+    #[serde(default)]
+    pub hardware_encoder: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
 pub struct ConfigForm {
     pub server: Option<ServerForm>,
-    pub web_auth: Option<WebAuthForm>,
+    pub overlay: Option<OverlayForm>,
     pub chat: Option<ChatForm>,
     pub notifications: Option<NotificationsForm>,
     pub targets: Option<Vec<TargetForm>>,
@@ -547,125 +727,86 @@ pub struct ConfigForm {
 impl ConfigForm {
     pub fn is_empty(&self) -> bool {
         self.server.is_none()
-            && self.web_auth.is_none()
+            && self.overlay.is_none()
             && self.chat.is_none()
             && self.notifications.is_none()
             && self.targets.is_none()
     }
 }
 
-#[derive(Debug, toasty::Model)]
-#[table = "app_config"]
-struct StoredConfig {
-    #[key]
-    id: i64,
-    data: String,
+#[derive(Debug, Default, Deserialize)]
+pub struct OverlayForm {
+    pub key: Option<String>,
+    pub theme: Option<String>,
+    pub font_size_px: Option<u8>,
+    pub background_opacity_percent: Option<u8>,
+    #[serde(default)]
+    pub show_badges: bool,
+    #[serde(default)]
+    pub show_avatars: bool,
+    #[serde(default)]
+    pub show_emotes: bool,
+    pub fade_duration_secs: Option<u16>,
 }
 
-/// Toasty-backed SQLite configuration storage.
+/// Database-agnostic configuration repository.
 #[derive(Clone)]
 pub struct ConfigStore {
-    path: PathBuf,
-    database: toasty::Db,
+    database: crate::database::Database,
 }
 
 impl ConfigStore {
-    pub async fn open<P: AsRef<Path>>(config_path: P) -> Result<(Self, AppConfig)> {
-        let config_path = config_path.as_ref();
-        let is_json = config_path.extension().is_some_and(|ext| ext == "json");
-        let database_path = if is_json {
-            config_path.with_extension("sqlite3")
-        } else {
-            config_path.to_path_buf()
-        };
-        let database_exists = database_path.exists();
-        if is_json && !config_path.exists() && !database_path.exists() {
-            bail!(
-                "Configuration database '{}' (from '{}') does not exist",
-                database_path.display(),
-                config_path.display()
-            );
-        }
-
-        let database = toasty::Db::builder()
-            .models(toasty::models!(StoredConfig))
-            .connect(&format!("sqlite:{}", database_path.display()))
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to open config database '{}'",
-                    database_path.display()
-                )
-            })?;
-        #[cfg(unix)]
-        if !database_exists {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&database_path, fs::Permissions::from_mode(0o600)).with_context(
-                || {
-                    format!(
-                        "Failed to secure config database '{}'",
-                        database_path.display()
-                    )
-                },
-            )?;
-        }
-        let store = Self {
-            path: database_path,
-            database,
-        };
-        if !database_exists {
-            store.database.push_schema().await?;
-        }
-        let config = match store.load().await? {
-            Some(config) => config,
-            None => {
-                let config = AppConfig::default();
-                store.save(&config).await?;
-                config
-            }
-        };
+    pub async fn open(database: crate::database::Database) -> Result<(Self, AppConfig)> {
+        let store = Self { database };
+        let config: AppConfig = store.load().await?.unwrap_or_default();
+        // Keep the built-in self-hosted tenant synchronized after every schema upgrade.
+        store.save(&config).await?;
 
         Ok((store, config))
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
     pub async fn load(&self) -> Result<Option<AppConfig>> {
-        let mut database = self.database.clone();
-        let record = StoredConfig::filter(StoredConfig::fields().id().eq(1_i64))
-            .first()
-            .exec(&mut database)
+        let data: Option<String> = sqlx::query_scalar("SELECT data FROM app_config WHERE id = $1")
+            .bind(1_i64)
+            .fetch_optional(self.database.pool())
             .await?;
-        record
-            .map(|record| {
-                serde_json::from_str(&record.data)
-                    .context("Failed to deserialize configuration from Toasty")
-            })
-            .transpose()
+        data.map(|data| {
+            let plaintext =
+                crate::crypto::decrypt(&data).context("Failed to decrypt stored configuration")?;
+            serde_json::from_str(&plaintext).context("Failed to deserialize stored configuration")
+        })
+        .transpose()
     }
 
     pub async fn save(&self, config: &AppConfig) -> Result<()> {
         config.validate()?;
-        let data = serde_json::to_string(config)?;
-        let mut database = self.database.clone();
-        if let Some(mut record) = StoredConfig::filter(StoredConfig::fields().id().eq(1_i64))
-            .first()
-            .exec(&mut database)
-            .await?
-        {
-            record.update().data(data).exec(&mut database).await?;
-        } else {
-            toasty::create!(StoredConfig { id: 1, data })
-                .exec(&mut database)
-                .await?;
-        }
+        let data = crate::crypto::encrypt(&serde_json::to_string(config)?)?;
+        sqlx::query(
+            "INSERT INTO app_config (id, data) VALUES ($1, $2) \
+             ON CONFLICT (id) DO UPDATE SET data = excluded.data",
+        )
+        .bind(1_i64)
+        .bind(data)
+        .execute(self.database.pool())
+        .await?;
+        crate::tenant::TenantRepository::new(self.database.clone())
+            .save(crate::tenant::TenantDefinition {
+                id: &crate::tenant::TenantId::default_tenant(),
+                name: "Default tenant",
+                stream_key: &config.server.ingest_stream_key,
+                active: config.initialized && !config.server.ingest_stream_key.is_empty(),
+                max_concurrent_streams: 1,
+                notifications: &config.notifications,
+                chat: &config.chat,
+                overlay: &config.overlay,
+                targets: &config.targets,
+            })
+            .await?;
         Ok(())
     }
 }
 
-/// Lightweight, cloneable handle managing live configuration broadcasts and persistent SQLite storage.
+/// Lightweight, cloneable handle managing live configuration broadcasts and persistence.
 #[derive(Clone)]
 pub struct ConfigHandle {
     store: ConfigStore,
@@ -674,8 +815,8 @@ pub struct ConfigHandle {
 }
 
 impl ConfigHandle {
-    pub async fn open<P: AsRef<Path>>(config_path: P) -> Result<(Self, Arc<AppConfig>)> {
-        let (store, config) = ConfigStore::open(config_path).await?;
+    pub async fn open(database: crate::database::Database) -> Result<(Self, Arc<AppConfig>)> {
+        let (store, config) = ConfigStore::open(database).await?;
         config.validate()?;
         let config_arc = Arc::new(config);
         let (current, _) = watch::channel(Arc::clone(&config_arc));
@@ -694,7 +835,7 @@ impl ConfigHandle {
         Arc::clone(&self.current.borrow())
     }
 
-    /// Subscribes to live configuration change events.
+    #[cfg(test)]
     pub fn subscribe(&self) -> watch::Receiver<Arc<AppConfig>> {
         self.current.subscribe()
     }
@@ -708,28 +849,11 @@ impl ConfigHandle {
         self.save_updated(current_config, updated).await
     }
 
-    pub async fn set_youtube_polling(&self, enabled: bool) -> Result<(Arc<AppConfig>, bool, bool)> {
+    pub async fn complete_setup(&self, updated: AppConfig) -> Result<Arc<AppConfig>> {
         let _guard = self.update_lock.lock().await;
         let current_config = self.get();
-        let mut updated = (*current_config).clone();
-        updated.chat.youtube_polling_enabled = enabled;
-        self.save_updated(current_config, updated).await
-    }
-
-    pub async fn set_x_webhook(&self, enabled: bool) -> Result<(Arc<AppConfig>, bool, bool)> {
-        let _guard = self.update_lock.lock().await;
-        let current_config = self.get();
-        let mut updated = (*current_config).clone();
-        updated.chat.x_webhook_enabled = enabled;
-        self.save_updated(current_config, updated).await
-    }
-
-    pub async fn set_kick_webhook(&self, enabled: bool) -> Result<(Arc<AppConfig>, bool, bool)> {
-        let _guard = self.update_lock.lock().await;
-        let current_config = self.get();
-        let mut updated = (*current_config).clone();
-        updated.chat.kick_webhook_enabled = enabled;
-        self.save_updated(current_config, updated).await
+        let (config, _, _) = self.save_updated(current_config, updated).await?;
+        Ok(config)
     }
 
     async fn save_updated(
@@ -761,23 +885,30 @@ impl ConfigHandle {
         let current_config = self.get();
         self.save_updated(current_config, imported).await
     }
-
-    pub fn path(&self) -> &Path {
-        self.store.path()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    async fn test_database(path: &std::path::Path) -> crate::database::Database {
+        crate::database::Database::connect(&crate::database::sqlite_url(path))
+            .await
+            .unwrap()
+    }
 
     fn populated_config() -> AppConfig {
         AppConfig {
+            initialized: true,
             server: ServerSettings {
                 listen: "0.0.0.0:1935".parse().unwrap(),
                 api_listen: "10.0.0.1:3000".parse().unwrap(),
+                srt_listen: "10.0.0.1:6000".parse().unwrap(),
+                srt_enabled: true,
                 test_stream_duration_secs: 15,
+                disconnect_grace_secs: 30,
                 ingest_stream_key: "existing-ingest-key".into(),
             },
             notifications: NotificationSettings {
@@ -791,11 +922,9 @@ mod tests {
                 stream_key: "secret".into(),
                 public_url: Some("https://example.test/watch".into()),
                 enabled: true,
+                encoding: EncodingProfile::default(),
             }],
-            web_auth: WebAuthSettings {
-                username: "operator".into(),
-                password: "correct horse battery staple".into(),
-            },
+            overlay: OverlaySettings::default(),
             chat: ChatSettings {
                 twitch_channel: Some("streamer".into()),
                 youtube_api_key: Some("youtube-api-key".into()),
@@ -813,13 +942,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unsafe_web_and_chat_credentials() {
+    fn rejects_unsafe_chat_and_ingest_credentials() {
         let mut config = AppConfig::default();
-        config.web_auth.username = "operator:name".into();
-        config.web_auth.password = "correct horse battery staple".into();
-        assert!(config.validate().unwrap_err().to_string().contains("':'"));
-
-        config.web_auth.username = "operator".into();
         config.chat.twitch_channel = Some("invalid-channel!".into());
         assert!(
             config
@@ -840,8 +964,31 @@ mod tests {
         );
     }
 
+    #[test]
+    fn rejects_unknown_hardware_encoder_profiles() {
+        let mut config = AppConfig::default();
+        config.targets.push(TargetConfig {
+            name: "GPU".into(),
+            url: "rtmp://example.test/live".into(),
+            stream_key: "key".into(),
+            public_url: None,
+            enabled: false,
+            encoding: EncodingProfile {
+                hardware_encoder: Some("unknown".into()),
+                ..EncodingProfile::default()
+            },
+        });
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("unsupported hardware encoder")
+        );
+    }
+
     #[tokio::test]
-    async fn stores_and_round_trips_config_with_toasty() {
+    async fn stores_and_round_trips_config() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -849,24 +996,22 @@ mod tests {
         let directory = std::env::temp_dir().join(format!("rtmp-proxy-config-{unique}"));
         fs::create_dir(&directory).unwrap();
         let database_path = directory.join("config.sqlite3");
-        let (store, mut config) = ConfigStore::open(&database_path).await.unwrap();
+        let (store, mut config) = ConfigStore::open(test_database(&database_path).await)
+            .await
+            .unwrap();
         config.server.test_stream_duration_secs = 30;
         config.server.ingest_stream_key = "new-ingest-key".into();
         config.notifications.live_message = "saved in sqlite".into();
-        config.web_auth = WebAuthSettings {
-            username: "operator".into(),
-            password: "correct horse battery staple".into(),
-        };
         config.chat.youtube_video_id = Some("video-id".into());
         config.chat.youtube_api_key = Some("api-key".into());
         store.save(&config).await.unwrap();
 
-        let (_, reloaded) = ConfigStore::open(&database_path).await.unwrap();
+        let (_, reloaded) = ConfigStore::open(test_database(&database_path).await)
+            .await
+            .unwrap();
         assert_eq!(reloaded.server.test_stream_duration_secs, 30);
         assert_eq!(reloaded.server.ingest_stream_key, "new-ingest-key");
         assert_eq!(reloaded.notifications.live_message, "saved in sqlite");
-        assert_eq!(reloaded.web_auth.username, "operator");
-        assert_eq!(reloaded.web_auth.password, "correct horse battery staple");
         assert_eq!(reloaded.chat.youtube_video_id.as_deref(), Some("video-id"));
 
         fs::remove_dir_all(directory).unwrap();
@@ -881,7 +1026,9 @@ mod tests {
         let directory = std::env::temp_dir().join(format!("rtmp-proxy-handle-{unique}"));
         fs::create_dir(&directory).unwrap();
         let database_path = directory.join("config.sqlite3");
-        let (handle, _) = ConfigHandle::open(&database_path).await.unwrap();
+        let (handle, _) = ConfigHandle::open(test_database(&database_path).await)
+            .await
+            .unwrap();
         let mut rx = handle.subscribe();
 
         let form: ConfigForm = serde_qs::Config::new()
@@ -893,50 +1040,6 @@ mod tests {
         rx.changed().await.unwrap();
         assert_eq!(rx.borrow().server.test_stream_duration_secs, 42);
         assert_eq!(handle.get().server.test_stream_duration_secs, 42);
-
-        fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[tokio::test]
-    async fn concurrent_ingest_updates_do_not_overwrite_each_other() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let directory = std::env::temp_dir().join(format!("rtmp-proxy-polling-{unique}"));
-        fs::create_dir(&directory).unwrap();
-        let database_path = directory.join("config.sqlite3");
-        let (handle, _) = ConfigHandle::open(&database_path).await.unwrap();
-        let form: ConfigForm = serde_qs::Config::new()
-            .use_form_encoding(true)
-            .deserialize_str(
-                "chat%5Bkick_client_id%5D=client-id&\
-                 chat%5Bkick_client_secret%5D=client-secret&\
-                 chat%5Bkick_channel%5D=streamer&action=save",
-            )
-            .unwrap();
-        handle.save_form(form).await.unwrap();
-
-        let youtube = {
-            let handle = handle.clone();
-            tokio::spawn(async move { handle.set_youtube_polling(true).await.unwrap() })
-        };
-        let x = {
-            let handle = handle.clone();
-            tokio::spawn(async move { handle.set_x_webhook(true).await.unwrap() })
-        };
-        let kick = {
-            let handle = handle.clone();
-            tokio::spawn(async move { handle.set_kick_webhook(true).await.unwrap() })
-        };
-        youtube.await.unwrap();
-        x.await.unwrap();
-        kick.await.unwrap();
-
-        let config = handle.get();
-        assert!(config.chat.youtube_polling_enabled);
-        assert!(config.chat.x_webhook_enabled);
-        assert!(config.chat.kick_webhook_enabled);
 
         fs::remove_dir_all(directory).unwrap();
     }
@@ -956,7 +1059,6 @@ mod tests {
         assert_eq!(updated.notifications.live_message, "Still live");
         assert_eq!(updated.targets.len(), 1);
         assert_eq!(updated.targets[0].stream_key, "secret");
-        assert_eq!(updated.web_auth.password, "correct horse battery staple");
     }
 
     #[test]
@@ -969,6 +1071,20 @@ mod tests {
 
         assert_eq!(updated.server.test_stream_duration_secs, 30);
         updated.validate().unwrap();
+    }
+
+    #[test]
+    fn disconnect_grace_period_is_configurable_and_bounded() {
+        let form: ConfigForm = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str("server%5Bdisconnect_grace_secs%5D=90")
+            .unwrap();
+        let updated = populated_config().merge_form(form).unwrap();
+        assert_eq!(updated.server.disconnect_grace_secs, 90);
+
+        let mut invalid = updated;
+        invalid.server.disconnect_grace_secs = 301;
+        assert!(invalid.validate().is_err());
     }
 
     #[test]
@@ -1006,6 +1122,30 @@ mod tests {
         let updated = populated_config().merge_form(form).unwrap();
 
         assert!(!updated.targets[0].enabled);
+    }
+
+    #[test]
+    fn target_encoding_profile_is_configurable() {
+        let form: ConfigForm = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str(
+                "targets%5B0%5D%5Bname%5D=Twitch&\
+                 targets%5B0%5D%5Burl%5D=rtmps%3A%2F%2Fexample.test%2Fapp&\
+                 targets%5B0%5D%5Bencoding_mode%5D=cpu&\
+                 targets%5B0%5D%5Bmax_video_bitrate_kbps%5D=4500&\
+                 targets%5B0%5D%5Bwidth%5D=1920&\
+                 targets%5B0%5D%5Bheight%5D=1080&\
+                 targets%5B0%5D%5Bhardware_encoder%5D=nvenc",
+            )
+            .unwrap();
+        let updated = populated_config().merge_form(form).unwrap();
+        let encoding = &updated.targets[0].encoding;
+
+        assert_eq!(encoding.mode, EncodingMode::Cpu);
+        assert_eq!(encoding.max_video_bitrate_kbps, Some(4500));
+        assert_eq!(encoding.width, Some(1920));
+        assert_eq!(encoding.height, Some(1080));
+        assert_eq!(encoding.hardware_encoder.as_deref(), Some("nvenc"));
     }
 
     #[test]
@@ -1127,18 +1267,16 @@ mod tests {
     }
 
     #[test]
-    fn blank_web_and_chat_secrets_preserve_existing_credentials() {
+    fn blank_chat_secrets_preserve_existing_credentials() {
         let form: ConfigForm = serde_qs::Config::new()
             .use_form_encoding(true)
             .deserialize_str(
-                "web_auth%5Busername%5D=operator&web_auth%5Bpassword%5D=&\
-                 chat%5Btwitch_channel%5D=streamer&\
+                "chat%5Btwitch_channel%5D=streamer&\
                  chat%5Byoutube_api_key%5D=&chat%5Bqueue_capacity%5D=250&action=save",
             )
             .unwrap();
         let updated = populated_config().merge_form(form).unwrap();
 
-        assert_eq!(updated.web_auth.password, "correct horse battery staple");
         assert_eq!(updated.chat.twitch_channel.as_deref(), Some("streamer"));
         assert_eq!(
             updated.chat.youtube_api_key.as_deref(),
@@ -1186,13 +1324,12 @@ mod tests {
             AppConfig::parse_imported(legacy_export)
                 .unwrap_err()
                 .to_string()
-                .contains("web_auth")
+                .contains("chat")
         );
 
         let invalid_target = br#"{
             "server": {},
             "notifications": {},
-            "web_auth": {},
             "chat": {},
             "targets": [{
                 "name": "Twitch",

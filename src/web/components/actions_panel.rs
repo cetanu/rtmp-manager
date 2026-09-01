@@ -11,7 +11,7 @@ use topcoat::{
 #[procedure]
 async fn start_test_stream(cx: &Cx) -> Result<String> {
     let app: &AppHandle = app_context(cx);
-    let config = app.config.get();
+    let config = crate::web::request_config(cx).await?;
     let duration_secs = config.server.test_stream_duration_secs;
     let targets = config
         .targets
@@ -31,7 +31,7 @@ async fn start_test_stream(cx: &Cx) -> Result<String> {
 #[procedure]
 async fn send_test_webhooks(cx: &Cx) -> Result<String> {
     let app: &AppHandle = app_context(cx);
-    let config = app.config.get();
+    let config = crate::web::request_config(cx).await?;
     let active_targets = config
         .targets
         .iter()

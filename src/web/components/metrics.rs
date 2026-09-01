@@ -1,4 +1,5 @@
 use crate::server::state::AppHandle;
+use crate::web::auth;
 use crate::web::components::ui::card::{card, card_content, card_header, card_title};
 use std::collections::HashMap;
 use topcoat::{
@@ -20,14 +21,16 @@ fn format_bitrate(bits_per_second: u64) -> String {
 #[component]
 pub async fn metrics_page(cx: &Cx) -> Result {
     let app: &AppHandle = app_context(cx);
+    let tenant_id = auth::current_user(cx).tenant_id.as_str();
     let ingest_bps = app.metrics.current_ingest_bps();
     let current = app
         .metrics
         .current_target_bitrates()
         .into_iter()
+        .filter(|sample| sample.tenant_id == tenant_id)
         .map(|sample| (sample.name.clone(), sample))
         .collect::<HashMap<_, _>>();
-    let targets = app.config.get().targets.clone();
+    let targets = crate::web::request_config(cx).await?.targets;
 
     view! {
         <section aria-labelledby="target-throughput-heading">
@@ -59,6 +62,8 @@ pub async fn metrics_page(cx: &Cx) -> Result {
                 for target in &targets {
                     let sample = current.get(&target.name);
                     let outbound = sample.map_or(0, |value| value.outbound_bps);
+                    let dropped_frames = sample.map_or(0, |value| value.dropped_frames);
+                    let reconnections = sample.map_or(0, |value| value.reconnections);
                     card(
                         attrs: attributes! { class="!gap-3 !rounded-lg !py-3" data-target-metric=(target.name.clone()) },
                         card_header(
@@ -74,6 +79,16 @@ pub async fn metrics_page(cx: &Cx) -> Result {
                                 <div>
                                     <div class="text-xs uppercase tracking-wide text-muted-foreground">"Outbound bitrate"</div>
                                     <div class="text-base font-semibold" data-bitrate-out="true">(format_bitrate(outbound))</div>
+                                </div>
+                                <div class="mt-2 grid grid-cols-2 gap-2 text-xs">
+                                    <div>
+                                        <div class="uppercase tracking-wide text-muted-foreground">"Dropped frames"</div>
+                                        <div class="font-medium" data-dropped-frames="true">(dropped_frames)</div>
+                                    </div>
+                                    <div>
+                                        <div class="uppercase tracking-wide text-muted-foreground">"Reconnects"</div>
+                                        <div class="font-medium" data-reconnections="true">(reconnections)</div>
+                                    </div>
                                 </div>
                             </div>
                             <canvas class="h-28 w-full" height="112" aria-label=(format!("{} bitrate history", target.name))></canvas>

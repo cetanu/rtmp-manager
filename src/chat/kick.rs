@@ -132,6 +132,28 @@ pub fn process_event(config: &ChatSettings, event: &WebhookEvent) -> Result<Inco
     parse_chat_event(&event.body)
 }
 
+pub async fn send_message(http_client: &Client, channel: &str, text: &str) -> Result<()> {
+    let token =
+        std::env::var("KICK_BOT_OAUTH_TOKEN").context("KICK_BOT_OAUTH_TOKEN is not configured")?;
+    let broadcaster_user_id: u64 = channel
+        .trim()
+        .parse()
+        .context("Kick bot channel must be a broadcaster user ID")?;
+    let text = text.replace(['\r', '\n'], " ");
+    if text.trim().is_empty() || text.len() > 500 {
+        bail!("invalid Kick message");
+    }
+    let response = http_client
+        .post("https://api.kick.com/public/v1/chat")
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "broadcaster_user_id": broadcaster_user_id, "content": text, "type": "bot" }))
+        .send().await.context("failed to send Kick chat message")?;
+    if !response.status().is_success() {
+        bail!("Kick chat API returned {}", response.status());
+    }
+    Ok(())
+}
+
 pub async fn set_chat_subscription(
     http_client: &Client,
     config: &ChatSettings,

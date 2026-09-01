@@ -1,17 +1,15 @@
-use crate::server::state::AppHandle;
 use crate::web::components::ui::card::{card, card_content, card_header, card_title};
 use crate::web::components::ui::form::{clearable_secret_field, form_field};
 use crate::web::components::ui::input::input;
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::Cx,
     view::{attributes, component, view},
 };
 
 #[component]
 pub async fn chat_settings(cx: &Cx) -> Result {
-    let app: &AppHandle = app_context(cx);
-    let chat = app.config.get().chat.clone();
+    let chat = crate::web::request_config(cx).await?.chat;
 
     view! {
         card(
@@ -30,6 +28,47 @@ pub async fn chat_settings(cx: &Cx) -> Result {
                                 id="twitch_channel"
                                 name="chat[twitch_channel]"
                                 value=(chat.twitch_channel.clone().unwrap_or_default())
+                            })
+                        )
+                        clearable_secret_field(
+                            control_id: "twitch_eventsub_secret",
+                            name: "chat[twitch_eventsub_secret]",
+                            label_text: "Twitch EventSub secret",
+                            empty_placeholder: "Required for tenant webhook verification",
+                            value: chat.twitch_eventsub_secret.clone().unwrap_or_default()
+                        )
+                    </div>
+
+                    <div class="grid gap-6 md:grid-cols-3">
+                        form_field(
+                            control_id: "relay_source",
+                            label_text: "Relay source platform",
+                            input(attrs: attributes! {
+                                id="relay_source"
+                                name="chat[relay_source]"
+                                placeholder="youtube, kick, or twitch"
+                                value=(chat.relay_source.clone().unwrap_or_default())
+                            })
+                        )
+                        form_field(
+                            control_id: "relay_destination",
+                            label_text: "Relay destination platform",
+                            input(attrs: attributes! {
+                                id="relay_destination"
+                                name="chat[relay_destination]"
+                                placeholder="twitch, kick, or youtube"
+                                value=(chat.relay_destination.clone().unwrap_or_default())
+                            })
+                        )
+                        form_field(
+                            control_id: "relay_enabled",
+                            label_text: "Enable cross-platform relay",
+                            input(attrs: attributes! {
+                                id="relay_enabled"
+                                name="chat[relay_enabled]"
+                                type="checkbox"
+                                value="true"
+                                checked=(chat.relay_enabled)
                             })
                         )
                     </div>

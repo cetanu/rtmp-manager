@@ -1,4 +1,3 @@
-use crate::server::state::AppHandle;
 use crate::web::components::ui::button::{
     ButtonSize, ButtonVariant, button, button_link, button_variants,
 };
@@ -8,7 +7,7 @@ use crate::web::components::ui::input::input;
 use crate::web::components::ui::textarea::textarea;
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::Cx,
     runtime::shard,
     view::{attributes, component, view},
 };
@@ -64,8 +63,7 @@ pub async fn exported_config(cx: &Cx, open: bool) -> Result {
         return view! {};
     }
 
-    let app: &AppHandle = app_context(cx);
-    let config_json = serde_json::to_string_pretty(&*app.config.get())?;
+    let config_json = serde_json::to_string_pretty(&crate::web::request_config(cx).await?)?;
     view! {
         <div class="mt-5">
             form_field(

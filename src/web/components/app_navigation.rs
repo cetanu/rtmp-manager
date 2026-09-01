@@ -1,5 +1,6 @@
 use topcoat::{
     Result,
+    context::Cx,
     view::{component, view},
 };
 
@@ -15,7 +16,8 @@ fn link_class(active_page: &str, page: &str) -> &'static str {
 }
 
 #[component]
-pub async fn app_navigation(active_page: &'static str) -> Result {
+pub async fn app_navigation(cx: &Cx, active_page: &'static str) -> Result {
+    let is_admin = crate::web::auth::current_user(cx).role == crate::accounts::Role::Admin;
     view! {
         <header class="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur">
             <div class="mx-auto flex max-w-7xl items-center gap-2 px-3 py-2 sm:px-4">
@@ -80,7 +82,17 @@ pub async fn app_navigation(active_page: &'static str) -> Result {
                         class=(link_class(active_page, "export"))
                         aria-current=(if active_page == "export" { "page" } else { "false" })
                     >"Export"</a>
+                    if is_admin {
+                        <a
+                            href="/admin/streams"
+                            class=(link_class(active_page, "admin-streams"))
+                        >"Admin"</a>
+                    }
                 </nav>
+                <a href="/profile" class="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground">"Profile"</a>
+                <form method="post" action="/logout">
+                    <button type="submit" class="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground">"Sign out"</button>
+                </form>
             </div>
         </header>
     }

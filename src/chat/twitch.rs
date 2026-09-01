@@ -20,6 +20,40 @@ pub async fn run(chat: ChatHandle, channel: String) {
     }
 }
 
+/// Sends one chat message using the configured Twitch bot credentials.
+pub async fn send_message(channel: &str, text: &str) -> Result<()> {
+    let token = std::env::var("TWITCH_BOT_OAUTH_TOKEN")
+        .context("TWITCH_BOT_OAUTH_TOKEN is not configured")?;
+    let username =
+        std::env::var("TWITCH_BOT_USERNAME").context("TWITCH_BOT_USERNAME is not configured")?;
+    let channel = channel.trim().trim_start_matches('#');
+    if channel.is_empty()
+        || !channel
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        anyhow::bail!("invalid Twitch channel");
+    }
+    let text = text.replace(['\r', '\n'], " ");
+    let text = text.trim();
+    if text.is_empty() || text.len() > 500 {
+        anyhow::bail!("invalid Twitch message");
+    }
+    let mut stream = TcpStream::connect(TWITCH_IRC_ADDRESS)
+        .await
+        .context("failed to connect to Twitch IRC")?;
+    let handshake = format!("PASS oauth:{token}\r\nNICK {username}\r\nJOIN #{channel}\r\n");
+    stream
+        .write_all(handshake.as_bytes())
+        .await
+        .context("failed to authenticate Twitch bot")?;
+    stream
+        .write_all(format!("PRIVMSG #{channel} :{text}\r\n").as_bytes())
+        .await
+        .context("failed to send Twitch message")?;
+    Ok(())
+}
+
 async fn read_connection(chat: &ChatHandle, channel: &str) -> Result<()> {
     let mut stream = TcpStream::connect(TWITCH_IRC_ADDRESS)
         .await

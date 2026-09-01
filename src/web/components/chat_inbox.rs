@@ -11,24 +11,25 @@ use topcoat::{
 
 #[procedure]
 async fn acknowledge_chat(cx: &Cx, displayed_id: String) -> Result<String> {
-    let app: &AppHandle = app_context(cx);
+    let chat = crate::web::request_chat(cx).await?;
     if let Ok(displayed_id) = displayed_id.parse() {
-        let _ = app.chat.acknowledge(displayed_id).await?;
+        let _ = chat.acknowledge(displayed_id).await?;
     }
-    Ok(first_message_id(&app.chat.snapshot().await?))
+    Ok(first_message_id(&chat.snapshot().await?))
 }
 
 #[procedure]
 async fn refresh_chat(cx: &Cx) -> Result<String> {
-    let app: &AppHandle = app_context(cx);
-    Ok(first_message_id(&app.chat.snapshot().await?))
+    Ok(first_message_id(
+        &crate::web::request_chat(cx).await?.snapshot().await?,
+    ))
 }
 
 #[procedure]
 async fn set_youtube_polling(cx: &Cx, enabled: bool) -> Result<String> {
     let app: &AppHandle = app_context(cx);
     Ok(app
-        .set_youtube_polling(enabled)
+        .set_youtube_polling(&crate::web::auth::current_user(cx).tenant_id, enabled)
         .await
         .err()
         .map(|error| error.to_string())
@@ -39,7 +40,7 @@ async fn set_youtube_polling(cx: &Cx, enabled: bool) -> Result<String> {
 async fn set_x_webhook(cx: &Cx, enabled: bool) -> Result<String> {
     let app: &AppHandle = app_context(cx);
     Ok(app
-        .set_x_webhook(enabled)
+        .set_x_webhook(&crate::web::auth::current_user(cx).tenant_id, enabled)
         .await
         .err()
         .map(|error| error.to_string())
@@ -50,7 +51,7 @@ async fn set_x_webhook(cx: &Cx, enabled: bool) -> Result<String> {
 async fn set_kick_webhook(cx: &Cx, enabled: bool) -> Result<String> {
     let app: &AppHandle = app_context(cx);
     Ok(app
-        .set_kick_webhook(enabled)
+        .set_kick_webhook(&crate::web::auth::current_user(cx).tenant_id, enabled)
         .await
         .err()
         .map(|error| error.to_string())
@@ -67,9 +68,8 @@ fn first_message_id(snapshot: &crate::chat::ChatInboxSnapshot) -> String {
 
 #[component]
 pub async fn chat_inbox(cx: &Cx) -> Result {
-    let app: &AppHandle = app_context(cx);
-    let initial_id = first_message_id(&app.chat.snapshot().await?);
-    let chat = app.config.get().chat.clone();
+    let initial_id = first_message_id(&crate::web::request_chat(cx).await?.snapshot().await?);
+    let chat = crate::web::request_config(cx).await?.chat;
     let youtube_configured = [
         &chat.youtube_live_chat_id,
         &chat.youtube_video_id,
@@ -212,8 +212,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
 #[shard]
 pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result {
     let _ = revision;
-    let app: &AppHandle = app_context(cx);
-    let snapshot = app.chat.snapshot().await?;
+    let snapshot = crate::web::request_chat(cx).await?.snapshot().await?;
 
     view! {
         card_content(

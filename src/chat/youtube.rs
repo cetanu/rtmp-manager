@@ -5,13 +5,28 @@ use regex::Regex;
 use reqwest::Client;
 use reqwest::header::{ACCEPT_LANGUAGE, USER_AGENT};
 use serde::Serialize;
-use std::sync::LazyLock;
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
+use tokio::sync::Semaphore;
 
 const DEFAULT_INNERTUBE_API_KEY: &str = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
 const INNERTUBE_LIVE_CHAT_URL: &str = "https://www.youtube.com/youtubei/v1/live_chat/get_live_chat";
 const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const BROWSER_ACCEPT_LANGUAGE: &str = "en-US,en;q=0.9";
+const REQUESTS_PER_API_KEY: usize = 8;
+static REQUEST_LIMITERS: LazyLock<Mutex<HashMap<String, Arc<Semaphore>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static QUOTA_CIRCUITS: LazyLock<Mutex<HashMap<String, QuotaCircuit>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+const QUOTA_FAILURE_THRESHOLD: u8 = 3;
+const QUOTA_COOLDOWN: Duration = Duration::from_secs(60);
+
+#[derive(Debug, Default)]
+struct QuotaCircuit {
+    consecutive_rate_limits: u8,
+    open_until: Option<std::time::Instant>,
+}
 
 static API_KEY_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#""INNERTUBE_API_KEY":"([^"]+)""#).unwrap());
@@ -31,6 +46,7 @@ static SHORT_URL_REGEX: LazyLock<Regex> =
 #[derive(Debug, Clone)]
 pub struct YouTubeChatConfig {
     pub target: YouTubeChatTarget,
+    pub api_key: Option<String>,
     pub min_poll_interval: Duration,
     pub adaptive_polling: bool,
 }
@@ -72,7 +88,7 @@ pub async fn run(client: Client, chat: ChatHandle, config: YouTubeChatConfig) {
             None,
             None,
         );
-        match resolve_live_chat_session(&client, &config.target).await {
+        match resolve_live_chat_session(&client, &config.target, config.api_key.as_deref()).await {
             Ok(session) => {
                 chat.update_youtube_status(
                     "connected",
@@ -161,7 +177,9 @@ pub async fn run(client: Client, chat: ChatHandle, config: YouTubeChatConfig) {
                 tracing::warn!("{detail}");
                 chat.update_youtube_status("resolving", detail, None, None);
                 tokio::time::sleep(Duration::from_secs(5)).await;
-                match resolve_live_chat_session(&client, &config.target).await {
+                match resolve_live_chat_session(&client, &config.target, config.api_key.as_deref())
+                    .await
+                {
                     Ok(new_session) => {
                         session = new_session;
                     }
@@ -185,18 +203,43 @@ pub async fn run(client: Client, chat: ChatHandle, config: YouTubeChatConfig) {
                 tokio::time::sleep(retry_delay).await;
                 retry_delay = (retry_delay * 2).min(Duration::from_secs(60));
             }
+            Err(PollFailure::RateLimited) => {
+                let detail = "YouTube quota/rate limit reached; backing off for 60 seconds";
+                tracing::warn!("{detail}");
+                chat.update_youtube_status("rate-limited", detail, None, None);
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }
         }
     }
+}
+
+pub async fn send_message(client: &Client, live_chat_id: &str, text: &str) -> Result<()> {
+    let token = std::env::var("YOUTUBE_BOT_OAUTH_TOKEN")
+        .context("YOUTUBE_BOT_OAUTH_TOKEN is not configured")?;
+    let text = text.replace(['\r', '\n'], " ");
+    if text.trim().is_empty() || text.len() > 500 {
+        bail!("invalid YouTube message");
+    }
+    let response = client
+        .post("https://www.googleapis.com/youtube/v3/liveChat/messages?part=snippet")
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "snippet": { "liveChatId": live_chat_id, "type": "textMessageEvent", "textMessageDetails": { "messageText": text } } }))
+        .send().await.context("failed to send YouTube chat message")?;
+    if !response.status().is_success() {
+        bail!("YouTube chat API returned {}", response.status());
+    }
+    Ok(())
 }
 
 async fn resolve_live_chat_session(
     client: &Client,
     target: &YouTubeChatTarget,
+    api_key: Option<&str>,
 ) -> Result<LiveChatSession> {
     match target {
         YouTubeChatTarget::LiveChat(chat_id) => {
             if let Some(video_id) = extract_video_id(chat_id) {
-                bootstrap_live_chat_session(client, &video_id).await
+                bootstrap_live_chat_session(client, &video_id, api_key).await
             } else {
                 Ok(LiveChatSession {
                     api_key: DEFAULT_INNERTUBE_API_KEY.to_string(),
@@ -208,11 +251,11 @@ async fn resolve_live_chat_session(
         YouTubeChatTarget::Video(video_input) => {
             let video_id = extract_video_id(video_input)
                 .ok_or_else(|| anyhow::anyhow!("Invalid YouTube video ID or URL: {video_input}"))?;
-            bootstrap_live_chat_session(client, &video_id).await
+            bootstrap_live_chat_session(client, &video_id, api_key).await
         }
         YouTubeChatTarget::Channel(channel_input) => {
             let video_id = resolve_channel_live_video(client, channel_input).await?;
-            bootstrap_live_chat_session(client, &video_id).await
+            bootstrap_live_chat_session(client, &video_id, api_key).await
         }
     }
 }
@@ -292,7 +335,11 @@ async fn resolve_channel_live_video(client: &Client, channel_input: &str) -> Res
     bail!("The selected YouTube channel has no active live stream")
 }
 
-async fn bootstrap_live_chat_session(client: &Client, video_id: &str) -> Result<LiveChatSession> {
+async fn bootstrap_live_chat_session(
+    client: &Client,
+    video_id: &str,
+    configured_api_key: Option<&str>,
+) -> Result<LiveChatSession> {
     let url = format!("https://www.youtube.com/live_chat?v={video_id}");
     let response = client
         .get(&url)
@@ -309,11 +356,7 @@ async fn bootstrap_live_chat_session(client: &Client, video_id: &str) -> Result<
         .await
         .context("Failed to read YouTube live chat HTML response")?;
 
-    let api_key = API_KEY_REGEX
-        .captures(&body)
-        .and_then(|c| c.get(1))
-        .map(|m| m.as_str().to_string())
-        .unwrap_or_else(|| DEFAULT_INNERTUBE_API_KEY.to_string());
+    let api_key = select_api_key(&body, configured_api_key);
 
     let initial_data_raw = YT_INITIAL_DATA_REGEX
         .captures(&body)
@@ -348,6 +391,19 @@ async fn bootstrap_live_chat_session(client: &Client, video_id: &str) -> Result<
     })
 }
 
+fn select_api_key(body: &str, configured_api_key: Option<&str>) -> String {
+    configured_api_key
+        .filter(|key| !key.trim().is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            API_KEY_REGEX
+                .captures(body)
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str().to_string())
+        })
+        .unwrap_or_else(|| DEFAULT_INNERTUBE_API_KEY.to_string())
+}
+
 struct InnerTubeFetchResult {
     messages: Vec<IncomingChatMessage>,
     next_continuation_token: String,
@@ -357,6 +413,7 @@ struct InnerTubeFetchResult {
 #[derive(Debug)]
 enum PollFailure {
     SessionExpired(anyhow::Error),
+    RateLimited,
     Retry(anyhow::Error),
 }
 
@@ -364,6 +421,14 @@ async fn fetch_innertube_page(
     client: &Client,
     session: &LiveChatSession,
 ) -> std::result::Result<InnerTubeFetchResult, PollFailure> {
+    if !quota_gate(&session.api_key) {
+        return Err(PollFailure::RateLimited);
+    }
+    let limiter = request_limiter(&session.api_key);
+    let _permit = limiter
+        .acquire()
+        .await
+        .map_err(|_| PollFailure::Retry(anyhow::anyhow!("YouTube request limiter stopped")))?;
     let url = format!("{INNERTUBE_LIVE_CHAT_URL}?key={}", session.api_key);
     let payload = serde_json::json!({
         "context": {
@@ -395,11 +460,15 @@ async fn fetch_innertube_page(
         );
         return if status.as_u16() == 404 {
             Err(PollFailure::SessionExpired(error))
+        } else if status.as_u16() == 429 {
+            quota_rate_limited(&session.api_key);
+            Err(PollFailure::RateLimited)
         } else {
             Err(PollFailure::Retry(error))
         };
     }
 
+    quota_success(&session.api_key);
     let data: serde_json::Value = response
         .json()
         .await
@@ -444,6 +513,51 @@ async fn fetch_innertube_page(
         next_continuation_token,
         timeout_millis: timeout_millis.unwrap_or(3000),
     })
+}
+
+fn request_limiter(api_key: &str) -> Arc<Semaphore> {
+    let mut limiters = REQUEST_LIMITERS
+        .lock()
+        .expect("request limiter lock poisoned");
+    Arc::clone(
+        limiters
+            .entry(api_key.to_owned())
+            .or_insert_with(|| Arc::new(Semaphore::new(REQUESTS_PER_API_KEY))),
+    )
+}
+
+fn quota_gate(api_key: &str) -> bool {
+    let mut circuits = QUOTA_CIRCUITS.lock().expect("quota circuit lock poisoned");
+    let circuit = circuits.entry(api_key.to_owned()).or_default();
+    match circuit.open_until {
+        Some(until) if until > std::time::Instant::now() => false,
+        Some(_) => {
+            circuit.open_until = None;
+            circuit.consecutive_rate_limits = 0;
+            true
+        }
+        None => true,
+    }
+}
+
+fn quota_success(api_key: &str) {
+    if let Some(circuit) = QUOTA_CIRCUITS
+        .lock()
+        .expect("quota circuit lock poisoned")
+        .get_mut(api_key)
+    {
+        circuit.consecutive_rate_limits = 0;
+        circuit.open_until = None;
+    }
+}
+
+fn quota_rate_limited(api_key: &str) {
+    let mut circuits = QUOTA_CIRCUITS.lock().expect("quota circuit lock poisoned");
+    let circuit = circuits.entry(api_key.to_owned()).or_default();
+    circuit.consecutive_rate_limits = circuit.consecutive_rate_limits.saturating_add(1);
+    if circuit.consecutive_rate_limits >= QUOTA_FAILURE_THRESHOLD {
+        circuit.open_until = Some(std::time::Instant::now() + QUOTA_COOLDOWN);
+    }
 }
 
 pub fn parse_continuations(continuations: &[serde_json::Value]) -> Option<(String, Option<u64>)> {
@@ -820,5 +934,40 @@ mod tests {
             parse_continuations(&continuations).expect("should extract continuation");
         assert_eq!(token, "token_abc123");
         assert_eq!(timeout, Some(4500));
+    }
+
+    #[test]
+    fn configured_api_key_takes_precedence_over_scraped_key() {
+        let body = r#"<script>"INNERTUBE_API_KEY":"scraped-key"</script>"#;
+        assert_eq!(select_api_key(body, Some("tenant-key")), "tenant-key");
+        assert_eq!(select_api_key(body, Some(" ")), "scraped-key");
+    }
+
+    #[test]
+    fn request_limiters_are_partitioned_by_api_key() {
+        let first = request_limiter("tenant-api-key-a");
+        let first_again = request_limiter("tenant-api-key-a");
+        let second = request_limiter("tenant-api-key-b");
+        assert!(Arc::ptr_eq(&first, &first_again));
+        assert!(!Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn quota_circuit_opens_after_repeated_rate_limits() {
+        let key = format!("quota-circuit-{}", std::process::id());
+        quota_rate_limited(&key);
+        quota_rate_limited(&key);
+        assert!(quota_gate(&key));
+        quota_rate_limited(&key);
+        assert!(!quota_gate(&key));
+
+        QUOTA_CIRCUITS
+            .lock()
+            .unwrap()
+            .get_mut(&key)
+            .unwrap()
+            .open_until = Some(std::time::Instant::now() - Duration::from_secs(1));
+        assert!(quota_gate(&key));
+        quota_success(&key);
     }
 }
