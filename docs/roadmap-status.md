@@ -13,5 +13,5 @@ draft PR does not imply completion where an external service is still needed.
 | 401–402 | Adaptive YouTube polling, tenant API-key partitioning, and signed Kick/X/Twitch handlers | Provider quota dashboards and webhook fleet soak |
 | 403 | Twitch/Kick/YouTube outbound adapters and loop prevention | Provider bot credential provisioning and end-to-end relay tests |
 | 501 | Persistent monthly quotas plus generic, Stripe, and LemonSqueezy webhooks | Production account/customer lifecycle integration |
-| 502 | Tenant metrics (bitrate, dropped frames, reconnects), Prometheus scrape, structured tracing spans | Collector deployment and export configuration |
+| 502 | Tenant metrics (bitrate, dropped frames, reconnects), Prometheus scrape, dashboard QoS cards, and structured tracing spans | Collector deployment and export configuration |
 | 503 | Global and tenant emergency-stop endpoints, administrator-only authorization, and incident runbook | Production authorization review |

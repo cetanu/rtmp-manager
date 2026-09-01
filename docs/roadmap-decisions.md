@@ -108,6 +108,8 @@
 - Relay progress now records FFmpeg dropped-frame totals and reconnection
   counts alongside outbound bitrate, and exposes both in the tenant-scoped
   Prometheus response.
+- The metrics dashboard renders those QoS counters per target and refreshes
+  them from the same tenant-filtered history endpoint as bitrate charts.
 
 ## GOAL-503: moderation
 
