@@ -77,16 +77,30 @@ struct RelayIntent {
 pub async fn run_redis_worker(url: &str) -> anyhow::Result<()> {
     let client = redis::Client::open(url)?;
     let mut connection = client.get_multiplexed_async_connection().await?;
+    let stream = "rtmp-manager:relay-intents";
+    let group = "rtmp-manager-workers";
+    let _ = redis::cmd("XGROUP")
+        .arg("CREATE")
+        .arg(stream)
+        .arg(group)
+        .arg("0")
+        .arg("MKSTREAM")
+        .query_async::<()>(&mut connection)
+        .await;
+    let consumer = format!("worker-{}", std::process::id());
     let mut active: HashMap<String, RelayProcess> = HashMap::new();
     loop {
-        let reply: redis::streams::StreamReadReply = redis::cmd("XREAD")
+        let reply: redis::streams::StreamReadReply = redis::cmd("XREADGROUP")
+            .arg("GROUP")
+            .arg(group)
+            .arg(&consumer)
             .arg("BLOCK")
             .arg(5000)
             .arg("COUNT")
             .arg(16)
             .arg("STREAMS")
-            .arg("rtmp-manager:relay-intents")
-            .arg("$")
+            .arg(stream)
+            .arg(">")
             .query_async(&mut connection)
             .await?;
         for stream in reply.keys {
@@ -113,6 +127,12 @@ pub async fn run_redis_worker(url: &str) -> anyhow::Result<()> {
                     );
                     active.insert(intent.job_id, process);
                 }
+                let _: () = redis::cmd("XACK")
+                    .arg("rtmp-manager:relay-intents")
+                    .arg(group)
+                    .arg(item.id)
+                    .query_async(&mut connection)
+                    .await?;
             }
         }
     }

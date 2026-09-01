@@ -45,3 +45,6 @@
 - Redis Streams is the first broker adapter because it is easy to self-host;
   `RELAY_BROKER_URL` selects it while the local executor remains the default
   for installations without a broker.
+- Workers consume through a Redis consumer group and acknowledge intents only
+  after starting or stopping the associated relay; this provides redelivery
+  after a worker crash without coupling the control plane to one process.
