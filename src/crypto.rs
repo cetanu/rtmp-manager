@@ -7,8 +7,14 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Digest, Sha256};
 
 fn key() -> [u8; 32] {
-    let value = std::env::var("MASTER_ENCRYPTION_KEY")
-        .unwrap_or_else(|_| "rtmp-manager-development-key-change-me".to_owned());
+    let value = match std::env::var("MASTER_ENCRYPTION_KEY") {
+        Ok(value) => value,
+        Err(_) => std::env::var("MASTER_ENCRYPTION_KEY_FILE")
+            .ok()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .unwrap_or_else(|| "rtmp-manager-development-key-change-me".to_owned()),
+    };
+    let value = value.trim();
     Sha256::digest(value.as_bytes()).into()
 }
 
