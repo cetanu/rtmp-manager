@@ -47,6 +47,12 @@
   surround or incompatible source audio layouts do not break destination
   publishing.
 
+## GOAL-303: disconnect grace
+
+- The disconnect grace period is a validated server setting (0–300 seconds),
+  defaulting to 30 seconds and applied by the stream handle when scheduling
+  delayed teardown. A zero value intentionally ends a stream immediately.
+
 ## GOAL-501: usage quotas
 
 - Quotas are enforced independently of payment-provider integrations. The
