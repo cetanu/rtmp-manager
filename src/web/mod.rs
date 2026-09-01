@@ -857,7 +857,8 @@ async fn receive_webhook_for_platform(
         let (challenge, message) = crate::chat::twitch_eventsub::parse(&event, &secret)
             .map_err(|error| bad_request(error.to_string()))?;
         if let Some(message) = message {
-            dispatch_configured_relay(&settings, &message, app.http_client.clone()).await;
+            dispatch_configured_relay(&tenant.id, &settings, &message, app.http_client.clone())
+                .await;
             chat.enqueue(message).await.map_err(internal_server_error)?;
         }
         if let Some(challenge) = challenge {
@@ -873,7 +874,7 @@ async fn receive_webhook_for_platform(
                 return Err(bad_request("Rejected Kick webhook").into());
             }
         };
-        dispatch_configured_relay(&settings, &message, app.http_client.clone()).await;
+        dispatch_configured_relay(&tenant.id, &settings, &message, app.http_client.clone()).await;
         chat.enqueue(message).await.map_err(internal_server_error)?;
     } else {
         let message = match crate::chat::x::process_event(&settings, &event) {
@@ -884,7 +885,8 @@ async fn receive_webhook_for_platform(
             }
         };
         if let Some(message) = message {
-            dispatch_configured_relay(&settings, &message, app.http_client.clone()).await;
+            dispatch_configured_relay(&tenant.id, &settings, &message, app.http_client.clone())
+                .await;
             chat.enqueue(message).await.map_err(internal_server_error)?;
         }
     }
@@ -893,6 +895,7 @@ async fn receive_webhook_for_platform(
 }
 
 async fn dispatch_configured_relay(
+    tenant_id: &crate::tenant::TenantId,
     settings: &crate::config::ChatSettings,
     message: &crate::chat::IncomingChatMessage,
     client: reqwest::Client,
@@ -908,6 +911,7 @@ async fn dispatch_configured_relay(
         return;
     };
     let rule = crate::chat::relay::RelayRule {
+        tenant_id: tenant_id.as_str().to_owned(),
         source: settings
             .relay_source
             .clone()

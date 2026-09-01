@@ -12,14 +12,17 @@ static RATE_LIMITS: LazyLock<Mutex<HashMap<String, VecDeque<Instant>>>> =
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelayRule {
+    pub tenant_id: String,
     pub source: String,
     pub destination: String,
     pub prefix: String,
 }
 
-async fn allow_delivery(destination: &str) -> bool {
+async fn allow_delivery(tenant_id: &str, destination: &str) -> bool {
     let mut limits = RATE_LIMITS.lock().await;
-    let window = limits.entry(destination.to_owned()).or_default();
+    let window = limits
+        .entry(format!("{tenant_id}:{destination}"))
+        .or_default();
     let now = Instant::now();
     while window
         .front()
@@ -44,7 +47,7 @@ pub async fn dispatch(
     if message.source == rule.destination || message.source != rule.source {
         return Ok(());
     }
-    if !allow_delivery(&rule.destination).await {
+    if !allow_delivery(&rule.tenant_id, &rule.destination).await {
         anyhow::bail!("chat relay rate limit exceeded");
     }
     let text = format!(
@@ -89,8 +92,9 @@ mod tests {
     async fn limits_burst_delivery_per_destination() {
         let destination = "test-rate-limit-destination";
         for _ in 0..5 {
-            assert!(allow_delivery(destination).await);
+            assert!(allow_delivery("tenant-a", destination).await);
         }
-        assert!(!allow_delivery(destination).await);
+        assert!(!allow_delivery("tenant-a", destination).await);
+        assert!(allow_delivery("tenant-b", destination).await);
     }
 }
