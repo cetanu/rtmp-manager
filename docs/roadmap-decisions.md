@@ -47,6 +47,10 @@
   `CHAT_RELAY_TWITCH_CHANNEL`. Relay messages are prefixed and newline
   sanitized; messages originating on the destination platform are skipped to
   prevent loops.
+- Kick and YouTube adapters use their official chat APIs with
+  `KICK_BOT_OAUTH_TOKEN` and `YOUTUBE_BOT_OAUTH_TOKEN`; selecting a destination
+  is done with `CHAT_RELAY_DESTINATION` and source filtering with
+  `CHAT_RELAY_SOURCE`.
 
 ## GOAL-301: relay control plane
 

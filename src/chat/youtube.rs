@@ -197,6 +197,24 @@ pub async fn run(client: Client, chat: ChatHandle, config: YouTubeChatConfig) {
     }
 }
 
+pub async fn send_message(client: &Client, live_chat_id: &str, text: &str) -> Result<()> {
+    let token = std::env::var("YOUTUBE_BOT_OAUTH_TOKEN")
+        .context("YOUTUBE_BOT_OAUTH_TOKEN is not configured")?;
+    let text = text.replace(['\r', '\n'], " ");
+    if text.trim().is_empty() || text.len() > 500 {
+        bail!("invalid YouTube message");
+    }
+    let response = client
+        .post("https://www.googleapis.com/youtube/v3/liveChat/messages?part=snippet")
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "snippet": { "liveChatId": live_chat_id, "type": "textMessageEvent", "textMessageDetails": { "messageText": text } } }))
+        .send().await.context("failed to send YouTube chat message")?;
+    if !response.status().is_success() {
+        bail!("YouTube chat API returned {}", response.status());
+    }
+    Ok(())
+}
+
 async fn resolve_live_chat_session(
     client: &Client,
     target: &YouTubeChatTarget,

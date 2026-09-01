@@ -601,7 +601,7 @@ async fn receive_webhook_for_platform(
         let (challenge, message) = crate::chat::twitch_eventsub::parse(&event, &secret)
             .map_err(|error| bad_request(error.to_string()))?;
         if let Some(message) = message {
-            dispatch_configured_relay(&message).await;
+            dispatch_configured_relay(&settings, &message, app.http_client.clone()).await;
             chat.enqueue(message).await.map_err(internal_server_error)?;
         }
         if let Some(challenge) = challenge {
@@ -617,7 +617,7 @@ async fn receive_webhook_for_platform(
                 return Err(bad_request("Rejected Kick webhook").into());
             }
         };
-        dispatch_configured_relay(&message).await;
+        dispatch_configured_relay(&settings, &message, app.http_client.clone()).await;
         chat.enqueue(message).await.map_err(internal_server_error)?;
     } else {
         let message = match crate::chat::x::process_event(&settings, &event) {
@@ -628,7 +628,7 @@ async fn receive_webhook_for_platform(
             }
         };
         if let Some(message) = message {
-            dispatch_configured_relay(&message).await;
+            dispatch_configured_relay(&settings, &message, app.http_client.clone()).await;
             chat.enqueue(message).await.map_err(internal_server_error)?;
         }
     }
@@ -636,16 +636,20 @@ async fn receive_webhook_for_platform(
     topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
 }
 
-async fn dispatch_configured_relay(message: &crate::chat::IncomingChatMessage) {
-    let Ok(channel) = std::env::var("CHAT_RELAY_TWITCH_CHANNEL") else {
+async fn dispatch_configured_relay(
+    settings: &crate::config::ChatSettings,
+    message: &crate::chat::IncomingChatMessage,
+    client: reqwest::Client,
+) {
+    let Ok(destination) = std::env::var("CHAT_RELAY_DESTINATION") else {
         return;
     };
     let rule = crate::chat::relay::RelayRule {
         source: std::env::var("CHAT_RELAY_SOURCE").unwrap_or_else(|_| message.source.clone()),
-        destination: "twitch".to_owned(),
+        destination,
         prefix: "[relay] ".to_owned(),
     };
-    if let Err(error) = crate::chat::relay::dispatch(&rule, message, &channel).await {
+    if let Err(error) = crate::chat::relay::dispatch(&rule, message, settings, &client).await {
         tracing::warn!(%error, "Chat relay dispatch failed");
     }
 }
