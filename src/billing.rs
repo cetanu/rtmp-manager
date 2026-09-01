@@ -1,5 +1,10 @@
 use crate::database::Database;
 use anyhow::Result;
+use anyhow::bail;
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
+
+type BillingHmac = Hmac<Sha256>;
 
 #[derive(Clone)]
 pub struct UsageRepository {
@@ -50,5 +55,27 @@ impl UsageRepository {
         sqlx::query("UPDATE tenant_usage SET stream_seconds = stream_seconds + $1 WHERE tenant_id = $2 AND period_start = $3")
             .bind(seconds).bind(tenant_id).bind(period).execute(self.database.pool()).await?;
         Ok(())
+    }
+
+    pub async fn set_plan(&self, tenant_id: &str, plan: &str, now: i64) -> Result<()> {
+        if !matches!(plan, "free" | "pro" | "enterprise") {
+            bail!("Unsupported subscription plan");
+        }
+        let period = now - now.rem_euclid(30 * 24 * 60 * 60);
+        sqlx::query("INSERT INTO tenant_usage (tenant_id, period_start, plan) VALUES ($1, $2, $3) ON CONFLICT (tenant_id, period_start) DO UPDATE SET plan = excluded.plan")
+            .bind(tenant_id).bind(period).bind(plan).execute(self.database.pool()).await?;
+        Ok(())
+    }
+
+    pub fn verify_webhook(body: &[u8], signature: &str, secret: &str) -> bool {
+        let Some(signature) = signature.strip_prefix("sha256=") else {
+            return false;
+        };
+        let Ok(mut mac) = BillingHmac::new_from_slice(secret.as_bytes()) else {
+            return false;
+        };
+        mac.update(body);
+        let expected = hex::encode(mac.finalize().into_bytes());
+        subtle::ConstantTimeEq::ct_eq(expected.as_bytes(), signature.as_bytes()).unwrap_u8() == 1
     }
 }

@@ -37,3 +37,5 @@
   initial plans are free (10 hours/month), pro (100 hours/month), and
   enterprise (unlimited); a later billing adapter can update the plan column
   without changing stream lifecycle code.
+- Provider webhooks use `BILLING_WEBHOOK_SECRET` and a generic signed payload;
+  Stripe/LemonSqueezy adapters can translate their events into this contract.

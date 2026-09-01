@@ -340,6 +340,40 @@ async fn get_config(cx: &Cx) -> Result<topcoat::router::Response> {
     )
 }
 
+#[derive(Deserialize)]
+struct BillingPlanUpdate {
+    tenant_id: String,
+    plan: String,
+}
+
+#[route(POST "/api/billing/webhook")]
+async fn billing_webhook(
+    cx: &Cx,
+    body: topcoat::router::Bytes,
+) -> Result<topcoat::router::Response> {
+    let secret = std::env::var("BILLING_WEBHOOK_SECRET")
+        .map_err(|_| bad_request("Billing webhook is not configured"))?;
+    let signature = topcoat::router::headers(cx)
+        .get("x-billing-signature")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| bad_request("Missing billing webhook signature"))?;
+    if !crate::billing::UsageRepository::verify_webhook(&body, signature, &secret) {
+        return Err(bad_request("Invalid billing webhook signature").into());
+    }
+    let update: BillingPlanUpdate = serde_json::from_slice(&body)
+        .map_err(|_| bad_request("Invalid billing webhook payload"))?;
+    let app: &AppHandle = app_context(cx);
+    app.usage
+        .set_plan(
+            &update.tenant_id,
+            &update.plan,
+            crate::util::now_unix_secs() as i64,
+        )
+        .await
+        .map_err(|error| bad_request(error.to_string()))?;
+    topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
+}
+
 #[route(POST "/api/config/import")]
 async fn import_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat::router::Response> {
     let app: &AppHandle = app_context(cx);
