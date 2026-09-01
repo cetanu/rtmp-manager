@@ -32,6 +32,8 @@ RUN apt-get update \
     && install -d -o rtmp-manager -g rtmp-manager /data /opt/rtmp-manager
 
 COPY --from=builder --chown=rtmp-manager:rtmp-manager /output/rtmp-proxy /opt/rtmp-manager/rtmp-proxy
+COPY --chown=rtmp-manager:rtmp-manager docker-entrypoint.sh /opt/rtmp-manager/docker-entrypoint.sh
+RUN chmod 0755 /opt/rtmp-manager/docker-entrypoint.sh
 
 USER rtmp-manager
 WORKDIR /data
@@ -44,4 +46,4 @@ EXPOSE 1935 3000 6000/udp
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["curl", "--fail", "--silent", "http://127.0.0.1:3000/healthz"]
 
-ENTRYPOINT ["/opt/rtmp-manager/rtmp-proxy"]
+ENTRYPOINT ["/opt/rtmp-manager/docker-entrypoint.sh"]
