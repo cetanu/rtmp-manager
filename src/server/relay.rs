@@ -1,6 +1,7 @@
 use crate::config::{EncodingMode, TargetConfig};
 use crate::metrics::Metrics;
 use crate::util::redact_secrets;
+use std::collections::HashMap;
 #[cfg(unix)]
 use std::process::Command;
 use std::process::Stdio;
@@ -66,6 +67,8 @@ impl RedisRelayExecutor {
 
 #[derive(serde::Deserialize)]
 struct RelayIntent {
+    kind: String,
+    job_id: String,
     tenant_id: String,
     source_url: String,
     target: TargetConfig,
@@ -74,6 +77,7 @@ struct RelayIntent {
 pub async fn run_redis_worker(url: &str) -> anyhow::Result<()> {
     let client = redis::Client::open(url)?;
     let mut connection = client.get_multiplexed_async_connection().await?;
+    let mut active: HashMap<String, RelayProcess> = HashMap::new();
     loop {
         let reply: redis::streams::StreamReadReply = redis::cmd("XREAD")
             .arg("BLOCK")
@@ -95,13 +99,20 @@ pub async fn run_redis_worker(url: &str) -> anyhow::Result<()> {
                     continue;
                 };
                 let intent: RelayIntent = serde_json::from_str(&payload)?;
-                let process = spawn_relay(
-                    Arc::new(Metrics::default()),
-                    intent.tenant_id,
-                    intent.source_url,
-                    intent.target,
-                );
-                std::mem::forget(process.task);
+                if intent.kind == "stop" {
+                    if let Some(process) = active.remove(&intent.job_id) {
+                        let _ = process.cancel.send(true);
+                        let _ = process.task.await;
+                    }
+                } else if intent.kind == "start" {
+                    let process = spawn_relay(
+                        Arc::new(Metrics::default()),
+                        intent.tenant_id,
+                        intent.source_url,
+                        intent.target,
+                    );
+                    active.insert(intent.job_id, process);
+                }
             }
         }
     }
@@ -126,8 +137,9 @@ impl RelayExecutor for RedisRelayExecutor {
                     return;
                 }
             };
+            let job_id = format!("{}-{}", std::process::id(), crate::util::now_unix_ms());
             let payload = match serde_json::to_string(&serde_json::json!({
-                "tenant_id": tenant_id, "source_url": source_url, "target": target
+                "kind": "start", "job_id": job_id, "tenant_id": tenant_id, "source_url": source_url, "target": target
             })) {
                 Ok(payload) => payload,
                 Err(error) => {
@@ -147,6 +159,14 @@ impl RelayExecutor for RedisRelayExecutor {
                 return;
             }
             let _ = cancel_rx.changed().await;
+            let stop = serde_json::json!({ "kind": "stop", "job_id": job_id }).to_string();
+            let _ = redis::cmd("XADD")
+                .arg("rtmp-manager:relay-intents")
+                .arg("*")
+                .arg("payload")
+                .arg(stop)
+                .query_async::<String>(&mut connection)
+                .await;
         });
         RelayProcess { cancel, task }
     }
