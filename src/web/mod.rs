@@ -233,6 +233,27 @@ async fn get_stream_status(cx: &Cx) -> Result<Json<StreamStatus>> {
     Ok(Json(app.stream.status(&auth::current_user(cx).tenant_id)))
 }
 
+#[route(GET "/api/admin/streams")]
+async fn get_admin_stream_status(cx: &Cx) -> Result<Json<Vec<AdminStreamStatus>>> {
+    let app: &AppHandle = app_context(cx);
+    Ok(Json(
+        app.stream
+            .all_status()
+            .iter()
+            .map(|(tenant_id, status)| AdminStreamStatus {
+                tenant_id: tenant_id.as_str().to_owned(),
+                status: *status,
+            })
+            .collect(),
+    ))
+}
+
+#[derive(Debug, Serialize)]
+struct AdminStreamStatus {
+    tenant_id: String,
+    status: StreamStatus,
+}
+
 #[route(GET "/api/metrics/history")]
 async fn get_metrics_history(cx: &Cx) -> Result<Json<Vec<crate::metrics::MetricsSample>>> {
     let app: &AppHandle = app_context(cx);

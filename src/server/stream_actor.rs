@@ -620,6 +620,11 @@ impl StreamHandle {
             })
     }
 
+    /// Returns every tenant's current status for administrator views.
+    pub fn all_status(&self) -> Arc<HashMap<TenantId, StreamStatus>> {
+        self.status_rx.borrow().clone()
+    }
+
     /// Subscribes to stream status change events.
     pub fn subscribe_status(&self) -> watch::Receiver<Arc<HashMap<TenantId, StreamStatus>>> {
         self.status_rx.clone()
