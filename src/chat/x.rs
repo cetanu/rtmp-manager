@@ -108,7 +108,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    const BODY: &[u8] = br#"{"data":{"event_uuid":"event-123","event_type":"broadcast.chat","payload":{"message_id":"message-456","message":"Hello X","author":{"data":{"username":"viewer","profile_image_url":"https://example.test/avatar.jpg"}}}}}"#;
+    const BODY: &[u8] = br#"{"data":{"event_uuid":"7365873565827875221","filter":{"user_id":"2055263440998973400"},"event_type":"broadcast.chat","tag":"broadcast chat","payload":{"broadcast_id":"1mGPaZaAdNqJN","message_id":"2090000000000000004","message":"hello from chat","is_subscriber":false,"author":{"data":{"id":"1234567890123456789","username":"ExampleUser","name":"Example User","created_at":"2024-08-31T23:23:51.000Z","description":"X","protected":false,"verified":true,"verified_type":"blue","is_identity_verified":false,"profile_image_url":"https://example.test/avatar.jpg","profile_banner_url":"https://example.test/banner.jpg","url":"https://t.co/xxxxxxxx","entities":{"url":{"urls":[]},"description":{"mentions":[]}},"public_metrics":{"followers_count":2774,"following_count":268,"tweet_count":705,"listed_count":42,"like_count":983,"media_count":93},"affiliation":{"url":"https://twitter.com/X","badge_url":"https://example.test/badge.jpg","description":"X"}}}}}}"#;
 
     fn signed_event(secret: &str) -> WebhookEvent {
         let mut headers = HashMap::new();
@@ -142,9 +142,9 @@ mod tests {
     fn parses_broadcast_chat_event() {
         let message = parse_chat_event(BODY).unwrap().unwrap();
         assert_eq!(message.source, "x");
-        assert_eq!(message.external_id, "message-456");
-        assert_eq!(message.author, "viewer");
-        assert_eq!(message.text, "Hello X");
+        assert_eq!(message.external_id, "2090000000000000004");
+        assert_eq!(message.author, "ExampleUser");
+        assert_eq!(message.text, "hello from chat");
         assert_eq!(
             message.avatar_url.as_deref(),
             Some("https://example.test/avatar.jpg")

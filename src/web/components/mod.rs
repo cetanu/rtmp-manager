@@ -13,3 +13,4 @@ pub mod stream_preview;
 pub mod targets;
 pub mod ui;
 pub mod web_auth;
+pub mod webhook_audit;

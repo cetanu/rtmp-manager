@@ -2,6 +2,7 @@ use crate::chat::ChatHandle;
 use crate::config::ConfigHandle;
 use crate::metrics::Metrics;
 use crate::server::stream_actor::StreamHandle;
+use crate::webhook_audit::WebhookAudit;
 use anyhow::Result;
 use reqwest::Client;
 use std::collections::HashMap;
@@ -31,6 +32,7 @@ pub struct AppHandle {
     pub config: ConfigHandle,
     pub metrics: Arc<Metrics>,
     pub http_client: Client,
+    pub webhook_audit: Arc<WebhookAudit>,
 }
 
 impl AppHandle {
@@ -61,6 +63,7 @@ impl AppHandle {
             config: config_handle,
             metrics,
             http_client,
+            webhook_audit: Arc::new(WebhookAudit::new()),
         };
 
         handle.apply_chat_config().await?;

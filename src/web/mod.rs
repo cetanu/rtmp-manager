@@ -26,7 +26,7 @@ pub mod components;
 use components::{
     app_navigation::app_navigation, chat_inbox::chat_inbox, config_transfer::config_transfer,
     configuration_form::configuration_form, log_viewer::log_viewer, metrics::metrics_page,
-    stream_preview::stream_preview,
+    stream_preview::stream_preview, webhook_audit::webhook_audit,
 };
 
 pub(crate) const TAILWIND_STYLESHEET: topcoat::asset::Asset = topcoat::tailwind::stylesheet!();
@@ -110,6 +110,7 @@ async fn app_page(active_page: &'static str) -> Result {
                 </section>
                 <section data-app-page="logs" hidden=(active_page != "logs")>
                     log_viewer()
+                    webhook_audit()
                 </section>
                 configuration_form(active_page: active_page)
                 <section data-app-page="export" hidden=(active_page != "export")>
@@ -442,9 +443,6 @@ async fn receive_webhook(
     body: topcoat::router::Bytes,
 ) -> Result<topcoat::router::Response> {
     const MAX_WEBHOOK_SIZE: usize = 128 * 1024;
-    if body.len() > MAX_WEBHOOK_SIZE {
-        return Err(bad_request("Webhook body exceeds 128 KiB").into());
-    }
     let app: &AppHandle = app_context(cx);
     let headers = topcoat::router::headers(cx)
         .iter()
@@ -457,6 +455,18 @@ async fn receive_webhook(
         .collect();
     let body_bytes = body.len();
     let event = crate::server::state::WebhookEvent { headers, body };
+    let platform = if event.header("kick-event-signature").is_some() {
+        "kick"
+    } else if event.header("x-twitter-webhooks-signature").is_some() {
+        "x"
+    } else {
+        "unknown"
+    };
+    app.webhook_audit
+        .record(platform, event.header("content-type"), &event.body);
+    if event.body.len() > MAX_WEBHOOK_SIZE {
+        return Err(bad_request("Webhook body exceeds 128 KiB").into());
+    }
     let settings = app.config.get().chat.clone();
     let platform = if event.header("kick-event-signature").is_some() {
         let message = match crate::chat::kick::process_event(&settings, &event) {
@@ -491,7 +501,7 @@ async fn receive_webhook(
         return Err(bad_request("Webhook signature is missing").into());
     };
     tracing::info!(platform, body_bytes, "Webhook accepted");
-    topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
+    topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::OK, cx)
 }
 
 #[derive(Deserialize)]

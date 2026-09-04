@@ -7,6 +7,7 @@ mod notifications;
 mod server;
 mod util;
 mod web;
+mod webhook_audit;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
