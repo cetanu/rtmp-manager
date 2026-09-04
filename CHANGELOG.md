@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.7](https://github.com/cetanu/rtmp-manager/compare/v0.3.6...v0.3.7) - 2026-09-04
+
+### Added
+
+- *(metrics)* stream dashboard updates over SSE
+- *(webhooks)* add troubleshooting audit
+
 ## [0.3.6](https://github.com/cetanu/rtmp-manager/compare/v0.3.5...v0.3.6) - 2026-08-31
 
 ### Added
