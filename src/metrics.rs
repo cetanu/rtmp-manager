@@ -3,6 +3,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use tokio::sync::watch;
 
 pub struct Metrics {
     ingest_bytes: AtomicU64,
@@ -10,6 +11,7 @@ pub struct Metrics {
     last_sample_ingest_bytes: AtomicU64,
     target_bitrates: RwLock<HashMap<String, Arc<TargetBitrate>>>,
     history: RwLock<VecDeque<MetricsSample>>,
+    samples: watch::Sender<Option<MetricsSample>>,
 }
 
 const HISTORY_SECONDS: usize = 300;
@@ -34,12 +36,14 @@ pub struct MetricsSample {
 
 impl Default for Metrics {
     fn default() -> Self {
+        let (samples, _) = watch::channel(None);
         Self {
             ingest_bytes: AtomicU64::new(0),
             ingest_bps: AtomicU64::new(0),
             last_sample_ingest_bytes: AtomicU64::new(0),
             target_bitrates: RwLock::new(HashMap::new()),
             history: RwLock::new(VecDeque::with_capacity(HISTORY_SECONDS)),
+            samples,
         }
     }
 }
@@ -82,19 +86,27 @@ impl Metrics {
         let previous = self.last_sample_ingest_bytes.swap(bytes, Ordering::Relaxed);
         let ingest_bps = bytes.saturating_sub(previous).saturating_mul(8);
         self.ingest_bps.store(ingest_bps, Ordering::Relaxed);
-        let mut history = self.history.write().unwrap();
-        if history.len() == HISTORY_SECONDS {
-            history.pop_front();
-        }
-        history.push_back(MetricsSample {
+        let sample = MetricsSample {
             timestamp_ms,
             ingest_bps,
             targets: self.current_target_bitrates(),
-        });
+        };
+        {
+            let mut history = self.history.write().unwrap();
+            if history.len() == HISTORY_SECONDS {
+                history.pop_front();
+            }
+            history.push_back(sample.clone());
+        }
+        self.samples.send_replace(Some(sample));
     }
 
     pub fn history(&self) -> Vec<MetricsSample> {
         self.history.read().unwrap().iter().cloned().collect()
+    }
+
+    pub fn subscribe(&self) -> watch::Receiver<Option<MetricsSample>> {
+        self.samples.subscribe()
     }
 
     pub fn add_ingest_bytes(&self, bytes: u64) {

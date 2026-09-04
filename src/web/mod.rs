@@ -90,10 +90,10 @@ async fn app_page(active_page: &'static str) -> Result {
             topcoat::runtime::script()
             <script src=(HLS_PLAYER_SCRIPT) defer="defer"></script>
             <script src=(STREAM_PREVIEW_SCRIPT) defer="defer"></script>
+            <script src=(METRICS_CHARTS_SCRIPT) defer="defer"></script>
             <script src=(CHAT_EVENTS_SCRIPT) defer="defer"></script>
             <script src=(APP_NAVIGATION_SCRIPT) defer="defer"></script>
             <script src=(LOG_VIEWER_SCRIPT) defer="defer"></script>
-            <script src=(METRICS_CHARTS_SCRIPT) defer="defer"></script>
             <script src=(SECRET_FIELDS_SCRIPT) defer="defer"></script>
         </head>
         <body class="min-h-screen bg-background text-foreground font-sans antialiased">
@@ -205,12 +205,6 @@ async fn get_preview_file(cx: &Cx) -> Result<topcoat::router::Response> {
 async fn get_stream_status(cx: &Cx) -> Result<Json<StreamStatus>> {
     let app: &AppHandle = app_context(cx);
     Ok(Json(app.stream.status()))
-}
-
-#[route(GET "/api/metrics/history")]
-async fn get_metrics_history(cx: &Cx) -> Result<Json<Vec<crate::metrics::MetricsSample>>> {
-    let app: &AppHandle = app_context(cx);
-    Ok(Json(app.metrics.history()))
 }
 
 #[derive(Debug, Deserialize)]
@@ -373,6 +367,7 @@ async fn server_events(
     let app: &AppHandle = app_context(cx);
     let status_rx = app.stream.subscribe_status();
     let chat_changes = app.chat.subscribe_changes();
+    let metric_samples = app.metrics.subscribe();
 
     let initial_status = SseEvent::new()
         .event("stream_status")
@@ -380,11 +375,14 @@ async fn server_events(
     let initial_events = futures_util::stream::iter([
         Ok(initial_status),
         Ok(SseEvent::new().event("chat_changed").data("changed")),
+        SseEvent::new()
+            .event("metrics_history")
+            .json_data(&app.metrics.history()),
     ]);
 
     let changes = futures_util::stream::unfold(
-        (status_rx, chat_changes),
-        |(mut status_rx, mut chat_changes)| async move {
+        (status_rx, chat_changes, metric_samples),
+        |(mut status_rx, mut chat_changes, mut metric_samples)| async move {
             tokio::select! {
                 changed = status_rx.changed() => {
                     if changed.is_err() {
@@ -394,7 +392,7 @@ async fn server_events(
                     let event = SseEvent::new()
                         .event("stream_status")
                         .json_data(&status);
-                    Some((event, (status_rx, chat_changes)))
+                    Some((event, (status_rx, chat_changes, metric_samples)))
                 }
                 changed = chat_changes.changed() => {
                     if changed.is_err() {
@@ -402,8 +400,19 @@ async fn server_events(
                     }
                     Some((
                         Ok(SseEvent::new().event("chat_changed").data("changed")),
-                        (status_rx, chat_changes),
+                        (status_rx, chat_changes, metric_samples),
                     ))
+                }
+                changed = metric_samples.changed() => {
+                    if changed.is_err() {
+                        return None;
+                    }
+                    let event = metric_samples
+                        .borrow()
+                        .as_ref()
+                        .map(|sample| SseEvent::new().event("metrics_sample").json_data(sample))
+                        .unwrap_or_else(|| Ok(SseEvent::new().event("metrics_sample").data("null")));
+                    Some((event, (status_rx, chat_changes, metric_samples)))
                 }
             }
         },
