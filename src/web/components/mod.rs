@@ -1,6 +1,7 @@
 pub mod actions_panel;
 pub mod app_navigation;
 pub mod chat_inbox;
+pub mod chat_overlay;
 pub mod chat_settings;
 pub mod config_transfer;
 pub mod configuration_form;

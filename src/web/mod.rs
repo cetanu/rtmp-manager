@@ -24,9 +24,10 @@ use topcoat::{
 pub mod auth;
 pub mod components;
 use components::{
-    app_navigation::app_navigation, chat_inbox::chat_inbox, config_transfer::config_transfer,
-    configuration_form::configuration_form, log_viewer::log_viewer, metrics::metrics_page,
-    stream_preview::stream_preview, webhook_audit::webhook_audit,
+    app_navigation::app_navigation, chat_inbox::chat_inbox, chat_overlay::chat_overlay_page,
+    config_transfer::config_transfer, configuration_form::configuration_form,
+    log_viewer::log_viewer, metrics::metrics_page, stream_preview::stream_preview,
+    webhook_audit::webhook_audit,
 };
 
 pub(crate) const TAILWIND_STYLESHEET: topcoat::asset::Asset = topcoat::tailwind::stylesheet!();
@@ -145,6 +146,16 @@ async fn metrics_page_route() -> Result {
 #[page("/chat")]
 async fn chat_page() -> Result {
     view! { app_page(active_page: "chat") }
+}
+
+#[page("/overlay/chat")]
+async fn chat_overlay_route() -> Result {
+    view! { chat_overlay_page() }
+}
+
+#[page("/chat/overlay")]
+async fn chat_overlay_alias_route() -> Result {
+    view! { chat_overlay_page() }
 }
 
 #[page("/logs")]
@@ -542,3 +553,115 @@ async fn verify_webhook_crc(cx: &Cx) -> Result<topcoat::router::Response> {
         crate::chat::x::response_token(&query.crc_token, secret).map_err(internal_server_error)?;
     topcoat::router::IntoResponse::into_response(Json(WebhookCrcResponse { response_token }), cx)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_PORT_COUNTER: AtomicU64 = AtomicU64::new(45000);
+
+    #[tokio::test]
+    async fn overlay_routes_are_registered_and_serve_html() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rtmp-overlay-test-{}",
+            TEST_PORT_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let config_path = temp_dir.join("config.sqlite3");
+        let client = reqwest::Client::new();
+        let (config_handle, _config) = crate::config::ConfigHandle::open(&config_path).await.unwrap();
+        let metrics = Arc::new(crate::metrics::Metrics::default());
+        let app_handle = AppHandle::new(metrics, config_handle, client.clone(), 1935).await.unwrap();
+
+        let _ = crate::embedded_assets::install(TAILWIND_STYLESHEET);
+
+        let app = Router::builder()
+            .discover()
+            .assets(AssetBundle::load().unwrap())
+            .app_context(app_handle.clone())
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let server_task = tokio::spawn(async move {
+            let _ = topcoat::serve(listener, app).await;
+        });
+
+        app_handle
+            .chat
+            .enqueue(crate::chat::IncomingChatMessage {
+                source: "twitch".into(),
+                external_id: "test1".into(),
+                author: "TestViewer".into(),
+                text: "OBS overlay test message".into(),
+                avatar_url: None,
+                sent_at: None,
+            })
+            .await
+            .unwrap();
+
+        let resp1 = client
+            .get(format!("http://{local_addr}/overlay/chat"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp1.status(), reqwest::StatusCode::OK);
+        let body1 = resp1.text().await.unwrap();
+        assert!(body1.contains("RTMP-Manager Chat Overlay"));
+        assert!(body1.contains("TestViewer"));
+        assert!(body1.contains("OBS overlay test message"));
+        assert!(body1.contains("data-source=\"twitch\""));
+
+        let resp2 = client
+            .get(format!("http://{local_addr}/chat/overlay"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp2.status(), reqwest::StatusCode::OK);
+        let body2 = resp2.text().await.unwrap();
+        assert!(body2.contains("RTMP-Manager Chat Overlay"));
+        assert!(body2.contains("TestViewer"));
+
+        // Verify web auth with query token works
+        let mut authed_config = app_handle.config.get().as_ref().clone();
+        authed_config.web_auth.username = "admin".into();
+        authed_config.web_auth.password = "secretpassword123".into();
+        app_handle
+            .config
+            .import(&serde_json::to_vec(&authed_config).unwrap())
+            .await
+            .unwrap();
+
+        // Dashboard routes (/chat, /settings) require authentication
+        let unauthed_dashboard = client
+            .get(format!("http://{local_addr}/chat"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(unauthed_dashboard.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+        // Overlay (/overlay/chat) works WITHOUT authentication!
+        let overlay_no_auth = client
+            .get(format!("http://{local_addr}/overlay/chat"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(overlay_no_auth.status(), reqwest::StatusCode::OK);
+        let overlay_body = overlay_no_auth.text().await.unwrap();
+        assert!(overlay_body.contains("RTMP-Manager Chat Overlay"));
+        assert!(overlay_body.contains("TestViewer"));
+
+        // Overlay alias (/chat/overlay) also works without authentication
+        let alias_no_auth = client
+            .get(format!("http://{local_addr}/chat/overlay"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(alias_no_auth.status(), reqwest::StatusCode::OK);
+
+        server_task.abort();
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+}
+

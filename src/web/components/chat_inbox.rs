@@ -92,7 +92,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
         signal polling_error = String::new();
 
         card(
-            attrs: attributes! { class="mb-8" },
+            attrs: attributes! { class="mb-2" },
             chat_inbox_content(revision: $(revision.get()))
             card_footer(
                 attrs: attributes! { class="justify-between" },
@@ -206,6 +206,22 @@ pub async fn chat_inbox(cx: &Cx) -> Result {
                 </div>
             )
         )
+        <div class="mb-8 flex justify-end px-1">
+            <a
+                href="/overlay/chat"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                title="Open OBS browser source overlay in a new tab"
+            >
+                <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                    <polyline points="15 3 21 3 21 9" />
+                    <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+                <span>"OBS Overlay"</span>
+            </a>
+        </div>
     }
 }
 
@@ -236,7 +252,7 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result {
     }
 }
 
-fn source_color(source: &str) -> &'static str {
+pub(crate) fn source_color(source: &str) -> &'static str {
     match source {
         "twitch" => "text-[#9146ff]",
         "youtube" => "text-[#ff0033]",
@@ -247,7 +263,7 @@ fn source_color(source: &str) -> &'static str {
 }
 
 #[component]
-async fn chat_source_icon(source: String) -> Result {
+pub(crate) async fn chat_source_icon(source: String) -> Result {
     let color = source_color(&source);
 
     view! {
