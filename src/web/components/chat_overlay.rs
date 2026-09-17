@@ -179,5 +179,3 @@ mod tests {
         assert!(standard.contains("chat-overlay-message"));
     }
 }
-
-

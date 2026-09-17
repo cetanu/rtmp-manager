@@ -40,8 +40,7 @@ async fn basic_auth(cx: &mut CxBuilder, body: Body, next: Next<'_>) -> Result<Re
         let stream_key = &app.config.get().server.ingest_stream_key;
         if (!auth.password.is_empty()
             && constant_time_eq(auth.password.as_bytes(), token.as_bytes()))
-            || (!stream_key.is_empty()
-                && constant_time_eq(stream_key.as_bytes(), token.as_bytes()))
+            || (!stream_key.is_empty() && constant_time_eq(stream_key.as_bytes(), token.as_bytes()))
         {
             return next.run(cx, body).await;
         }
@@ -98,7 +97,10 @@ mod tests {
     #[test]
     fn extracts_query_token_from_key_or_token_param() {
         assert_eq!(extract_query_token("key=mysecret"), Some("mysecret".into()));
-        assert_eq!(extract_query_token("token=mysecret"), Some("mysecret".into()));
+        assert_eq!(
+            extract_query_token("token=mysecret"),
+            Some("mysecret".into())
+        );
         assert_eq!(
             extract_query_token("theme=plain&key=stream123&align=bottom"),
             Some("stream123".into())

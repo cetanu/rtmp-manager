@@ -570,9 +570,13 @@ mod tests {
         let _ = std::fs::create_dir_all(&temp_dir);
         let config_path = temp_dir.join("config.sqlite3");
         let client = reqwest::Client::new();
-        let (config_handle, _config) = crate::config::ConfigHandle::open(&config_path).await.unwrap();
+        let (config_handle, _config) = crate::config::ConfigHandle::open(&config_path)
+            .await
+            .unwrap();
         let metrics = Arc::new(crate::metrics::Metrics::default());
-        let app_handle = AppHandle::new(metrics, config_handle, client.clone(), 1935).await.unwrap();
+        let app_handle = AppHandle::new(metrics, config_handle, client.clone(), 1935)
+            .await
+            .unwrap();
 
         let _ = crate::embedded_assets::install(TAILWIND_STYLESHEET);
 
@@ -639,7 +643,10 @@ mod tests {
             .send()
             .await
             .unwrap();
-        assert_eq!(unauthed_dashboard.status(), reqwest::StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            unauthed_dashboard.status(),
+            reqwest::StatusCode::UNAUTHORIZED
+        );
 
         // Overlay (/overlay/chat) works WITHOUT authentication!
         let overlay_no_auth = client
@@ -664,4 +671,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 }
-
