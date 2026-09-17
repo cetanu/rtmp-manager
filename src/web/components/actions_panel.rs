@@ -11,6 +11,13 @@ use topcoat::{
 #[procedure]
 async fn start_test_stream(cx: &Cx) -> Result<String> {
     let app: &AppHandle = app_context(cx);
+    if app.stream.status().state == crate::server::preview::StreamState::Live {
+        return Ok("Cannot run a test stream while publishing live".to_owned());
+    }
+    if app.stream.is_test_stream_running() {
+        return Ok("A test stream is already in progress".to_owned());
+    }
+
     let config = app.config.get();
     let duration_secs = config.server.test_stream_duration_secs;
     let targets = config

@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::process::Child;
 use tokio::sync::{mpsc, oneshot, watch};
@@ -53,6 +54,7 @@ pub struct StreamActor {
     http_client: Client,
     config_rx: watch::Receiver<Arc<AppConfig>>,
     status_tx: watch::Sender<StreamStatus>,
+    test_stream_running: Arc<AtomicBool>,
 }
 
 impl StreamActor {
@@ -88,7 +90,12 @@ impl StreamActor {
                             }
                         }
                         StreamCommand::RunTestStream { duration_secs, targets } => {
-                            run_direct_test(duration_secs, targets);
+                            run_direct_test(
+                                Arc::clone(&self.metrics),
+                                Arc::clone(&self.test_stream_running),
+                                duration_secs,
+                                targets,
+                            );
                         }
                     }
                 }
@@ -303,6 +310,7 @@ pub struct StreamHandle {
     sender: mpsc::Sender<StreamCommand>,
     status_rx: watch::Receiver<StreamStatus>,
     preview_dir: PathBuf,
+    test_stream_running: Arc<AtomicBool>,
 }
 
 impl StreamHandle {
@@ -321,11 +329,13 @@ impl StreamHandle {
             state: StreamState::Offline,
         });
         let (sender, receiver) = mpsc::channel(64);
+        let test_stream_running = Arc::new(AtomicBool::new(false));
 
         let handle = Self {
             sender,
             status_rx,
             preview_dir: preview_dir.clone(),
+            test_stream_running: Arc::clone(&test_stream_running),
         };
 
         let actor = StreamActor {
@@ -337,6 +347,7 @@ impl StreamHandle {
             http_client,
             config_rx,
             status_tx,
+            test_stream_running,
         };
 
         tokio::spawn(actor.run(receiver));
@@ -389,6 +400,11 @@ impl StreamHandle {
             duration_secs,
             targets,
         });
+    }
+
+    /// Returns whether a direct test stream is currently in progress.
+    pub fn is_test_stream_running(&self) -> bool {
+        self.test_stream_running.load(Ordering::SeqCst)
     }
 
     /// Returns the current stream status instantly with zero locks.

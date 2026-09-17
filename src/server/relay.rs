@@ -3,6 +3,7 @@ use crate::metrics::Metrics;
 use crate::util::redact_secrets;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::watch;
@@ -40,8 +41,26 @@ pub fn target_destination(target: &TargetConfig) -> String {
     }
 }
 
-pub fn run_direct_test(duration_secs: u64, targets: Vec<TargetConfig>) {
+pub fn run_direct_test(
+    metrics: Arc<Metrics>,
+    running: Arc<AtomicBool>,
+    duration_secs: u64,
+    targets: Vec<TargetConfig>,
+) {
+    if running.swap(true, Ordering::SeqCst) {
+        tracing::warn!("Direct test stream is already in progress; ignoring duplicate request");
+        return;
+    }
+
     tokio::spawn(async move {
+        struct RunningGuard(Arc<AtomicBool>);
+        impl Drop for RunningGuard {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
+        let _guard = RunningGuard(running);
+
         tracing::info!(
             duration_secs,
             target_count = targets.len(),
@@ -49,16 +68,23 @@ pub fn run_direct_test(duration_secs: u64, targets: Vec<TargetConfig>) {
         );
         let mut tasks = tokio::task::JoinSet::new();
         for target in targets {
+            let metrics = Arc::clone(&metrics);
             tasks.spawn(async move {
+                let bitrate = metrics.register_target(target.name.clone());
                 let destination = target_destination(&target);
+                let secrets = [destination.clone(), target.stream_key.clone()];
                 let video_source =
                     format!("testsrc=duration={duration_secs}:size=1280x720:rate=30");
                 let audio_source = format!("sine=frequency=1000:duration={duration_secs}");
-                let output = tokio::process::Command::new("ffmpeg")
+                let child = tokio::process::Command::new("ffmpeg")
                     .args([
                         "-hide_banner",
                         "-loglevel",
                         "warning",
+                        "-stats_period",
+                        "1",
+                        "-progress",
+                        "pipe:1",
                         "-re",
                         "-f",
                         "lavfi",
@@ -82,25 +108,134 @@ pub fn run_direct_test(duration_secs: u64, targets: Vec<TargetConfig>) {
                         "flv",
                         &destination,
                     ])
-                    .stdout(Stdio::null())
+                    .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
-                    .output()
-                    .await;
-                match output {
-                    Ok(output) if output.status.success() => {
-                        tracing::info!(
+                    .kill_on_drop(true)
+                    .spawn();
+
+                let mut child = match child {
+                    Ok(child) => child,
+                    Err(error) => {
+                        bitrate.update_from_ffmpeg(0);
+                        metrics.unregister_target(&target.name);
+                        tracing::error!(
                             name = %target.name,
-                            "Direct target test completed successfully"
+                            %error,
+                            "Direct target test FFmpeg failed to start"
                         );
+                        return;
                     }
-                    Ok(output) => {
+                };
+
+                tracing::info!(
+                    name = %target.name,
+                    duration_secs,
+                    "Direct target test stream process started"
+                );
+
+                let stdout_task = child.stdout.take().map(|stdout| {
+                    let bitrate = Arc::clone(&bitrate);
+                    let target_name = target.name.clone();
+                    tokio::spawn(async move {
+                        let mut lines = BufReader::new(stdout).lines();
+                        let mut current_bitrate_bps = 0_u64;
+                        let mut current_total_bytes = 0_u64;
+                        let mut current_speed = String::new();
+                        let mut last_progress_log = tokio::time::Instant::now();
+
+                        while let Ok(Some(line)) = lines.next_line().await {
+                            if let Some(value) = line.strip_prefix("bitrate=") {
+                                if let Some(bps) = parse_ffmpeg_bitrate(value) {
+                                    current_bitrate_bps = bps;
+                                    bitrate.update_from_ffmpeg(bps);
+                                }
+                            } else if let Some(value) = line.strip_prefix("total_size=") {
+                                if let Some(bytes) = parse_ffmpeg_total_size(value) {
+                                    current_total_bytes = bytes;
+                                }
+                            } else if let Some(value) = line.strip_prefix("speed=") {
+                                current_speed = value.trim().to_string();
+                            } else if let Some(value) = line.strip_prefix("progress=") {
+                                let progress = value.trim();
+                                if progress == "continue"
+                                    && last_progress_log.elapsed() >= Duration::from_secs(3)
+                                {
+                                    tracing::info!(
+                                        name = %target_name,
+                                        bitrate = %format_bitrate_display(current_bitrate_bps),
+                                        sent = %format_bytes_display(current_total_bytes),
+                                        speed = %current_speed,
+                                        "Direct test stream progress"
+                                    );
+                                    last_progress_log = tokio::time::Instant::now();
+                                }
+                            }
+                        }
+                        current_total_bytes
+                    })
+                });
+
+                let stderr_task = child.stderr.take().map(|stderr| {
+                    let target_name = target.name.clone();
+                    let secrets = secrets.clone();
+                    tokio::spawn(async move {
+                        let mut lines = BufReader::new(stderr).lines();
+                        let mut captured_stderr = Vec::new();
+                        while let Ok(Some(line)) = lines.next_line().await {
+                            let detail = redact_secrets(&line, &secrets);
+                            let trimmed = detail.trim();
+                            if !trimmed.is_empty() {
+                                tracing::warn!(
+                                    name = %target_name,
+                                    detail = %trimmed,
+                                    "Direct test FFmpeg diagnostic"
+                                );
+                                captured_stderr.push(trimmed.to_string());
+                            }
+                        }
+                        captured_stderr.join("\n")
+                    })
+                });
+
+                let exit_status = child.wait().await;
+                bitrate.update_from_ffmpeg(0);
+                metrics.unregister_target(&target.name);
+
+                let total_bytes = if let Some(task) = stdout_task {
+                    task.await.unwrap_or_default()
+                } else {
+                    0
+                };
+
+                let captured_stderr = if let Some(task) = stderr_task {
+                    task.await.unwrap_or_default()
+                } else {
+                    String::new()
+                };
+
+                match exit_status {
+                    Ok(status) if status.success() => {
+                        if total_bytes > 0 {
+                            tracing::info!(
+                                name = %target.name,
+                                total_sent = %format_bytes_display(total_bytes),
+                                "Direct target test completed successfully"
+                            );
+                        } else {
+                            tracing::info!(
+                                name = %target.name,
+                                "Direct target test completed successfully"
+                            );
+                        }
+                    }
+                    Ok(status) => {
                         let detail = safe_ffmpeg_failure(
-                            &String::from_utf8_lossy(&output.stderr),
+                            &captured_stderr,
                             &[target.stream_key.clone(), destination],
                         );
                         tracing::error!(
                             name = %target.name,
-                            status = %output.status,
+                            %status,
                             %detail,
                             "Direct target test failed"
                         );
@@ -109,7 +244,7 @@ pub fn run_direct_test(duration_secs: u64, targets: Vec<TargetConfig>) {
                         tracing::error!(
                             name = %target.name,
                             %error,
-                            "Direct target test FFmpeg failed to start"
+                            "Failed while waiting for direct target test FFmpeg"
                         );
                     }
                 }
@@ -120,6 +255,7 @@ pub fn run_direct_test(duration_secs: u64, targets: Vec<TargetConfig>) {
                 tracing::error!(%error, "Direct target test task failed");
             }
         }
+        tracing::info!("Direct test stream completed for all targets");
     });
 }
 
@@ -262,6 +398,36 @@ pub fn parse_ffmpeg_bitrate(value: &str) -> Option<u64> {
         .then_some((number.max(0.0) * 1_000.0) as u64)
 }
 
+pub fn parse_ffmpeg_total_size(value: &str) -> Option<u64> {
+    let value = value.trim();
+    if value == "N/A" {
+        return None;
+    }
+    value.parse::<u64>().ok()
+}
+
+pub fn format_bytes_display(bytes: u64) -> String {
+    if bytes >= 1_000_000_000 {
+        format!("{:.2} GB", bytes as f64 / 1_000_000_000.0)
+    } else if bytes >= 1_000_000 {
+        format!("{:.2} MB", bytes as f64 / 1_000_000.0)
+    } else if bytes >= 1_000 {
+        format!("{:.1} KB", bytes as f64 / 1_000.0)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+pub fn format_bitrate_display(bits_per_second: u64) -> String {
+    if bits_per_second >= 1_000_000 {
+        format!("{:.2} Mbps", bits_per_second as f64 / 1_000_000.0)
+    } else if bits_per_second >= 1_000 {
+        format!("{:.0} Kbps", bits_per_second as f64 / 1_000.0)
+    } else {
+        format!("{bits_per_second} bps")
+    }
+}
+
 pub fn safe_ffmpeg_failure(stderr: &str, secrets: &[String]) -> String {
     let detail = stderr.to_ascii_lowercase();
     for (needle, message) in [
@@ -308,6 +474,28 @@ mod tests {
     }
 
     #[test]
+    fn parses_ffmpeg_total_size() {
+        assert_eq!(parse_ffmpeg_total_size("46015"), Some(46015));
+        assert_eq!(parse_ffmpeg_total_size("  1024  "), Some(1024));
+        assert_eq!(parse_ffmpeg_total_size("N/A"), None);
+    }
+
+    #[test]
+    fn formats_bytes_display() {
+        assert_eq!(format_bytes_display(500), "500 B");
+        assert_eq!(format_bytes_display(1500), "1.5 KB");
+        assert_eq!(format_bytes_display(2_500_000), "2.50 MB");
+        assert_eq!(format_bytes_display(3_200_000_000), "3.20 GB");
+    }
+
+    #[test]
+    fn formats_bitrate_display() {
+        assert_eq!(format_bitrate_display(500), "500 bps");
+        assert_eq!(format_bitrate_display(500_000), "500 Kbps");
+        assert_eq!(format_bitrate_display(2_500_000), "2.50 Mbps");
+    }
+
+    #[test]
     fn ffmpeg_failure_summary_does_not_echo_diagnostics() {
         let stderr = "rtmp://example.test/app/private-key: Connection refused";
         let secrets = vec!["private-key".to_owned()];
@@ -327,5 +515,55 @@ mod tests {
             detail,
             "[RTMP_URL_REDACTED] Invalid data found when processing input"
         );
+    }
+
+    #[tokio::test]
+    async fn direct_test_stream_registers_target_and_updates_metrics() {
+        let metrics = Arc::new(Metrics::default());
+        let running = Arc::new(AtomicBool::new(false));
+        let temp_dir =
+            std::env::temp_dir().join(format!("rtmp-test-stream-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let test_flv = temp_dir.join("test.flv");
+
+        let targets = vec![TargetConfig {
+            name: "TestTarget".to_string(),
+            url: test_flv.to_string_lossy().to_string(),
+            stream_key: String::new(),
+            public_url: None,
+            enabled: true,
+        }];
+
+        run_direct_test(Arc::clone(&metrics), Arc::clone(&running), 1, targets);
+
+        let mut registered = false;
+        for _ in 0..50 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            if !metrics.current_target_bitrates().is_empty() {
+                registered = true;
+                break;
+            }
+        }
+        assert!(
+            registered,
+            "target should be registered in metrics during test stream"
+        );
+
+        for _ in 0..100 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            if !running.load(Ordering::SeqCst) {
+                break;
+            }
+        }
+        assert!(
+            !running.load(Ordering::SeqCst),
+            "running flag should reset after test stream"
+        );
+        assert!(
+            metrics.current_target_bitrates().is_empty(),
+            "target should unregister from metrics when done"
+        );
+
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 }
