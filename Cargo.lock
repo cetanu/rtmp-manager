@@ -1908,7 +1908,7 @@ dependencies = [
 
 [[package]]
 name = "rtmp-proxy"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "anyhow",
  "aws-lc-rs",
