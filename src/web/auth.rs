@@ -3,8 +3,12 @@ use crate::util::constant_time_eq;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use topcoat::{
     Result,
-    context::{CxBuilder, app_context},
-    router::{Body, IntoResponse, Next, Response, StatusCode, header, layer},
+    context::{Cx, app_context},
+    router::{
+        Body, Next, StatusCode, header, layer,
+        request::{headers, uri},
+        response::{IntoResponse, Response},
+    },
 };
 
 pub(crate) fn is_public_path(path: &str) -> bool {
@@ -18,8 +22,8 @@ pub(crate) fn is_public_path(path: &str) -> bool {
 }
 
 #[layer("/")]
-async fn basic_auth(cx: &mut CxBuilder, body: Body, next: Next<'_>) -> Result<Response> {
-    if is_public_path(topcoat::router::uri(cx).path()) {
+async fn basic_auth(cx: &Cx, body: Body, next: Next<'_>) -> Result<Response> {
+    if is_public_path(uri(cx).path()) {
         return next.run(cx, body).await;
     }
 
@@ -58,7 +62,7 @@ async fn basic_auth(cx: &mut CxBuilder, body: Body, next: Next<'_>) -> Result<Re
 }
 
 fn submitted_credentials(cx: &topcoat::context::Cx) -> Option<(String, String)> {
-    let encoded = topcoat::router::headers(cx)
+    let encoded = headers(cx)
         .get(header::AUTHORIZATION)?
         .to_str()
         .ok()?
@@ -70,7 +74,7 @@ fn submitted_credentials(cx: &topcoat::context::Cx) -> Option<(String, String)> 
 }
 
 fn submitted_token(cx: &topcoat::context::Cx) -> Option<String> {
-    extract_query_token(topcoat::router::uri(cx).query()?)
+    extract_query_token(uri(cx).query()?)
 }
 
 fn extract_query_token(query: &str) -> Option<String> {

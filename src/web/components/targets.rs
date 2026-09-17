@@ -8,26 +8,27 @@ use crate::web::components::ui::input::input;
 use topcoat::{
     Result,
     context::{Cx, app_context},
-    view::{attributes, component, view},
+    view::{View, attributes, component, view},
 };
 
 #[component]
-pub async fn targets(cx: &Cx) -> Result {
+pub async fn targets(cx: &Cx) -> Result<impl View> {
     let app: &AppHandle = app_context(cx);
-    let config = app.config.get();
-    let targets = &config.targets;
+    let targets = app.config.get().targets.clone();
 
-    view! {
+    Ok(view! {
         card(
             card_content(
                 if !targets.is_empty() {
                     <div id="targetsContainer">
-                        for (index, target) in targets.iter().enumerate() {
+                        for (index, target) in targets.into_iter().enumerate() {
                             target_item(index: index, target: target)
                         }
                     </div>
                 } else {
-                    <p class="text-sm text-muted-foreground">"No targets configured."</p>
+                    <p class="text-sm text-muted-foreground">
+                        "No targets configured."
+                    </p>
                 }
             )
             card_footer(
@@ -43,57 +44,65 @@ pub async fn targets(cx: &Cx) -> Result {
                 )
             )
         )
-    }
+    })
 }
 
 #[component]
-pub async fn target_item(index: usize, target: &TargetConfig) -> Result {
+pub async fn target_item(index: usize, target: TargetConfig) -> Result<impl View> {
     let enabled_id = format!("target_enabled_{index}");
     let name_id = format!("target_name_{index}");
     let url_id = format!("target_url_{index}");
     let key_id = format!("target_stream_key_{index}");
     let public_url_id = format!("target_public_url_{index}");
 
-    view! {
-        <div class="mb-4 flex flex-col items-start gap-6 border bg-surface p-6 transition-all hover:border-primary hover:bg-foreground/5 hover:shadow-sm md:flex-row md:items-center">
+    Ok(view! {
+        <div
+            class="mb-4 flex flex-col items-start gap-6 border bg-surface p-6 transition-all hover:border-primary hover:bg-foreground/5 hover:shadow-sm md:flex-row md:items-center"
+        >
             <div class="flex w-full flex-1 flex-col gap-1">
                 <div class="grid gap-1 md:grid-cols-2">
                     form_field(
                         control_id: name_id.clone(),
                         label_text: "Target Name",
-                        input(attrs: attributes! {
-                            type="text"
-                            id=(name_id)
-                            name=(format!("targets[{index}][name]"))
-                            value=(target.name.clone())
-                            placeholder="e.g. Twitch, YouTube"
-                            required="required"
-                        })
+                        input(
+                            attrs: attributes! {
+                                type="text"
+                                id=(name_id)
+                                name=(format!("targets[{index}][name]"))
+                                value=(target.name.clone())
+                                placeholder="e.g. Twitch, YouTube"
+                                required="required"
+                            }
+                        )
                     )
                     form_field(
                         control_id: public_url_id.clone(),
                         label_text: "Public URL (Optional)",
-                        input(attrs: attributes! {
-                            type="url"
-                            id=(public_url_id)
-                            name=(format!("targets[{index}][public_url]"))
-                            value=(target.public_url.clone().unwrap_or_default())
-                            placeholder="https://twitch.tv/mychannel"
-                        })
+                        input(
+                            attrs: attributes! {
+                                type="url"
+                                id=(public_url_id)
+                                name=(format!("targets[{index}][public_url]"))
+                                value=(target.public_url.clone().unwrap_or_default())
+                                placeholder="https://twitch.tv/mychannel"
+                            }
+                        )
                     )
                 </div>
                 <div class="grid gap-1 md:grid-cols-2">
                     form_field(
                         control_id: url_id.clone(),
                         label_text: "RTMP URL Base",
-                        input(attrs: attributes! {
-                            type="url"
-                            id=(url_id)
-                            name=(format!("targets[{index}][url]"))
-                            value=(target.url.clone())
-                            placeholder="rtmp://live.twitch.tv/app"
-                            required="required"
-                        })
+                        input(
+                            attrs: attributes! {
+                                type="url"
+                                id=(url_id)
+                                name=(format!("targets[{index}][url]"))
+                                value=(target.url.clone())
+                                placeholder="rtmp://live.twitch.tv/app"
+                                required="required"
+                            }
+                        )
                     )
                     form_field(
                         control_id: key_id.clone(),
@@ -133,5 +142,5 @@ pub async fn target_item(index: usize, target: &TargetConfig) -> Result {
                 </div>
             </div>
         </div>
-    }
+    })
 }

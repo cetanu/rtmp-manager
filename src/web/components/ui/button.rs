@@ -1,6 +1,6 @@
 use topcoat::{
     Result,
-    view::{Attributes, View, class, component, view},
+    view::{Attributes, Child, Class, StaticClass, View, class, component, view},
 };
 
 /// The visual style of a [`button`].
@@ -35,27 +35,27 @@ impl ButtonVariant {
     /// transparent one from [`BASE`]: with two border-color classes on the
     /// same element, stylesheet order (not class order) would decide the
     /// winner.
-    fn classes(self) -> &'static str {
+    fn classes(self) -> StaticClass {
         match self {
-            Self::Primary => {
+            Self::Primary => class!(
                 "border-transparent bg-primary text-primary-foreground shadow-xs \
-                 hover:bg-primary/90 active:bg-primary/80"
-            }
-            Self::Secondary => {
+                 hover:bg-primary/90 active:bg-primary/80",
+            ),
+            Self::Secondary => class!(
                 "border-transparent bg-foreground/5 text-foreground shadow-xs \
-                 hover:bg-foreground/10 active:bg-foreground/15"
-            }
-            Self::Outline => {
+                 hover:bg-foreground/10 active:bg-foreground/15",
+            ),
+            Self::Outline => class!(
                 "border-border text-foreground shadow-xs hover:bg-foreground/5 \
-                 active:bg-foreground/10"
-            }
-            Self::Ghost => {
-                "border-transparent text-foreground hover:bg-foreground/5 active:bg-foreground/10"
-            }
-            Self::Destructive => {
+                 active:bg-foreground/10",
+            ),
+            Self::Ghost => class!(
+                "border-transparent text-foreground hover:bg-foreground/5 active:bg-foreground/10",
+            ),
+            Self::Destructive => class!(
                 "border-transparent bg-destructive text-destructive-foreground shadow-xs \
-                 hover:bg-destructive/90 active:bg-destructive/80"
-            }
+                 hover:bg-destructive/90 active:bg-destructive/80",
+            ),
         }
     }
 }
@@ -68,40 +68,47 @@ impl ButtonVariant {
 pub enum ButtonSize {
     /// A compact button.
     Sm,
-    /// The standard button size.
+    /// The default size.
     #[default]
     Md,
     /// A prominent button.
     Lg,
-    /// A square button sized for a single icon.
+    /// A square button sized to fit an icon, matching [`ButtonSize::Md`].
     Icon,
 }
 
 impl ButtonSize {
     /// The Tailwind classes for this size.
     ///
-    /// Each size sets a text size, which also scales any icons inside: the
-    /// `icon` component is `1em` square by default.
-    fn classes(self) -> &'static str {
+    /// The height and padding are calibrated so the button sits on the 4px
+    /// grid while centering its label baseline against sibling form controls.
+    /// `Icon` uses equal width and height to remain square regardless of its
+    /// child's natural aspect ratio.
+    fn classes(self) -> StaticClass {
         match self {
-            Self::Sm => "h-8 gap-1.5 rounded-md px-3 text-xs",
-            Self::Md => "h-9 gap-2 rounded-lg px-4 text-sm",
-            Self::Lg => "h-10 gap-2 rounded-lg px-5 text-base",
-            Self::Icon => "size-9 rounded-lg text-base",
+            Self::Sm => class!("h-8 rounded-md px-3 text-xs gap-1.5"),
+            Self::Md => class!("h-9 rounded-lg px-4 text-sm gap-2"),
+            Self::Lg => class!("h-10 rounded-lg px-5 text-sm gap-2"),
+            Self::Icon => class!("size-9 rounded-lg"),
         }
     }
 }
 
-/// The classes shared by every button, regardless of variant or size.
+/// The base classes applied to every button, before variant and size styles.
 ///
-/// Every button carries a border (colored per variant) so that the `Outline`
-/// variant, which only recolors it, does not change the button's dimensions.
-const BASE: &str = "inline-flex shrink-0 items-center justify-center border \
-    font-medium whitespace-nowrap transition-colors outline-none select-none \
-    focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 \
-    focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50";
+/// Flex layout centers child elements (such as an icon and label) and aligns
+/// them along the row. Transitions animate fill and border colors on hover
+/// and active states. The focus ring is styled through `focus-visible:` so
+/// pointer clicks avoid an outline, while keyboard navigation produces the
+/// theme's two-color focus ring.
+const BASE: StaticClass = class!(
+    "inline-flex shrink-0 items-center justify-center border \
+     font-medium whitespace-nowrap transition-colors outline-none select-none \
+     focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 \
+     focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
+);
 
-/// Builds the full class string for a button of the given `variant` and `size`.
+/// Builds the full class list for a button of the given `variant` and `size`.
 ///
 /// Use it to give button styling to an element that is not a `<button>`, such
 /// as a link styled as a button:
@@ -114,8 +121,11 @@ const BASE: &str = "inline-flex shrink-0 items-center justify-center border \
 /// }
 /// ```
 #[must_use]
-pub fn button_variants(variant: ButtonVariant, size: ButtonSize) -> String {
-    format!("{BASE} {} {}", variant.classes(), size.classes())
+pub fn button_variants(
+    variant: ButtonVariant,
+    size: ButtonSize,
+) -> Class<(StaticClass, StaticClass, StaticClass)> {
+    class!(BASE, variant.classes(), size.classes())
 }
 
 /// A button component.
@@ -143,9 +153,9 @@ pub async fn button(
     #[default] variant: ButtonVariant,
     #[default] size: ButtonSize,
     #[default] mut attrs: Attributes,
-    #[default] child: View,
-) -> Result {
-    view! {
+    #[default] child: Child<'_>,
+) -> Result<impl View> {
+    Ok(view! {
         <button
             class=(class!(
                 BASE,
@@ -157,7 +167,7 @@ pub async fn button(
         >
             (child)
         </button>
-    }
+    })
 }
 
 /// A link rendered with the same variants and sizing as [`button`].
@@ -166,9 +176,9 @@ pub async fn button_link(
     #[default] variant: ButtonVariant,
     #[default] size: ButtonSize,
     #[default] mut attrs: Attributes,
-    #[default] child: View,
-) -> Result {
-    view! {
+    #[default] child: Child<'_>,
+) -> Result<impl View> {
+    Ok(view! {
         <a
             class=(class!(
                 BASE,
@@ -180,5 +190,5 @@ pub async fn button_link(
         >
             (child)
         </a>
-    }
+    })
 }

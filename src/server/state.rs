@@ -11,7 +11,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct WebhookEvent {
     pub headers: HashMap<String, String>,
-    pub body: topcoat::router::Bytes,
+    pub body: topcoat::router::request::Bytes,
 }
 
 impl WebhookEvent {

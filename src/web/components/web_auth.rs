@@ -5,31 +5,31 @@ use crate::web::components::ui::input::input;
 use topcoat::{
     Result,
     context::{Cx, app_context},
-    view::{attributes, component, view},
+    view::{View, attributes, component, view},
 };
 
 #[component]
-pub async fn web_auth(cx: &Cx) -> Result {
+pub async fn web_auth(cx: &Cx) -> Result<impl View> {
     let app: &AppHandle = app_context(cx);
     let auth = app.config.get().web_auth.clone();
-    view! {
+    Ok(view! {
         card(
             attrs: attributes! { class="h-full" },
-            card_header(
-                card_title("Web Authentication")
-            )
+            card_header(card_title("Web Authentication"))
             card_content(
                 <div class="grid gap-6 md:grid-cols-2">
                     form_field(
                         control_id: "web_auth_username",
                         label_text: "Username",
-                        input(attrs: attributes! {
-                            id="web_auth_username"
-                            name="web_auth[username]"
-                            autocomplete="username"
-                            value=(auth.username)
-                            required="true"
-                        })
+                        input(
+                            attrs: attributes! {
+                                id="web_auth_username"
+                                name="web_auth[username]"
+                                autocomplete="username"
+                                value=(auth.username)
+                                required="true"
+                            }
+                        )
                     )
                     form_field(
                         control_id: "web_auth_password",
@@ -51,5 +51,5 @@ pub async fn web_auth(cx: &Cx) -> Result {
                 </div>
             )
         )
-    }
+    })
 }

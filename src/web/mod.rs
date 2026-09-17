@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use topcoat::asset::{AssetBundle, RouterBuilderAssetExt};
+use topcoat::runtime::RouterBuilderRuntimeExt;
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -16,9 +17,12 @@ use topcoat::{
             sse::{Event as SseEvent, KeepAlive, Sse},
         },
         error::{bad_request, internal_server_error, not_found},
-        page, parse_query_params, route,
+        page, parse_query_params,
+        request::{Bytes, headers},
+        response::{IntoResponse, Response},
+        route,
     },
-    view::{component, view},
+    view::{View, component, view},
 };
 
 pub mod auth;
@@ -55,6 +59,7 @@ pub async fn run_web_server(
     let sampler_metrics = Arc::clone(&app_handle.metrics);
     let app = Router::builder()
         .discover()
+        .runtime()
         .assets(AssetBundle::load()?)
         .app_context(app_handle)
         .build();
@@ -77,112 +82,119 @@ pub async fn run_web_server(
 }
 
 #[component]
-async fn app_page(active_page: &'static str) -> Result {
-    view! {
+async fn app_page(active_page: &'static str) -> Result<impl View> {
+    Ok(view! {
         <!DOCTYPE html>
         <html lang="en" class="dark">
-        <head>
-            <meta charset="UTF-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-            <title>"RTMP-Manager"</title>
-            <meta name="description" content="Configuration dashboard for the RTMP Stream Multiplexer." />
-            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-            <link rel="stylesheet" href=(TAILWIND_STYLESHEET) />
-            topcoat::runtime::script()
-            <script src=(HLS_PLAYER_SCRIPT) defer="defer"></script>
-            <script src=(STREAM_PREVIEW_SCRIPT) defer="defer"></script>
-            <script src=(METRICS_CHARTS_SCRIPT) defer="defer"></script>
-            <script src=(CHAT_EVENTS_SCRIPT) defer="defer"></script>
-            <script src=(APP_NAVIGATION_SCRIPT) defer="defer"></script>
-            <script src=(LOG_VIEWER_SCRIPT) defer="defer"></script>
-            <script src=(SECRET_FIELDS_SCRIPT) defer="defer"></script>
-        </head>
-        <body class="min-h-screen bg-background text-foreground font-sans antialiased">
-            app_navigation(active_page: active_page)
-            <main class="mx-auto max-w-7xl px-3 py-3 sm:px-4 sm:py-4">
-                <section data-app-page="preview" hidden=(active_page != "preview")>
-                    stream_preview()
-                </section>
-                <section data-app-page="metrics" hidden=(active_page != "metrics")>
-                    metrics_page()
-                </section>
-                <section data-app-page="chat" hidden=(active_page != "chat")>
-                    chat_inbox()
-                </section>
-                <section data-app-page="logs" hidden=(active_page != "logs")>
-                    log_viewer()
-                    webhook_audit()
-                </section>
-                configuration_form(active_page: active_page)
-                <section data-app-page="export" hidden=(active_page != "export")>
-                    config_transfer()
-                </section>
-            </main>
-        </body>
+            <head>
+                <meta charset="UTF-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+                <title>"RTMP-Manager"</title>
+                <meta
+                    name="description"
+                    content="Configuration dashboard for the RTMP Stream Multiplexer."
+                />
+                <link
+                    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+                    rel="stylesheet"
+                />
+                <link rel="stylesheet" href=(TAILWIND_STYLESHEET) />
+                topcoat::runtime::script()
+                <script src=(HLS_PLAYER_SCRIPT) defer="defer"></script>
+                <script src=(STREAM_PREVIEW_SCRIPT) defer="defer"></script>
+                <script src=(METRICS_CHARTS_SCRIPT) defer="defer"></script>
+                <script src=(CHAT_EVENTS_SCRIPT) defer="defer"></script>
+                <script src=(APP_NAVIGATION_SCRIPT) defer="defer"></script>
+                <script src=(LOG_VIEWER_SCRIPT) defer="defer"></script>
+                <script src=(SECRET_FIELDS_SCRIPT) defer="defer"></script>
+            </head>
+            <body
+                class="min-h-screen bg-background text-foreground font-sans antialiased"
+            >
+                app_navigation(active_page: active_page)
+                <main class="mx-auto max-w-7xl px-3 py-3 sm:px-4 sm:py-4">
+                    <section data-app-page="preview" hidden=(active_page != "preview")>
+                        stream_preview()
+                    </section>
+                    <section data-app-page="metrics" hidden=(active_page != "metrics")>
+                        metrics_page()
+                    </section>
+                    <section data-app-page="chat" hidden=(active_page != "chat")>
+                        chat_inbox()
+                    </section>
+                    <section data-app-page="logs" hidden=(active_page != "logs")>
+                        log_viewer()
+                        webhook_audit()
+                    </section>
+                    configuration_form(active_page: active_page)
+                    <section data-app-page="export" hidden=(active_page != "export")>
+                        config_transfer()
+                    </section>
+                </main>
+            </body>
         </html>
-    }
+    })
 }
 
 #[page("/")]
-async fn home() -> Result {
-    view! { app_page(active_page: "preview") }
+async fn home() -> Result<impl View> {
+    Ok(view! { app_page(active_page: "preview") })
 }
 
 #[page("/overview")]
-async fn overview_page() -> Result {
-    view! { app_page(active_page: "preview") }
+async fn overview_page() -> Result<impl View> {
+    Ok(view! { app_page(active_page: "preview") })
 }
 
 #[page("/preview")]
-async fn preview_page() -> Result {
-    view! { app_page(active_page: "preview") }
+async fn preview_page() -> Result<impl View> {
+    Ok(view! { app_page(active_page: "preview") })
 }
 
 #[page("/metrics")]
-async fn metrics_page_route() -> Result {
-    view! { app_page(active_page: "metrics") }
+async fn metrics_page_route() -> Result<impl View> {
+    Ok(view! { app_page(active_page: "metrics") })
 }
 
 #[page("/chat")]
-async fn chat_page() -> Result {
-    view! { app_page(active_page: "chat") }
+async fn chat_page() -> Result<impl View> {
+    Ok(view! { app_page(active_page: "chat") })
 }
 
 #[page("/overlay/chat")]
-async fn chat_overlay_route() -> Result {
-    view! { chat_overlay_page() }
+async fn chat_overlay_route() -> Result<impl View> {
+    Ok(view! { chat_overlay_page() })
 }
 
 #[page("/chat/overlay")]
-async fn chat_overlay_alias_route() -> Result {
-    view! { chat_overlay_page() }
+async fn chat_overlay_alias_route() -> Result<impl View> {
+    Ok(view! { chat_overlay_page() })
 }
 
 #[page("/logs")]
-async fn logs_page() -> Result {
-    view! { app_page(active_page: "logs") }
+async fn logs_page() -> Result<impl View> {
+    Ok(view! { app_page(active_page: "logs") })
 }
 
 #[page("/settings")]
-async fn settings_page() -> Result {
-    view! { app_page(active_page: "settings") }
+async fn settings_page() -> Result<impl View> {
+    Ok(view! { app_page(active_page: "settings") })
 }
 
 #[page("/targets")]
-async fn targets_page() -> Result {
-    view! { app_page(active_page: "targets") }
+async fn targets_page() -> Result<impl View> {
+    Ok(view! { app_page(active_page: "targets") })
 }
 
 #[page("/export")]
-async fn export_page() -> Result {
-    view! { app_page(active_page: "export") }
+async fn export_page() -> Result<impl View> {
+    Ok(view! { app_page(active_page: "export") })
 }
 
-#[topcoat::router::path_param]
-struct PreviewFile(str);
+topcoat::router::path_param!(preview_file);
 
 #[route(GET "/api/preview/{preview_file}")]
-async fn get_preview_file(cx: &Cx) -> Result<topcoat::router::Response> {
+async fn get_preview_file(cx: &Cx) -> Result<Response> {
     let app: &AppHandle = app_context(cx);
     let name = topcoat::router::path_param::<PreviewFile>(cx);
     let Some(path) = app.stream.preview_file(name) else {
@@ -200,7 +212,7 @@ async fn get_preview_file(cx: &Cx) -> Result<topcoat::router::Response> {
     } else {
         "video/mp2t"
     };
-    let mut response = topcoat::router::Response::new(topcoat::router::Body::from(bytes));
+    let mut response = Response::new(topcoat::router::Body::from(bytes));
     response.headers_mut().insert(
         topcoat::router::header::CONTENT_TYPE,
         topcoat::router::HeaderValue::from_static(content_type),
@@ -224,7 +236,7 @@ struct AcknowledgeChatMessage {
 }
 
 #[route(POST "/api/config")]
-async fn update_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat::router::Response> {
+async fn update_config(cx: &Cx, body: Bytes) -> Result<Response> {
     let app: &AppHandle = app_context(cx);
 
     let form: ConfigForm = match serde_qs::Config::new()
@@ -265,23 +277,21 @@ async fn update_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
         return Err(internal_server_error(error).into());
     }
 
-    topcoat::router::IntoResponse::into_response(redirect, cx)
+    redirect.into_response(cx)
 }
 
 #[route(GET "/api/config")]
-async fn get_config(cx: &Cx) -> Result<topcoat::router::Response> {
+async fn get_config(cx: &Cx) -> Result<Response> {
     let app: &AppHandle = app_context(cx);
-    topcoat::router::IntoResponse::into_response(
-        (
-            [(topcoat::router::header::CACHE_CONTROL, "no-store, private")],
-            Json(app.config.get().as_ref().clone()),
-        ),
-        cx,
+    (
+        [(topcoat::router::header::CACHE_CONTROL, "no-store, private")],
+        Json(app.config.get().as_ref().clone()),
     )
+        .into_response(cx)
 }
 
 #[route(POST "/api/config/import")]
-async fn import_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat::router::Response> {
+async fn import_config(cx: &Cx, body: Bytes) -> Result<Response> {
     let app: &AppHandle = app_context(cx);
     let (_, _changed, chat_changed) = match app.config.import(&body).await {
         Ok(res) => res,
@@ -292,14 +302,11 @@ async fn import_config(cx: &Cx, body: topcoat::router::Bytes) -> Result<topcoat:
         return Err(internal_server_error(error).into());
     }
 
-    topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::NO_CONTENT, cx)
+    topcoat::router::StatusCode::NO_CONTENT.into_response(cx)
 }
 
 #[route(POST "/api/config/import-file")]
-async fn import_config_file(
-    cx: &Cx,
-    mut multipart: Multipart,
-) -> Result<topcoat::router::Response> {
+async fn import_config_file(cx: &Cx, mut multipart: Multipart) -> Result<Response> {
     const MAX_CONFIG_SIZE: usize = 1024 * 1024;
 
     let mut config_bytes = None;
@@ -329,46 +336,40 @@ async fn import_config_file(
     redirect_to(cx, "/export")
 }
 
-fn redirect_to(cx: &Cx, location: &'static str) -> Result<topcoat::router::Response> {
-    topcoat::router::IntoResponse::into_response(
-        (
-            topcoat::router::StatusCode::SEE_OTHER,
-            [(topcoat::router::header::LOCATION, location)],
-        ),
-        cx,
+fn redirect_to(cx: &Cx, location: &'static str) -> Result<Response> {
+    (
+        topcoat::router::StatusCode::SEE_OTHER,
+        [(topcoat::router::header::LOCATION, location)],
     )
+        .into_response(cx)
 }
 
 #[route(GET "/api/chat")]
-async fn get_chat_inbox(cx: &Cx) -> Result<topcoat::router::Response> {
+async fn get_chat_inbox(cx: &Cx) -> Result<Response> {
     let app: &AppHandle = app_context(cx);
     let snapshot = app.chat.snapshot().await?;
-    topcoat::router::IntoResponse::into_response(
-        (
-            [(topcoat::router::header::CACHE_CONTROL, "no-store")],
-            Json(snapshot),
-        ),
-        cx,
+    (
+        [(topcoat::router::header::CACHE_CONTROL, "no-store")],
+        Json(snapshot),
     )
+        .into_response(cx)
 }
 
 #[route(POST "/api/chat/acknowledge")]
 async fn acknowledge_chat_message(
     cx: &Cx,
     Json(request): Json<AcknowledgeChatMessage>,
-) -> Result<topcoat::router::Response> {
+) -> Result<Response> {
     let app: &AppHandle = app_context(cx);
     if !app.chat.acknowledge(request.id).await? {
-        return topcoat::router::IntoResponse::into_response(
-            (
-                topcoat::router::StatusCode::CONFLICT,
-                "The displayed chat message has already changed",
-            ),
-            cx,
-        );
+        return (
+            topcoat::router::StatusCode::CONFLICT,
+            "The displayed chat message has already changed",
+        )
+            .into_response(cx);
     }
 
-    topcoat::router::IntoResponse::into_response(Json(app.chat.snapshot().await?), cx)
+    Json(app.chat.snapshot().await?).into_response(cx)
 }
 
 #[route(GET "/api/events")]
@@ -458,13 +459,10 @@ async fn service_logs(
 }
 
 #[route(POST "/api/webhook")]
-async fn receive_webhook(
-    cx: &Cx,
-    body: topcoat::router::Bytes,
-) -> Result<topcoat::router::Response> {
+async fn receive_webhook(cx: &Cx, body: Bytes) -> Result<Response> {
     const MAX_WEBHOOK_SIZE: usize = 128 * 1024;
     let app: &AppHandle = app_context(cx);
-    let headers = topcoat::router::headers(cx)
+    let headers = headers(cx)
         .iter()
         .filter_map(|(name, value)| {
             value
@@ -521,7 +519,7 @@ async fn receive_webhook(
         return Err(bad_request("Webhook signature is missing").into());
     };
     tracing::info!(platform, body_bytes, "Webhook accepted");
-    topcoat::router::IntoResponse::into_response(topcoat::router::StatusCode::OK, cx)
+    topcoat::router::StatusCode::OK.into_response(cx)
 }
 
 #[derive(Deserialize)]
@@ -535,7 +533,7 @@ struct WebhookCrcResponse {
 }
 
 #[route(GET "/api/webhook")]
-async fn verify_webhook_crc(cx: &Cx) -> Result<topcoat::router::Response> {
+async fn verify_webhook_crc(cx: &Cx) -> Result<Response> {
     let query: WebhookCrcQuery =
         parse_query_params(cx).map_err(|_| bad_request("Missing crc_token"))?;
     if query.crc_token.is_empty() {
@@ -551,7 +549,7 @@ async fn verify_webhook_crc(cx: &Cx) -> Result<topcoat::router::Response> {
         .ok_or_else(|| bad_request("X API secret key is not configured"))?;
     let response_token =
         crate::chat::x::response_token(&query.crc_token, secret).map_err(internal_server_error)?;
-    topcoat::router::IntoResponse::into_response(Json(WebhookCrcResponse { response_token }), cx)
+    Json(WebhookCrcResponse { response_token }).into_response(cx)
 }
 
 #[cfg(test)]
@@ -582,6 +580,7 @@ mod tests {
 
         let app = Router::builder()
             .discover()
+            .runtime()
             .assets(AssetBundle::load().unwrap())
             .app_context(app_handle.clone())
             .build();

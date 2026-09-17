@@ -3,8 +3,8 @@ use crate::web::components::ui::form::secret_input;
 use topcoat::{
     Result,
     context::{Cx, app_context},
-    runtime::{procedure, shard},
-    view::{attributes, component, view},
+    runtime::{procedure, shard, signal},
+    view::{View, attributes, component, view},
 };
 
 #[procedure]
@@ -14,15 +14,19 @@ async fn refresh_webhook_audit(cx: &Cx) -> Result<f64> {
 }
 
 #[component]
-pub async fn webhook_audit(cx: &Cx) -> Result {
+pub async fn webhook_audit(cx: &Cx) -> Result<impl View> {
     let _app: &AppHandle = app_context(cx);
-    view! {
-        signal revision = 0.0;
+    let revision = signal(cx, || 0.0);
+    Ok(view! {
         <section class="mt-4" aria-labelledby="webhook-audit-heading">
             <div class="mb-2 flex items-center justify-between gap-4">
                 <div>
-                    <h2 id="webhook-audit-heading" class="text-base font-semibold">"Webhook audit"</h2>
-                    <p class="text-xs text-muted-foreground">"Latest 10 POST requests. Payloads are concealed by default."</p>
+                    <h2 id="webhook-audit-heading" class="text-base font-semibold">
+                        "Webhook audit"
+                    </h2>
+                    <p class="text-xs text-muted-foreground">
+                        "Latest 10 POST requests. Payloads are concealed by default."
+                    </p>
                 </div>
                 <button
                     type="button"
@@ -30,20 +34,22 @@ pub async fn webhook_audit(cx: &Cx) -> Result {
                     @click=$(async |_event| {
                         revision.set(revision.get() + refresh_webhook_audit().await);
                     })
-                >"Refresh"</button>
+                >
+                    "Refresh"
+                </button>
             </div>
             webhook_audit_table(revision: $(revision.get()))
         </section>
-    }
+    })
 }
 
 #[shard]
-async fn webhook_audit_table(cx: &Cx, revision: f64) -> Result {
+async fn webhook_audit_table(cx: &Cx, revision: f64) -> Result<impl View> {
     let _ = revision;
     let app: &AppHandle = app_context(cx);
     let entries = app.webhook_audit.snapshot();
 
-    view! {
+    Ok(view! {
         <div class="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
             <table class="w-full text-left text-sm">
                 <thead class="border-b border-border text-xs text-muted-foreground">
@@ -57,14 +63,27 @@ async fn webhook_audit_table(cx: &Cx, revision: f64) -> Result {
                 </thead>
                 <tbody class="divide-y divide-border">
                     if entries.is_empty() {
-                        <tr><td colspan="5" class="px-4 py-6 text-center text-muted-foreground">"No webhooks received since startup."</td></tr>
+                        <tr>
+                            <td
+                                colspan="5"
+                                class="px-4 py-6 text-center text-muted-foreground"
+                            >
+                                "No webhooks received since startup."
+                            </td>
+                        </tr>
                     } else {
                         for entry in entries {
                             <tr>
-                                <td class="whitespace-nowrap px-4 py-3 font-mono text-xs">(entry.timestamp_ms.to_string())</td>
+                                <td class="whitespace-nowrap px-4 py-3 font-mono text-xs">
+                                    (entry.timestamp_ms.to_string())
+                                </td>
                                 <td class="px-4 py-3">(entry.platform)</td>
-                                <td class="px-4 py-3 text-xs text-muted-foreground">(entry.content_type.unwrap_or_else(|| "—".into()))</td>
-                                <td class="whitespace-nowrap px-4 py-3">(format!("{} B", entry.body_bytes))</td>
+                                <td class="px-4 py-3 text-xs text-muted-foreground">
+                                    (entry.content_type.unwrap_or_else(|| "—".into()))
+                                </td>
+                                <td class="whitespace-nowrap px-4 py-3">
+                                    (format!("{} B", entry.body_bytes))
+                                </td>
                                 <td class="px-4 py-3">
                                     secret_input(
                                         control_id: format!("webhook-payload-{}", entry.id),
@@ -82,5 +101,5 @@ async fn webhook_audit_table(cx: &Cx, revision: f64) -> Result {
                 </tbody>
             </table>
         </div>
-    }
+    })
 }

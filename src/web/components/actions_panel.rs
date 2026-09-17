@@ -4,8 +4,8 @@ use crate::web::components::ui::button::{ButtonVariant, button};
 use topcoat::{
     Result,
     context::{Cx, app_context},
-    runtime::{Event, procedure},
-    view::{attributes, component, view},
+    runtime::{Event, procedure, signal},
+    view::{View, attributes, component, view},
 };
 
 #[procedure]
@@ -38,6 +38,11 @@ async fn send_test_webhooks(cx: &Cx) -> Result<String> {
         .filter(|target| target.enabled)
         .map(NotificationTarget::from)
         .collect::<Vec<_>>();
+
+    if active_targets.is_empty() {
+        return Ok("Enable at least one target before sending test webhooks".to_owned());
+    }
+
     let dispatcher = NotificationDispatcher::new(&config.notifications, app.http_client.clone());
 
     tokio::spawn(async move {
@@ -47,42 +52,47 @@ async fn send_test_webhooks(cx: &Cx) -> Result<String> {
 }
 
 #[component]
-pub async fn actions_panel() -> Result {
-    view! {
-        signal testing = false;
-        signal test_error = String::new();
+pub async fn actions_panel(cx: &Cx) -> Result<impl View> {
+    let testing = signal(cx, || false);
+    let test_error = signal(cx, String::new);
 
-        <div class="flex flex-col sm:flex-row gap-4 justify-between items-center bg-surface p-4 border rounded-xl">
+    Ok(view! {
+        <div
+            class="flex flex-col sm:flex-row gap-4 justify-between items-center bg-surface p-4 border rounded-xl"
+        >
             <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <div class="flex gap-4">
-                button(
-                    variant: ButtonVariant::Outline,
-                    attrs: attributes! {
-                        type="button"
-                        :disabled=$(testing.get())
-                        @click=$(async |_event: Event| {
-                            testing.set(true);
-                            test_error.set(start_test_stream().await);
-                            testing.set(false);
-                        })
-                    },
-                    "Test Stream"
-                )
-                button(
-                    variant: ButtonVariant::Outline,
-                    attrs: attributes! {
-                        type="button"
-                        :disabled=$(testing.get())
-                        @click=$(async |_event: Event| {
-                            testing.set(true);
-                            test_error.set(send_test_webhooks().await);
-                            testing.set(false);
-                        })
-                    },
-                    "Test Webhooks"
-                )
+                    button(
+                        variant: ButtonVariant::Outline,
+                        attrs: attributes! {
+                            type="button"
+                            :disabled=$(testing.get())
+                            @click=$(async |_event: Event| {
+                                testing.set(true);
+                                test_error.set(start_test_stream().await);
+                                testing.set(false);
+                            })
+                        },
+                        "Test Stream"
+                    )
+                    button(
+                        variant: ButtonVariant::Outline,
+                        attrs: attributes! {
+                            type="button"
+                            :disabled=$(testing.get())
+                            @click=$(async |_event: Event| {
+                                testing.set(true);
+                                test_error.set(send_test_webhooks().await);
+                                testing.set(false);
+                            })
+                        },
+                        "Test Webhooks"
+                    )
                 </div>
-                <p :hidden=$(test_error.get().is_empty()) class="text-sm text-destructive">
+                <p
+                    :hidden=$(test_error.get().is_empty())
+                    class="text-sm text-destructive"
+                >
                     $(test_error.get())
                 </p>
             </div>
@@ -106,5 +116,5 @@ pub async fn actions_panel() -> Result {
                 )
             </div>
         </div>
-    }
+    })
 }

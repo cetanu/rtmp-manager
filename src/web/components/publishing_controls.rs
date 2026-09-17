@@ -2,8 +2,8 @@ use crate::server::state::{AppHandle, StreamState};
 use topcoat::{
     Result,
     context::{Cx, app_context},
-    runtime::{Event, procedure, shard},
-    view::view,
+    runtime::{Event, procedure, shard, signal},
+    view::{View, view},
 };
 
 #[procedure]
@@ -21,7 +21,7 @@ async fn toggle_publishing(cx: &Cx, is_live: bool) -> Result<String> {
 }
 
 #[shard]
-pub async fn publishing_controls(cx: &Cx, revision: f64) -> Result {
+pub async fn publishing_controls(cx: &Cx, revision: f64) -> Result<impl View> {
     let _ = revision;
     let app: &AppHandle = app_context(cx);
     let status = app.stream.status();
@@ -33,12 +33,12 @@ pub async fn publishing_controls(cx: &Cx, revision: f64) -> Result {
         );
     let toggle_class = "inline-flex h-8 items-center justify-center rounded-md bg-foreground/10 px-3 text-xs font-medium text-muted-foreground shadow-xs transition-colors hover:bg-foreground/15 hover:text-foreground active:bg-foreground/20 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 data-[live=true]:bg-destructive data-[live=true]:text-destructive-foreground data-[live=true]:hover:bg-destructive/90 data-[live=true]:hover:text-destructive-foreground data-[live=true]:active:bg-destructive/80";
 
-    view! {
-        signal pending = false;
-        signal action_error = String::new();
-        signal live = is_live;
-        signal can_toggle = toggle_available;
+    let pending = signal(cx, || false);
+    let action_error = signal(cx, String::new);
+    let live = signal(cx, || is_live);
+    let can_toggle = signal(cx, || toggle_available);
 
+    Ok(view! {
         <div class="flex items-center gap-2">
             <button
                 type="button"
@@ -57,9 +57,12 @@ pub async fn publishing_controls(cx: &Cx, revision: f64) -> Result {
             >
                 $(if live.get() { "LIVE" } else { "Go live" })
             </button>
-            <p :hidden=$(action_error.get().is_empty()) class="text-sm text-destructive">
+            <p
+                :hidden=$(action_error.get().is_empty())
+                class="text-sm text-destructive"
+            >
                 $(action_error.get())
             </p>
         </div>
-    }
+    })
 }

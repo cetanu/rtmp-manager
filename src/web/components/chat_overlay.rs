@@ -4,8 +4,8 @@ use crate::web::components::chat_inbox::{chat_source_icon, source_color};
 use topcoat::{
     Result,
     context::{Cx, app_context},
-    runtime::shard,
-    view::{component, view},
+    runtime::{shard, signal},
+    view::{View, component, view},
 };
 
 const OVERLAY_CSS: &str = r#"
@@ -76,34 +76,47 @@ const OVERLAY_JS: &str = r#"
 "#;
 
 #[component]
-pub async fn chat_overlay_page() -> Result {
-    view! {
+pub async fn chat_overlay_page() -> Result<impl View> {
+    Ok(view! {
         <!DOCTYPE html>
-        <html lang="en" class="dark" style="background: transparent !important; background-color: transparent !important;">
-        <head>
-            <meta charset="UTF-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-            <title>"RTMP-Manager Chat Overlay"</title>
-            <meta name="description" content="OBS browser source overlay for aggregated live stream chat." />
-            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-            <link rel="stylesheet" href=(crate::web::TAILWIND_STYLESHEET) />
-            topcoat::runtime::script()
-            <script src=(crate::web::CHAT_EVENTS_SCRIPT) defer="defer"></script>
-            <style>(OVERLAY_CSS)</style>
-        </head>
-        <body class="min-h-screen bg-transparent p-2 font-sans text-foreground antialiased selection:bg-none" style="background: transparent !important; background-color: transparent !important;">
-            chat_overlay()
-            <script>(OVERLAY_JS)</script>
-        </body>
+        <html
+            lang="en"
+            class="dark"
+            style="background: transparent !important; background-color: transparent !important;"
+        >
+            <head>
+                <meta charset="UTF-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+                <title>"RTMP-Manager Chat Overlay"</title>
+                <meta
+                    name="description"
+                    content="OBS browser source overlay for aggregated live stream chat."
+                />
+                <link
+                    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+                    rel="stylesheet"
+                />
+                <link rel="stylesheet" href=(crate::web::TAILWIND_STYLESHEET) />
+                topcoat::runtime::script()
+                <script src=(crate::web::CHAT_EVENTS_SCRIPT) defer="defer"></script>
+                <style>(OVERLAY_CSS)</style>
+            </head>
+            <body
+                class="min-h-screen bg-transparent p-2 font-sans text-foreground antialiased selection:bg-none"
+                style="background: transparent !important; background-color: transparent !important;"
+            >
+                chat_overlay()
+                <script>(OVERLAY_JS)</script>
+            </body>
         </html>
-    }
+    })
 }
 
 #[component]
-pub async fn chat_overlay() -> Result {
-    view! {
-        signal revision = 0.0;
+pub async fn chat_overlay(cx: &Cx) -> Result<impl View> {
+    let revision = signal(cx, || 0.0);
 
+    Ok(view! {
         <div id="chat-overlay-wrapper" class="flex flex-col w-full">
             chat_overlay_content(revision: $(revision.get()))
             <button
@@ -116,16 +129,16 @@ pub async fn chat_overlay() -> Result {
                 @click=$(|_event: topcoat::runtime::Event| revision.increment())
             ></button>
         </div>
-    }
+    })
 }
 
 #[shard]
-pub async fn chat_overlay_content(cx: &Cx, revision: f64) -> Result {
+pub async fn chat_overlay_content(cx: &Cx, revision: f64) -> Result<impl View> {
     let _ = revision;
     let app: &AppHandle = app_context(cx);
     let snapshot = app.chat.snapshot().await?;
 
-    view! {
+    Ok(view! {
         <div id="chat-overlay-messages" class="flex flex-col gap-2">
             if snapshot.messages.is_empty() {
                 <div class="hidden" aria-hidden="true"></div>
@@ -135,7 +148,7 @@ pub async fn chat_overlay_content(cx: &Cx, revision: f64) -> Result {
                 }
             }
         </div>
-    }
+    })
 }
 
 pub(crate) fn overlay_message_class(highlighted: bool) -> &'static str {
@@ -147,19 +160,25 @@ pub(crate) fn overlay_message_class(highlighted: bool) -> &'static str {
 }
 
 #[component]
-pub async fn chat_overlay_message(message: ChatMessage, highlighted: bool) -> Result {
+pub async fn chat_overlay_message(message: ChatMessage, highlighted: bool) -> Result<impl View> {
     let row_class = overlay_message_class(highlighted);
     let author_color = source_color(&message.source);
 
-    view! {
-        <article class=(row_class) data-source=(message.source.clone()) data-highlighted=(if highlighted { "true" } else { "false" })>
+    Ok(view! {
+        <article
+            class=(row_class)
+            data-source=(message.source.clone())
+            data-highlighted=(if highlighted { "true" } else { "false" })
+        >
             chat_source_icon(source: message.source)
             <p class="min-w-0 break-words text-sm leading-snug">
-                <span class=(format!("mr-1 font-semibold {author_color}"))>(message.author)</span>
+                <span class=(format!("mr-1 font-semibold {author_color}"))>
+                    (message.author)
+                </span>
                 <span class="text-zinc-100">(message.text)</span>
             </p>
         </article>
-    }
+    })
 }
 
 #[cfg(test)]

@@ -4,19 +4,17 @@ use crate::web::components::ui::card::{card, card_content, card_header};
 use topcoat::{
     Result,
     context::{Cx, app_context},
-    runtime::{Event, shard},
-    view::{View, component, view},
+    runtime::{Event, shard, signal},
+    view::{Child, View, component, view},
 };
 
 #[component]
-pub async fn stream_preview() -> Result {
-    view! {
-        signal status_revision = 0.0;
+pub async fn stream_preview(cx: &Cx) -> Result<impl View> {
+    let status_revision = signal(cx, || 0.0);
 
+    Ok(view! {
         card(
-            card_header(
-                publishing_controls(revision: $(status_revision.get()))
-            )
+            card_header(publishing_controls(revision: $(status_revision.get())))
             card_content(
                 stream_preview_player(
                     stream_preview_placeholder(revision: $(status_revision.get()))
@@ -31,13 +29,15 @@ pub async fn stream_preview() -> Result {
                 ></button>
             )
         )
-    }
+    })
 }
 
 #[component]
-pub async fn stream_preview_player(child: View) -> Result {
-    view! {
-        <div class="relative mx-auto h-[calc(100dvh-10rem)] max-h-[56.25vw] max-w-full aspect-video overflow-hidden bg-black">
+pub async fn stream_preview_player(#[default] child: Child<'_>) -> Result<impl View> {
+    Ok(view! {
+        <div
+            class="relative mx-auto h-[calc(100dvh-10rem)] max-h-[56.25vw] max-w-full aspect-video overflow-hidden bg-black"
+        >
             <video
                 id="stream-preview-video"
                 class="h-full w-full bg-black object-contain"
@@ -48,20 +48,20 @@ pub async fn stream_preview_player(child: View) -> Result {
             ></video>
             (child)
         </div>
-    }
+    })
 }
 
 #[shard]
-pub async fn stream_preview_placeholder(cx: &Cx, revision: f64) -> Result {
+pub async fn stream_preview_placeholder(cx: &Cx, revision: f64) -> Result<impl View> {
     let _ = revision;
     let app: &AppHandle = app_context(cx);
     let status = app.stream.status();
     let message = status.state.to_string();
-    view! {
+    Ok(view! {
         <div
             class="absolute inset-0 flex items-center justify-center text-center text-sm text-white/70"
         >
             (message)
         </div>
-    }
+    })
 }

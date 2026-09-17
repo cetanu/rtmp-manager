@@ -6,12 +6,12 @@ use crate::web::components::targets::targets;
 use crate::web::components::web_auth::web_auth;
 use topcoat::{
     Result,
-    view::{component, view},
+    view::{View, component, view},
 };
 
 #[component]
-pub async fn configuration_form(active_page: &'static str) -> Result {
-    view! {
+pub async fn configuration_form(active_page: &'static str) -> Result<impl View> {
+    Ok(view! {
         <form
             id="configForm"
             method="post"
@@ -39,5 +39,5 @@ pub async fn configuration_form(active_page: &'static str) -> Result {
             </section>
             <div class="mt-6">actions_panel()</div>
         </form>
-    }
+    })
 }

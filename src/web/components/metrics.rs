@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use topcoat::{
     Result,
     context::{Cx, app_context},
-    view::{attributes, component, view},
+    view::{View, attributes, component, view},
 };
 
 fn format_bitrate(bits_per_second: u64) -> String {
@@ -18,7 +18,7 @@ fn format_bitrate(bits_per_second: u64) -> String {
 }
 
 #[component]
-pub async fn metrics_page(cx: &Cx) -> Result {
+pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
     let app: &AppHandle = app_context(cx);
     let ingest_bps = app.metrics.current_ingest_bps();
     let current = app
@@ -29,17 +29,27 @@ pub async fn metrics_page(cx: &Cx) -> Result {
         .collect::<HashMap<_, _>>();
     let targets = app.config.get().targets.clone();
 
-    view! {
+    Ok(view! {
         <section aria-labelledby="target-throughput-heading">
             <div class="mb-2 flex items-end justify-between gap-4">
                 <div>
-                    <h2 id="target-throughput-heading" class="text-base font-semibold">"Throughput"</h2>
+                    <h2 id="target-throughput-heading" class="text-base font-semibold">
+                        "Throughput"
+                    </h2>
                 </div>
-                <span data-metrics-status="true" class="text-xs text-muted-foreground">"Live"</span>
+                <span data-metrics-status="true" class="text-xs text-muted-foreground">
+                    "Live"
+                </span>
             </div>
-            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" data-metrics-charts="true">
+            <div
+                class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                data-metrics-charts="true"
+            >
                 card(
-                    attrs: attributes! { class="!gap-3 !rounded-lg !py-3" data-ingest-metric="true" },
+                    attrs: attributes! {
+                        class="!gap-3 !rounded-lg !py-3"
+                        data-ingest-metric="true"
+                    },
                     card_header(
                         attrs: attributes! { class="!px-3" },
                         <div class="flex items-center justify-between gap-3">
@@ -50,33 +60,64 @@ pub async fn metrics_page(cx: &Cx) -> Result {
                     card_content(
                         attrs: attributes! { class="!px-3" },
                         <div class="mb-2">
-                            <div class="text-xs uppercase tracking-wide text-muted-foreground">"Ingest bitrate"</div>
-                            <div class="text-base font-semibold" data-ingest-bitrate="true">(format_bitrate(ingest_bps))</div>
+                            <div
+                                class="text-xs uppercase tracking-wide text-muted-foreground"
+                            >
+                                "Ingest bitrate"
+                            </div>
+                            <div
+                                class="text-base font-semibold"
+                                data-ingest-bitrate="true"
+                            >
+                                (format_bitrate(ingest_bps))
+                            </div>
                         </div>
-                        <canvas class="h-28 w-full" height="112" aria-label="Streamer ingest bitrate history"></canvas>
+                        <canvas
+                            class="h-28 w-full"
+                            height="112"
+                            aria-label="Streamer ingest bitrate history"
+                        ></canvas>
                     )
                 )
                 for target in &targets {
                     let sample = current.get(&target.name);
                     let outbound = sample.map_or(0, |value| value.outbound_bps);
                     card(
-                        attrs: attributes! { class="!gap-3 !rounded-lg !py-3" data-target-metric=(target.name.clone()) },
+                        attrs: attributes! {
+                            class="!gap-3 !rounded-lg !py-3"
+                            data-target-metric=(target.name.clone())
+                        },
                         card_header(
                             attrs: attributes! { class="!px-3" },
                             <div class="flex items-center justify-between gap-3">
                                 card_title((target.name.clone()))
-                                <span class="text-xs text-muted-foreground">(if sample.is_some() { "Relaying" } else { "Idle" })</span>
+                                <span class="text-xs text-muted-foreground">
+                                    (if sample.is_some() { "Relaying" } else { "Idle" })
+                                </span>
                             </div>
                         )
                         card_content(
                             attrs: attributes! { class="!px-3" },
                             <div class="mb-2">
                                 <div>
-                                    <div class="text-xs uppercase tracking-wide text-muted-foreground">"Outbound bitrate"</div>
-                                    <div class="text-base font-semibold" data-bitrate-out="true">(format_bitrate(outbound))</div>
+                                    <div
+                                        class="text-xs uppercase tracking-wide text-muted-foreground"
+                                    >
+                                        "Outbound bitrate"
+                                    </div>
+                                    <div
+                                        class="text-base font-semibold"
+                                        data-bitrate-out="true"
+                                    >
+                                        (format_bitrate(outbound))
+                                    </div>
                                 </div>
                             </div>
-                            <canvas class="h-28 w-full" height="112" aria-label=(format!("{} bitrate history", target.name))></canvas>
+                            <canvas
+                                class="h-28 w-full"
+                                height="112"
+                                aria-label=(format!("{} bitrate history", target.name))
+                            ></canvas>
                         )
                     )
                 }
@@ -85,7 +126,7 @@ pub async fn metrics_page(cx: &Cx) -> Result {
                 "No targets configured. Add a target to begin collecting throughput metrics."
             }
         </section>
-    }
+    })
 }
 
 #[cfg(test)]
