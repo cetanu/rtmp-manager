@@ -56,7 +56,30 @@ impl IncomingChatMessage {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct TestChatMessageRequest {
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+}
+
+static TEST_MESSAGE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+const SAMPLE_TEST_MESSAGES: &[(&str, &str, &str)] = &[
+    ("twitch", "Viewer88", "Hello from the chat! Great stream today! 🚀"),
+    ("youtube", "PixelMaster", "Can you test the acknowledge button next?"),
+    ("kick", "GreenLover", "Audio and video quality are looking crisp!"),
+    ("x", "SocialWatcher", "Testing chat overlay and acknowledge button flow!"),
+    ("twitch", "GamerGal", "POG! That was an awesome moment."),
+    ("youtube", "CoderGuy", "Latency is super low, nice setup!"),
+];
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub id: u64,
     pub source: String,
@@ -101,7 +124,7 @@ struct StoredChatState {
     dropped: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatInboxSnapshot {
     pub messages: Vec<ChatMessage>,
     pub queued: usize,
@@ -563,6 +586,50 @@ impl ChatHandle {
         rx.await.context("Chat actor dropped enqueue response")?
     }
 
+    pub async fn enqueue_test(
+        &self,
+        request: Option<TestChatMessageRequest>,
+    ) -> Result<EnqueueOutcome> {
+        let seq = TEST_MESSAGE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let sample = SAMPLE_TEST_MESSAGES[(seq as usize) % SAMPLE_TEST_MESSAGES.len()];
+        let req = request.unwrap_or_default();
+
+        let source = req
+            .source
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(sample.0)
+            .to_string();
+
+        let author = req
+            .author
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("{} #{}", sample.1, seq));
+
+        let text = req
+            .text
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| sample.2.to_string());
+
+        let message = IncomingChatMessage {
+            source,
+            external_id: format!("test-{}-{}", now_unix_ms(), seq),
+            author,
+            text,
+            avatar_url: req.avatar_url,
+            sent_at: None,
+        };
+
+        self.enqueue(message).await
+    }
+
     pub async fn acknowledge(&self, expected_id: u64) -> Result<bool> {
         let (tx, rx) = oneshot::channel();
         self.sender
@@ -930,4 +997,24 @@ mod tests {
         std::fs::remove_file(actor_path).unwrap();
         std::fs::remove_file(handle_path).unwrap();
     }
+
+    #[tokio::test]
+    async fn enqueue_test_generates_valid_messages_and_can_be_acknowledged() {
+        let path = database_path();
+        let handle = ChatHandle::spawn(&path, 5, Client::new()).await.unwrap();
+
+        let outcome = handle.enqueue_test(None).await.unwrap();
+        assert_eq!(outcome, EnqueueOutcome::Accepted);
+
+        let snapshot = handle.snapshot().await.unwrap();
+        assert_eq!(snapshot.messages.len(), 1);
+        let first_id = snapshot.messages[0].id;
+        assert!(handle.acknowledge(first_id).await.unwrap());
+
+        let snapshot_after = handle.snapshot().await.unwrap();
+        assert_eq!(snapshot_after.messages.len(), 0);
+
+        std::fs::remove_file(path).unwrap();
+    }
 }
+

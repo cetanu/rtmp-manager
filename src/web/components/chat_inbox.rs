@@ -19,6 +19,13 @@ async fn acknowledge_chat(cx: &Cx, displayed_id: String) -> Result<String> {
 }
 
 #[procedure]
+async fn send_test_chat(cx: &Cx) -> Result<String> {
+    let app: &AppHandle = app_context(cx);
+    let _ = app.chat.enqueue_test(None).await?;
+    Ok(first_message_id(&app.chat.snapshot().await?))
+}
+
+#[procedure]
 async fn refresh_chat(cx: &Cx) -> Result<String> {
     let app: &AppHandle = app_context(cx);
     Ok(first_message_id(&app.chat.snapshot().await?))
@@ -206,6 +213,18 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                     </p>
                 </div>
                 <div class="ml-auto flex items-center gap-2">
+                    <button
+                        id="chat-test-button"
+                        type="button"
+                        class=(outline_button.clone())
+                        @click=$(async |_event| {
+                            let next_id = send_test_chat().await;
+                            current_id.set(next_id);
+                            revision.set(revision.get() + 1.0);
+                        })
+                    >
+                        "Test Message"
+                    </button>
                     <button
                         id="chat-refresh-button"
                         type="button"

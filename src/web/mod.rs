@@ -389,6 +389,24 @@ async fn acknowledge_chat_message(
     Json(app.chat.snapshot().await?).into_response(cx)
 }
 
+#[route(POST "/api/chat/test")]
+async fn send_test_chat_message(cx: &Cx, body: Bytes) -> Result<Response> {
+    let app: &AppHandle = app_context(cx);
+    let request = if body.is_empty() {
+        None
+    } else {
+        match serde_json::from_slice::<crate::chat::TestChatMessageRequest>(&body) {
+            Ok(req) => Some(req),
+            Err(error) => return Err(bad_request(format!("Invalid JSON payload: {error}")).into()),
+        }
+    };
+    app.chat
+        .enqueue_test(request)
+        .await
+        .map_err(internal_server_error)?;
+    Json(app.chat.snapshot().await?).into_response(cx)
+}
+
 #[route(GET "/api/events")]
 async fn server_events(
     cx: &Cx,
