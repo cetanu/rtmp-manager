@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.9](https://github.com/cetanu/rtmp-manager/compare/v0.3.8...v0.3.9) - 2026-09-18
+
+### Added
+
+- *(stream)* stream logs and track outbound metrics during test streams
+
+### Other
+
+- *(relay)* replace slow test stream test with unit tests
+
 ## [0.3.8](https://github.com/cetanu/rtmp-manager/compare/v0.3.7...v0.3.8) - 2026-09-17
 
 ### Added
