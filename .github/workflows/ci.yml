@@ -43,13 +43,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
           persist-credentials: false
       - uses: taiki-e/install-action@cargo-audit
       - run: cargo audit
 
   check:
-    name: Check, lint, and test
+    name: Check and lint
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    name: Test release (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+          - arch: aarch64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
     services:
       rtmp:
         image: bluenviron/mediamtx:1.20.1
@@ -58,25 +81,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: Install Topcoat CLI
-        run: cargo install topcoat-cli --version 0.8.0 --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: topcoat-cli@0.8.0
       - name: Install FFmpeg
         run: sudo apt-get update && sudo apt-get install --yes ffmpeg
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets --all-features -- -D warnings
-      - run: topcoat asset bundle --bin rtmp-proxy
-      - run: cargo test --all-targets --all-features --locked
+      - name: Build release binary and assets
+        run: topcoat asset bundle --release --bin rtmp-proxy
+      - run: cargo test --release --all-targets --all-features --locked
       - name: Test FFmpeg publishing to RTMP
-        run: cargo test --locked server::relay::tests::direct_test_publishes_to_local_rtmp_server -- --ignored --exact
+        run: cargo test --release --locked server::relay::tests::direct_test_publishes_to_local_rtmp_server -- --ignored --exact
+      - name: Package tested release
+        run: |
+          mkdir release
+          cp target/release/rtmp-proxy release/rtmp-proxy
+          cp -R target/release/assets release/assets
+          tar -C release -czf "rtmp-proxy-${{ matrix.arch }}.tar.gz" .
+          sha256sum "rtmp-proxy-${{ matrix.arch }}.tar.gz" > "rtmp-proxy-${{ matrix.arch }}.tar.gz.sha256"
+      - name: Preserve tested release
+        uses: actions/upload-artifact@v4
+        with:
+          name: rtmp-proxy-${{ matrix.arch }}
+          path: |
+            rtmp-proxy-${{ matrix.arch }}.tar.gz
+            rtmp-proxy-${{ matrix.arch }}.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 1
 
   release:
     name: Create draft release
-    needs: [commitlint, audit, check]
+    needs: [commitlint, audit, check, test]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
@@ -106,7 +145,7 @@ jobs:
 
   release-pr:
     name: Prepare release pull request
-    needs: [commitlint, audit, check]
+    needs: [commitlint, audit, check, test]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -128,40 +167,24 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   upload-binary:
-    name: Upload Linux binary
-    needs: release
-    if: always() && (needs.release.outputs.tag != '' || github.event.inputs.release_tag != '')
+    name: Upload tested Linux binaries
+    needs: [release, test]
+    if: always() && needs.test.result == 'success' && (needs.release.outputs.tag != '' || github.event.inputs.release_tag != '')
     runs-on: ubuntu-latest
-    container: ubuntu:22.04
     permissions:
       contents: write
     steps:
-      - name: Install build tools
-        run: |
-          apt-get update
-          apt-get install --yes build-essential ca-certificates cmake curl gh git perl pkg-config
-      - uses: actions/checkout@v4
+      - name: Download tested releases
+        uses: actions/download-artifact@v4
         with:
-          ref: refs/tags/${{ needs.release.outputs.tag || github.event.inputs.release_tag }}
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install Topcoat CLI
-        run: cargo install topcoat-cli --version 0.8.0 --locked
-      - name: Build release binary
-        run: cargo build --locked --release --bin rtmp-proxy
-      - name: Bundle Topcoat assets
-        run: topcoat asset bundle --release --bin rtmp-proxy --out release/assets
-      - name: Package release asset
-        run: |
-          cp target/release/rtmp-proxy release/rtmp-proxy
-          tar -C release -czf rtmp-proxy.tar.gz .
-          sha256sum rtmp-proxy.tar.gz > rtmp-proxy.tar.gz.sha256
+          pattern: rtmp-proxy-*
+          merge-multiple: true
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.release.outputs.tag || github.event.inputs.release_tag }}
           REPOSITORY: ${{ github.repository }}
-        run: gh release upload "$RELEASE_TAG" rtmp-proxy.tar.gz rtmp-proxy.tar.gz.sha256 --clobber --repo "$REPOSITORY"
+        run: gh release upload "$RELEASE_TAG" rtmp-proxy-*.tar.gz rtmp-proxy-*.tar.gz.sha256 --clobber --repo "$REPOSITORY"
 
   publish-release:
     name: Publish GitHub release

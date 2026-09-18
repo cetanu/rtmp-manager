@@ -11,13 +11,20 @@ fn topcoat_bundle_is_loadable_by_startup() {
     fs::create_dir_all(&test_dir).unwrap();
     fs::copy(env!("CARGO_BIN_EXE_rtmp-proxy"), &executable).unwrap();
 
-    let status = Command::new("topcoat")
-        .args(["asset", "bundle", "--bin", "rtmp-proxy"])
-        .status()
-        .expect("topcoat CLI should be installed");
+    let mut topcoat = Command::new("topcoat");
+    topcoat.args(["asset", "bundle", "--bin", "rtmp-proxy"]);
+    if !cfg!(debug_assertions) {
+        topcoat.arg("--release");
+    }
+    let status = topcoat.status().expect("topcoat CLI should be installed");
     assert!(status.success(), "topcoat asset bundle failed");
     fs::create_dir_all(test_dir.join("assets")).unwrap();
-    for entry in fs::read_dir("target/debug/assets").unwrap() {
+    let profile = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+    for entry in fs::read_dir(format!("target/{profile}/assets")).unwrap() {
         let entry = entry.unwrap();
         fs::copy(
             entry.path(),
