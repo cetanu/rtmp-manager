@@ -151,12 +151,10 @@ jobs:
       - name: Bundle Topcoat assets
         env:
           CARGO_BUILD_TARGET: x86_64-unknown-linux-musl
-        run: topcoat asset bundle --release --bin rtmp-proxy
+        run: topcoat asset bundle --release --bin rtmp-proxy --out release/assets
       - name: Package release asset
         run: |
-          mkdir release
           cp target/x86_64-unknown-linux-musl/release/rtmp-proxy release/rtmp-proxy
-          cp -R target/x86_64-unknown-linux-musl/release/assets release/assets
           tar -C release -czf rtmp-proxy.tar.gz .
           sha256sum rtmp-proxy.tar.gz > rtmp-proxy.tar.gz.sha256
       - name: Upload release assets
