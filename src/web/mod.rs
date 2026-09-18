@@ -28,13 +28,14 @@ use topcoat::{
 pub mod auth;
 pub mod components;
 use components::{
-    app_navigation::app_navigation, chat_inbox::chat_inbox, chat_overlay::chat_overlay_page,
-    config_transfer::config_transfer, configuration_form::configuration_form,
-    log_viewer::log_viewer, metrics::metrics_page, stream_preview::stream_preview,
-    webhook_audit::webhook_audit,
+    actions_panel::start_test_stream, app_navigation::app_navigation, chat_inbox::chat_inbox,
+    chat_overlay::chat_overlay_page, config_transfer::config_transfer,
+    configuration_form::configuration_form, log_viewer::log_viewer, metrics::metrics_page,
+    stream_preview::stream_preview, webhook_audit::webhook_audit,
 };
 
 pub(crate) const TAILWIND_STYLESHEET: topcoat::asset::Asset = topcoat::tailwind::stylesheet!();
+pub(crate) const FAVICON: topcoat::asset::Asset = topcoat::asset::asset!("rtmp.png");
 pub(crate) const CHAT_EVENTS_SCRIPT: topcoat::asset::Asset =
     topcoat::asset::asset!("static/chat-events.js");
 pub(crate) const HLS_PLAYER_SCRIPT: topcoat::asset::Asset =
@@ -94,6 +95,7 @@ async fn app_page(active_page: &'static str) -> Result<impl View> {
                     name="description"
                     content="Configuration dashboard for the RTMP Stream Multiplexer."
                 />
+                <link rel="icon" type="image/png" href=(FAVICON) />
                 <link
                     href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
                     rel="stylesheet"
@@ -278,6 +280,21 @@ async fn update_config(cx: &Cx, body: Bytes) -> Result<Response> {
     }
 
     redirect.into_response(cx)
+}
+
+#[route(POST "/api/test-stream")]
+async fn run_test_stream(cx: &Cx) -> Result<Response> {
+    let app: &AppHandle = app_context(cx);
+    let error = start_test_stream(app);
+    if !error.is_empty() {
+        return Err(bad_request(error).into());
+    }
+
+    (
+        topcoat::router::StatusCode::SEE_OTHER,
+        [(topcoat::router::header::LOCATION, "/metrics")],
+    )
+        .into_response(cx)
 }
 
 #[route(GET "/api/config")]

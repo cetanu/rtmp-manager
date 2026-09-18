@@ -8,14 +8,12 @@ use topcoat::{
     view::{View, attributes, component, view},
 };
 
-#[procedure]
-async fn start_test_stream(cx: &Cx) -> Result<String> {
-    let app: &AppHandle = app_context(cx);
+pub(crate) fn start_test_stream(app: &AppHandle) -> String {
     if app.stream.status().state == crate::server::preview::StreamState::Live {
-        return Ok("Cannot run a test stream while publishing live".to_owned());
+        return "Cannot run a test stream while publishing live".to_owned();
     }
     if app.stream.is_test_stream_running() {
-        return Ok("A test stream is already in progress".to_owned());
+        return "A test stream is already in progress".to_owned();
     }
 
     let config = app.config.get();
@@ -28,11 +26,14 @@ async fn start_test_stream(cx: &Cx) -> Result<String> {
         .collect::<Vec<_>>();
 
     if targets.is_empty() {
-        return Ok("Enable at least one target before starting a test stream".to_owned());
+        return "Enable at least one target before starting a test stream".to_owned();
     }
 
-    app.stream.run_test_stream(duration_secs, targets);
-    Ok(String::new())
+    app.stream
+        .run_test_stream(duration_secs, targets)
+        .err()
+        .map(|error| error.to_string())
+        .unwrap_or_default()
 }
 
 #[procedure]
@@ -72,13 +73,9 @@ pub async fn actions_panel(cx: &Cx) -> Result<impl View> {
                     button(
                         variant: ButtonVariant::Outline,
                         attrs: attributes! {
-                            type="button"
-                            :disabled=$(testing.get())
-                            @click=$(async |_event: Event| {
-                                testing.set(true);
-                                test_error.set(start_test_stream().await);
-                                testing.set(false);
-                            })
+                            type="submit"
+                            formaction="/api/test-stream"
+                            formmethod="post"
                         },
                         "Test Stream"
                     )
