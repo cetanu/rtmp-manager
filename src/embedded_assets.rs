@@ -4,6 +4,7 @@ use std::{fs, path::Path};
 use topcoat::asset::{Asset, MANIFEST_NAME, MANIFEST_VERSION, Manifest, ManifestEntry};
 
 const TAILWIND_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/tailwind.css"));
+const FAVICON: &[u8] = include_bytes!("../rtmp.png");
 // Vendored from topcoat-runtime 0.5.0 so the browser runtime is part of the
 // same release artifact as the server executable.
 const TOPCOAT_RUNTIME: &[u8] = include_bytes!("../static/topcoat-runtime.js");
@@ -45,6 +46,13 @@ fn install_at(executable: &Path, tailwind_stylesheet: Asset) -> Result<()> {
             extension: "css",
             content_type: "text/css",
             contents: TAILWIND_CSS,
+        },
+        EmbeddedAsset {
+            id: crate::web::FAVICON,
+            stem: "favicon",
+            extension: "png",
+            content_type: "image/png",
+            contents: FAVICON,
         },
         EmbeddedAsset {
             id: topcoat::runtime::SCRIPT,
@@ -158,6 +166,7 @@ mod tests {
         let bundle = AssetBundle::load_dir(test_dir.join("assets")).unwrap();
 
         assert!(bundle.get(crate::web::TAILWIND_STYLESHEET.id()).is_some());
+        assert!(bundle.get(crate::web::FAVICON.id()).is_some());
         assert!(bundle.get(topcoat::runtime::SCRIPT.id()).is_some());
         assert!(bundle.get(crate::web::CHAT_EVENTS_SCRIPT.id()).is_some());
         assert!(bundle.get(crate::web::HLS_PLAYER_SCRIPT.id()).is_some());
