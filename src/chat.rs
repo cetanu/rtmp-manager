@@ -621,7 +621,7 @@ impl ChatHandle {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("{} #{}", sample.1, seq));
+            .unwrap_or_else(|| sample.1.to_string());
 
         let text = req
             .text
