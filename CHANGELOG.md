@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.11](https://github.com/cetanu/rtmp-manager/compare/v0.3.10...v0.3.11) - 2026-09-18
+
+### Added
+
+- *(chat)* add test message endpoint
+
+### Fixed
+
+- *(tests)* bundle assets from test binary
+- *(tests)* load assets from profile directory
+- *(chat)* remove numbers from sample usernames
+
+### Other
+
+- clippy lints
+- turn kick K into an svg
+- test chat message formatting/change
+- normalize chat source formatting
+- *(topcoat)* bundle assets with release artifacts
+
 ## [0.3.10](https://github.com/cetanu/rtmp-manager/compare/v0.3.9...v0.3.10) - 2026-09-18
 
 ### Added
