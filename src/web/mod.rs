@@ -3,9 +3,11 @@ use crate::server::state::{AppHandle, StreamStatus};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::TcpListener;
-use topcoat::asset::{AssetBundle, RouterBuilderAssetExt};
+use topcoat::asset::{Asset, AssetBundle, RouterBuilderAssetExt, asset};
 use topcoat::runtime::RouterBuilderRuntimeExt;
+use topcoat::tailwind::stylesheet;
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -34,24 +36,15 @@ use components::{
     stream_preview::stream_preview, webhook_audit::webhook_audit,
 };
 
-pub(crate) const TAILWIND_STYLESHEET: topcoat::asset::Asset = topcoat::tailwind::stylesheet!();
-pub(crate) const FAVICON: topcoat::asset::Asset = topcoat::asset::asset!("rtmp.png");
-pub(crate) const CHAT_EVENTS_SCRIPT: topcoat::asset::Asset =
-    topcoat::asset::asset!("static/chat-events.js");
-pub(crate) const HLS_PLAYER_SCRIPT: topcoat::asset::Asset =
-    topcoat::asset::asset!("static/hls.min.js");
-pub(crate) const HLS_PLAYER_LICENSE: topcoat::asset::Asset =
-    topcoat::asset::asset!("static/hls.LICENSE.txt");
-pub(crate) const STREAM_PREVIEW_SCRIPT: topcoat::asset::Asset =
-    topcoat::asset::asset!("static/stream-preview.js");
-pub(crate) const APP_NAVIGATION_SCRIPT: topcoat::asset::Asset =
-    topcoat::asset::asset!("static/app-navigation.js");
-pub(crate) const LOG_VIEWER_SCRIPT: topcoat::asset::Asset =
-    topcoat::asset::asset!("static/log-viewer.js");
-pub(crate) const METRICS_CHARTS_SCRIPT: topcoat::asset::Asset =
-    topcoat::asset::asset!("static/metrics-charts.js");
-pub(crate) const SECRET_FIELDS_SCRIPT: topcoat::asset::Asset =
-    topcoat::asset::asset!("static/secret-fields.js");
+pub(crate) const TAILWIND_STYLESHEET: Asset = stylesheet!();
+pub(crate) const FAVICON: Asset = asset!("rtmp.png");
+pub(crate) const CHAT_EVENTS_SCRIPT: Asset = asset!("static/chat-events.js");
+pub(crate) const HLS_PLAYER_SCRIPT: Asset = asset!("static/hls.min.js");
+pub(crate) const STREAM_PREVIEW_SCRIPT: Asset = asset!("static/stream-preview.js");
+pub(crate) const APP_NAVIGATION_SCRIPT: Asset = asset!("static/app-navigation.js");
+pub(crate) const LOG_VIEWER_SCRIPT: Asset = asset!("static/log-viewer.js");
+pub(crate) const METRICS_CHARTS_SCRIPT: Asset = asset!("static/metrics-charts.js");
+pub(crate) const SECRET_FIELDS_SCRIPT: Asset = asset!("static/secret-fields.js");
 
 pub async fn run_web_server(
     app_handle: AppHandle,
@@ -66,7 +59,7 @@ pub async fn run_web_server(
         .build();
 
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
         loop {
             interval.tick().await;
             sampler_metrics.record_sample();
