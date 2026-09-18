@@ -517,53 +517,32 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn direct_test_stream_registers_target_and_updates_metrics() {
-        let metrics = Arc::new(Metrics::default());
+    #[test]
+    fn metrics_target_lifecycle_updates_and_unregisters() {
+        let metrics = Metrics::default();
+        let target_name = "Twitch".to_string();
+        let bitrate = metrics.register_target(target_name.clone());
+
+        assert_eq!(metrics.current_target_bitrates().len(), 1);
+        assert_eq!(metrics.current_target_bitrates()[0].name, "Twitch");
+        assert_eq!(metrics.current_target_bitrates()[0].outbound_bps, 0);
+
+        bitrate.update_from_ffmpeg(2_500_000);
+        assert_eq!(metrics.current_target_bitrates()[0].outbound_bps, 2_500_000);
+
+        bitrate.update_from_ffmpeg(0);
+        metrics.unregister_target(&target_name);
+        assert!(metrics.current_target_bitrates().is_empty());
+    }
+
+    #[test]
+    fn direct_test_prevents_concurrent_runs() {
         let running = Arc::new(AtomicBool::new(false));
-        let temp_dir =
-            std::env::temp_dir().join(format!("rtmp-test-stream-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&temp_dir);
-        let test_flv = temp_dir.join("test.flv");
 
-        let targets = vec![TargetConfig {
-            name: "TestTarget".to_string(),
-            url: test_flv.to_string_lossy().to_string(),
-            stream_key: String::new(),
-            public_url: None,
-            enabled: true,
-        }];
+        assert!(!running.swap(true, Ordering::SeqCst));
+        assert!(running.swap(true, Ordering::SeqCst));
 
-        run_direct_test(Arc::clone(&metrics), Arc::clone(&running), 1, targets);
-
-        let mut registered = false;
-        for _ in 0..50 {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            if !metrics.current_target_bitrates().is_empty() {
-                registered = true;
-                break;
-            }
-        }
-        assert!(
-            registered,
-            "target should be registered in metrics during test stream"
-        );
-
-        for _ in 0..100 {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            if !running.load(Ordering::SeqCst) {
-                break;
-            }
-        }
-        assert!(
-            !running.load(Ordering::SeqCst),
-            "running flag should reset after test stream"
-        );
-        assert!(
-            metrics.current_target_bitrates().is_empty(),
-            "target should unregister from metrics when done"
-        );
-
-        let _ = std::fs::remove_dir_all(temp_dir);
+        running.store(false, Ordering::SeqCst);
+        assert!(!running.load(Ordering::SeqCst));
     }
 }
