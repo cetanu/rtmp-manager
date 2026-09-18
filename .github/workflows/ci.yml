@@ -132,29 +132,28 @@ jobs:
     needs: release
     if: always() && (needs.release.outputs.tag != '' || github.event.inputs.release_tag != '')
     runs-on: ubuntu-latest
+    container: ubuntu:22.04
     permissions:
       contents: write
     steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install --yes build-essential ca-certificates cmake curl gh git perl pkg-config
       - uses: actions/checkout@v4
         with:
           ref: refs/tags/${{ needs.release.outputs.tag || github.event.inputs.release_tag }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-musl
-      - name: Install musl tools
-        run: sudo apt-get update && sudo apt-get install --yes musl-tools
       - name: Install Topcoat CLI
         run: cargo install topcoat-cli --version 0.8.0 --locked
-      - name: Build static release binary
-        run: cargo build --locked --release --target x86_64-unknown-linux-musl --bin rtmp-proxy
+      - name: Build release binary
+        run: cargo build --locked --release --bin rtmp-proxy
       - name: Bundle Topcoat assets
-        env:
-          CARGO_BUILD_TARGET: x86_64-unknown-linux-musl
         run: topcoat asset bundle --release --bin rtmp-proxy --out release/assets
       - name: Package release asset
         run: |
-          cp target/x86_64-unknown-linux-musl/release/rtmp-proxy release/rtmp-proxy
+          cp target/release/rtmp-proxy release/rtmp-proxy
           tar -C release -czf rtmp-proxy.tar.gz .
           sha256sum rtmp-proxy.tar.gz > rtmp-proxy.tar.gz.sha256
       - name: Upload release assets
