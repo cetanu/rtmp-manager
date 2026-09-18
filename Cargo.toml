@@ -32,6 +32,9 @@ aws-lc-rs = "1.17.3"
 [build-dependencies]
 topcoat = { version = "0.8.0", default-features = false, features = ["tailwind"] }
 
+[dev-dependencies]
+topcoat-asset = { version = "0.8.0", features = ["bundler"] }
+
 [profile.release]
 opt-level = "z"
 lto = true

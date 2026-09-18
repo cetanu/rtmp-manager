@@ -583,27 +583,27 @@ async fn verify_webhook_crc(cx: &Cx) -> Result<Response> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Once;
+    use std::sync::OnceLock;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use topcoat::asset::{Bundler, BundlerConfig};
 
     static TEST_PORT_COUNTER: AtomicU64 = AtomicU64::new(45000);
-    static ASSET_BUNDLE: Once = Once::new();
+    static ASSET_BUNDLE: OnceLock<AssetBundle> = OnceLock::new();
 
     fn test_asset_bundle() -> AssetBundle {
-        ASSET_BUNDLE.call_once(|| {
-            let status = std::process::Command::new("topcoat")
-                .args(["asset", "bundle", "--bin", "rtmp-proxy"])
-                .status()
-                .expect("topcoat CLI should be installed");
-            assert!(status.success(), "topcoat asset bundle failed");
-        });
-
-        let test_exe = std::env::current_exe().expect("test executable path should be available");
-        let profile_dir = test_exe
-            .parent()
-            .and_then(std::path::Path::parent)
-            .expect("test executable should be under the profile deps directory");
-        AssetBundle::load_dir(profile_dir.join("assets")).unwrap()
+        ASSET_BUNDLE
+            .get_or_init(|| {
+                let test_exe =
+                    std::env::current_exe().expect("test executable path should be available");
+                let binary = std::fs::read(test_exe).expect("test executable should be readable");
+                let bundle_dir = std::env::temp_dir()
+                    .join(format!("rtmp-proxy-test-assets-{}", std::process::id()));
+                Bundler::new(&BundlerConfig::new())
+                    .bundle(&binary, &bundle_dir)
+                    .expect("test assets should bundle");
+                AssetBundle::load_dir(bundle_dir).expect("test asset bundle should load")
+            })
+            .clone()
     }
 
     #[tokio::test]
