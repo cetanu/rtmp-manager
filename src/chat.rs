@@ -70,12 +70,26 @@ pub struct TestChatMessageRequest {
 static TEST_MESSAGE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 const SAMPLE_TEST_MESSAGES: &[(&str, &str, &str)] = &[
-    ("twitch", "Viewer88", "Hello from the chat! Great stream today! 🚀"),
-    ("youtube", "PixelMaster", "Can you test the acknowledge button next?"),
-    ("kick", "GreenLover", "Audio and video quality are looking crisp!"),
-    ("x", "SocialWatcher", "Testing chat overlay and acknowledge button flow!"),
-    ("twitch", "GamerGal", "POG! That was an awesome moment."),
-    ("youtube", "CoderGuy", "Latency is super low, nice setup!"),
+    (
+        "twitch",
+        "Gabriel",
+        "Look up from the relentless noise of your daily life and listen to the quiet intuition guiding you, because the answers you seek have already been spoken.",
+    ),
+    (
+        "youtube",
+        "Michael",
+        "Stand firm against the fear that seeks to paralyze this world, for you have the inherent strength and courage to protect what is right.",
+    ),
+    (
+        "kick",
+        "Raphael",
+        "Forgive yourself for the heavy burdens you were never meant to carry alone, and allow your exhausted mind and body the necessary grace to truly heal.",
+    ),
+    (
+        "x",
+        "Uriel",
+        "Seek the light of truth in times of manufactured chaos, remembering that real wisdom is found in calm discernment rather than the loudest voices.",
+    ),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
