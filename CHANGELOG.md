@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.12](https://github.com/cetanu/rtmp-manager/compare/v0.3.11...v0.3.12) - 2026-09-18
+
+### Fixed
+
+- *(ci)* stage bundled release assets explicitly
+
 ## [0.3.11](https://github.com/cetanu/rtmp-manager/compare/v0.3.10...v0.3.11) - 2026-09-18
 
 ### Added
