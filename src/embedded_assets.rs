@@ -174,6 +174,8 @@ mod tests {
         assert!(bundle.get(crate::web::STREAM_PREVIEW_SCRIPT.id()).is_some());
         assert!(bundle.get(crate::web::APP_NAVIGATION_SCRIPT.id()).is_some());
         assert!(bundle.get(crate::web::LOG_VIEWER_SCRIPT.id()).is_some());
+        assert!(bundle.get(crate::web::METRICS_CHARTS_SCRIPT.id()).is_some());
+        assert!(bundle.get(crate::web::SECRET_FIELDS_SCRIPT.id()).is_some());
 
         fs::remove_dir_all(test_dir).unwrap();
     }
