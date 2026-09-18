@@ -39,7 +39,6 @@ pub struct IncomingChatMessage {
     #[validate(max_length = 100)]
     pub sent_at: Option<String>,
 }
-
 impl IncomingChatMessage {
     pub fn normalized(mut self) -> Result<Self> {
         self.source = self.source.trim().to_ascii_lowercase();
@@ -1017,4 +1016,3 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
 }
-
