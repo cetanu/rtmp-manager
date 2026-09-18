@@ -46,10 +46,10 @@ pub fn run_direct_test(
     running: Arc<AtomicBool>,
     duration_secs: u64,
     targets: Vec<TargetConfig>,
-) {
+) -> bool {
     if running.swap(true, Ordering::SeqCst) {
         tracing::warn!("Direct test stream is already in progress; ignoring duplicate request");
-        return;
+        return false;
     }
 
     tokio::spawn(async move {
@@ -197,7 +197,20 @@ pub fn run_direct_test(
                     })
                 });
 
-                let exit_status = child.wait().await;
+                let process_timeout = direct_test_timeout(duration_secs);
+                let (exit_status, timed_out) =
+                    match tokio::time::timeout(process_timeout, child.wait()).await {
+                        Ok(status) => (status, false),
+                        Err(_) => {
+                            tracing::error!(
+                                name = %target.name,
+                                timeout_secs = process_timeout.as_secs(),
+                                "Direct target test timed out; terminating FFmpeg"
+                            );
+                            let _ = child.start_kill();
+                            (child.wait().await, true)
+                        }
+                    };
                 bitrate.update_from_ffmpeg(0);
                 metrics.unregister_target(&target.name);
 
@@ -214,6 +227,7 @@ pub fn run_direct_test(
                 };
 
                 match exit_status {
+                    _ if timed_out => {}
                     Ok(status) if status.success() => {
                         if total_bytes > 0 {
                             tracing::info!(
@@ -257,6 +271,11 @@ pub fn run_direct_test(
         }
         tracing::info!("Direct test stream completed for all targets");
     });
+    true
+}
+
+fn direct_test_timeout(duration_secs: u64) -> Duration {
+    Duration::from_secs(duration_secs.saturating_add(15))
 }
 
 async fn supervise_relay(
@@ -544,5 +563,56 @@ mod tests {
 
         running.store(false, Ordering::SeqCst);
         assert!(!running.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn direct_test_timeout_allows_for_connection_and_shutdown() {
+        assert_eq!(direct_test_timeout(15), Duration::from_secs(30));
+        assert_eq!(direct_test_timeout(u64::MAX), Duration::from_secs(u64::MAX));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires FFmpeg and an RTMP server on 127.0.0.1:1935"]
+    async fn direct_test_publishes_to_local_rtmp_server() {
+        let metrics = Arc::new(Metrics::default());
+        let running = Arc::new(AtomicBool::new(false));
+        let target = TargetConfig {
+            name: "Local RTMP integration test".to_owned(),
+            url: "rtmp://127.0.0.1:1935/live".to_owned(),
+            stream_key: "test-stream".to_owned(),
+            public_url: None,
+            enabled: true,
+        };
+
+        assert!(run_direct_test(
+            Arc::clone(&metrics),
+            Arc::clone(&running),
+            3,
+            vec![target],
+        ));
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+        let mut saw_registered_target = false;
+        let mut saw_outbound_traffic = false;
+        while tokio::time::Instant::now() < deadline {
+            let targets = metrics.current_target_bitrates();
+            saw_registered_target |= !targets.is_empty();
+            saw_outbound_traffic |= targets.iter().any(|target| target.outbound_bps > 0);
+            if !running.load(Ordering::SeqCst) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        assert!(saw_registered_target, "test target was never registered");
+        assert!(
+            saw_outbound_traffic,
+            "FFmpeg never reported outbound traffic to the RTMP server"
+        );
+        assert!(
+            !running.load(Ordering::SeqCst),
+            "test stream did not finish before the integration-test deadline"
+        );
+        assert!(metrics.current_target_bitrates().is_empty());
     }
 }

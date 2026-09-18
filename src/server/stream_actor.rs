@@ -38,10 +38,6 @@ pub enum StreamCommand {
         stream_key: String,
         respond_to: Option<oneshot::Sender<()>>,
     },
-    RunTestStream {
-        duration_secs: u64,
-        targets: Vec<TargetConfig>,
-    },
 }
 
 /// Actor exclusively managing HLS preview FFmpeg processes, RTMP target relays, and lifecycle state.
@@ -54,7 +50,6 @@ pub struct StreamActor {
     http_client: Client,
     config_rx: watch::Receiver<Arc<AppConfig>>,
     status_tx: watch::Sender<StreamStatus>,
-    test_stream_running: Arc<AtomicBool>,
 }
 
 impl StreamActor {
@@ -88,14 +83,6 @@ impl StreamActor {
                             if let Some(respond_to) = respond_to {
                                 let _ = respond_to.send(());
                             }
-                        }
-                        StreamCommand::RunTestStream { duration_secs, targets } => {
-                            run_direct_test(
-                                Arc::clone(&self.metrics),
-                                Arc::clone(&self.test_stream_running),
-                                duration_secs,
-                                targets,
-                            );
                         }
                     }
                 }
@@ -310,6 +297,7 @@ pub struct StreamHandle {
     sender: mpsc::Sender<StreamCommand>,
     status_rx: watch::Receiver<StreamStatus>,
     preview_dir: PathBuf,
+    metrics: Arc<Metrics>,
     test_stream_running: Arc<AtomicBool>,
 }
 
@@ -335,6 +323,7 @@ impl StreamHandle {
             sender,
             status_rx,
             preview_dir: preview_dir.clone(),
+            metrics: Arc::clone(&metrics),
             test_stream_running: Arc::clone(&test_stream_running),
         };
 
@@ -347,7 +336,6 @@ impl StreamHandle {
             http_client,
             config_rx,
             status_tx,
-            test_stream_running,
         };
 
         tokio::spawn(actor.run(receiver));
@@ -395,11 +383,17 @@ impl StreamHandle {
             .await;
     }
 
-    pub fn run_test_stream(&self, duration_secs: u64, targets: Vec<TargetConfig>) {
-        let _ = self.sender.try_send(StreamCommand::RunTestStream {
+    pub fn run_test_stream(&self, duration_secs: u64, targets: Vec<TargetConfig>) -> Result<()> {
+        if run_direct_test(
+            Arc::clone(&self.metrics),
+            Arc::clone(&self.test_stream_running),
             duration_secs,
             targets,
-        });
+        ) {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("A test stream is already in progress"))
+        }
     }
 
     /// Returns whether a direct test stream is currently in progress.
