@@ -1,0 +1,26 @@
+{
+  "server": {
+    "listen": "127.0.0.1:1935",
+    "api_listen": "127.0.0.1:3000",
+    "test_stream_duration_secs": 30,
+    "ingest_stream_key": "local-ingest"
+  },
+  "web_auth": {
+    "username": "local",
+    "password": "local-testing"
+  },
+  "notifications": {
+    "discord_webhook": null,
+    "live_message": "Local test stream",
+    "webhook_url": null
+  },
+  "chat": {},
+  "targets": [
+    {
+      "name": "Local MediaMTX",
+      "url": "rtmp://127.0.0.1:1936/live",
+      "stream_key": "test-stream",
+      "enabled": true
+    }
+  ]
+}
