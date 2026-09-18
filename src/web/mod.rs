@@ -589,7 +589,7 @@ mod tests {
     static TEST_PORT_COUNTER: AtomicU64 = AtomicU64::new(45000);
     static ASSET_BUNDLE: Once = Once::new();
 
-    fn ensure_asset_bundle() {
+    fn test_asset_bundle() -> AssetBundle {
         ASSET_BUNDLE.call_once(|| {
             let status = std::process::Command::new("topcoat")
                 .args(["asset", "bundle", "--bin", "rtmp-proxy"])
@@ -597,12 +597,20 @@ mod tests {
                 .expect("topcoat CLI should be installed");
             assert!(status.success(), "topcoat asset bundle failed");
         });
+
+        let test_exe = std::env::current_exe().expect("test executable path should be available");
+        let profile_dir = test_exe
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("test executable should be under the profile deps directory");
+        AssetBundle::load_dir(profile_dir.join("assets")).unwrap()
     }
 
     #[tokio::test]
     async fn overlay_routes_are_registered_and_serve_html() {
         let temp_dir = std::env::temp_dir().join(format!(
-            "rtmp-overlay-test-{}",
+            "rtmp-overlay-test-{}-{}",
+            std::process::id(),
             TEST_PORT_COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
         let _ = std::fs::create_dir_all(&temp_dir);
@@ -616,12 +624,10 @@ mod tests {
             .await
             .unwrap();
 
-        ensure_asset_bundle();
-
         let app = Router::builder()
             .discover()
             .runtime()
-            .assets(AssetBundle::load().unwrap())
+            .assets(test_asset_bundle())
             .app_context(app_handle.clone())
             .build();
 
@@ -713,7 +719,8 @@ mod tests {
     #[tokio::test]
     async fn test_chat_endpoint_and_acknowledge_flow() {
         let temp_dir = std::env::temp_dir().join(format!(
-            "rtmp-chat-test-{}",
+            "rtmp-chat-test-{}-{}",
+            std::process::id(),
             TEST_PORT_COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
         let _ = std::fs::create_dir_all(&temp_dir);
@@ -727,12 +734,10 @@ mod tests {
             .await
             .unwrap();
 
-        ensure_asset_bundle();
-
         let app = Router::builder()
             .discover()
             .runtime()
-            .assets(AssetBundle::load().unwrap())
+            .assets(test_asset_bundle())
             .app_context(app_handle.clone())
             .build();
 
@@ -765,21 +770,6 @@ mod tests {
             .split("&quot;")
             .next()
             .unwrap();
-        println!("PROCEDURE ID: {proc_id}");
-
-        let proc_resp = client
-            .post(format!(
-                "http://{local_addr}/_topcoat/runtime/procedures/{proc_id}"
-            ))
-            .header("Content-Type", "application/json")
-            .body("null")
-            .send()
-            .await
-            .unwrap();
-        println!("PROCEDURE STATUS: {}", proc_resp.status());
-        let proc_text = proc_resp.text().await.unwrap();
-        println!("PROCEDURE RESPONSE: {proc_text}");
-
         // 1. Post to /api/chat/test with empty body (generates sample message)
         let resp = client
             .post(format!("http://{local_addr}/api/chat/test"))
@@ -816,6 +806,17 @@ mod tests {
         assert_eq!(snapshot_after_ack.messages.len(), 1);
         assert_eq!(snapshot_after_ack.messages[0].author, "CustomTester");
         assert_eq!(snapshot_after_ack.messages[0].text, "Testing custom text");
+
+        let proc_resp = client
+            .post(format!(
+                "http://{local_addr}/_topcoat/runtime/procedures/{proc_id}"
+            ))
+            .header("Content-Type", "application/json")
+            .body("null")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(proc_resp.status(), reqwest::StatusCode::OK);
 
         server_task.abort();
         let _ = std::fs::remove_dir_all(temp_dir);
