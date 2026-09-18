@@ -160,7 +160,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.release.outputs.tag || github.event.inputs.release_tag }}
-        run: gh release upload "$RELEASE_TAG" rtmp-proxy.tar.gz rtmp-proxy.tar.gz.sha256 --clobber
+          REPOSITORY: ${{ github.repository }}
+        run: gh release upload "$RELEASE_TAG" rtmp-proxy.tar.gz rtmp-proxy.tar.gz.sha256 --clobber --repo "$REPOSITORY"
 
   publish-release:
     name: Publish GitHub release
