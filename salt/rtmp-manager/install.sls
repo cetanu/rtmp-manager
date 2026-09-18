@@ -23,13 +23,6 @@
     - require:
       - archive: {{ ffmpeg['install_dir'] }}
 
-rtmp-proxy-current-directory:
-  file.directory:
-    - user: root
-    - group: root
-    - mode: '0755'
-    - makedirs: true
-
 /opt/apps/rtmp-proxy/shared:
   file.directory:
     - user: root
@@ -37,10 +30,18 @@ rtmp-proxy-current-directory:
     - mode: '0700'
     - makedirs: true
 
+stop-rtmp-proxy-before-upgrade:
+  service.dead:
+    - name: rtmp-proxy.service
+    - onlyif: systemctl is-active --quiet rtmp-proxy.service
+    - prereq:
+      - archive: /opt/apps/rtmp-proxy/current
+
 /opt/apps/rtmp-proxy/current:
   archive.extracted:
     - source: {{ pillar['rtmp_proxy']['release_url'] }}
     - source_hash: {{ pillar['rtmp_proxy']['release_url'] }}.sha256
+    - source_hash_update: true
     - archive_format: tar
     - overwrite: true
     - user: root

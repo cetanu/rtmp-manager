@@ -15,7 +15,7 @@ rtmp-proxy.service:
   service.running:
     - enable: true
     - watch:
-      - file: /opt/apps/rtmp-proxy/current/rtmp-proxy
+      - archive: /opt/apps/rtmp-proxy/current
       - file: /etc/rtmp-proxy.env
       - file: /etc/systemd/system/rtmp-proxy.service
     - require:
