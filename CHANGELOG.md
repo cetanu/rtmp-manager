@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.10](https://github.com/cetanu/rtmp-manager/compare/v0.3.9...v0.3.10) - 2026-09-18
+
+### Added
+
+- *(dev)* add local dashboard and test stream automation scripts
+- *(web)* add favicon embedded asset and link
+- *(web)* add form POST endpoint for running test streams
+
+### Fixed
+
+- *(relay)* add process timeout to direct test streams
+
+### Other
+
+- *(assets)* avoid asserting exact count in startup assets test
+- *(assets)* update expected embedded asset count and assertions
+- add logo to README
+- add integration test job with MediaMTX service container
+
 ## [0.3.9](https://github.com/cetanu/rtmp-manager/compare/v0.3.8...v0.3.9) - 2026-09-18
 
 ### Added
