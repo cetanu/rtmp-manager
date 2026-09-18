@@ -23,7 +23,7 @@
     - require:
       - archive: {{ ffmpeg['install_dir'] }}
 
-/opt/apps/rtmp-proxy/current:
+rtmp-proxy-current-directory:
   file.directory:
     - user: root
     - group: root
@@ -37,12 +37,12 @@
     - mode: '0700'
     - makedirs: true
 
-/opt/apps/rtmp-proxy/current/rtmp-proxy:
-  file.managed:
+/opt/apps/rtmp-proxy/current:
+  archive.extracted:
     - source: {{ pillar['rtmp_proxy']['release_url'] }}
     - source_hash: {{ pillar['rtmp_proxy']['release_url'] }}.sha256
+    - archive_format: tar
+    - overwrite: true
     - user: root
     - group: root
-    - mode: '0755'
-    - require:
-      - file: /opt/apps/rtmp-proxy/current
+    - enforce_ownership_on: /opt/apps/rtmp-proxy/current

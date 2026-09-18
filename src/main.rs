@@ -1,6 +1,5 @@
 mod chat;
 mod config;
-mod embedded_assets;
 mod log_buffer;
 mod metrics;
 mod notifications;
@@ -109,9 +108,6 @@ async fn main() -> Result<()> {
     {
         return install_systemd(&work_dir, &config_path);
     }
-
-    embedded_assets::install(web::TAILWIND_STYLESHEET)
-        .context("Failed to install embedded web assets")?;
 
     info!(path = ?cli.config, "Loading configuration");
     let (config_handle, config) = ConfigHandle::open(&cli.config).await?;

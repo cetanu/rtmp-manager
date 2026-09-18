@@ -63,10 +63,13 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install Topcoat CLI
+        run: cargo install topcoat-cli --version 0.8.0 --locked
       - name: Install FFmpeg
         run: sudo apt-get update && sudo apt-get install --yes ffmpeg
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: topcoat asset bundle --bin rtmp-proxy
       - run: cargo test --all-targets --all-features --locked
       - name: Test FFmpeg publishing to RTMP
         run: cargo test --locked server::relay::tests::direct_test_publishes_to_local_rtmp_server -- --ignored --exact
@@ -141,17 +144,26 @@ jobs:
           targets: x86_64-unknown-linux-musl
       - name: Install musl tools
         run: sudo apt-get update && sudo apt-get install --yes musl-tools
+      - name: Install Topcoat CLI
+        run: cargo install topcoat-cli --version 0.8.0 --locked
       - name: Build static release binary
         run: cargo build --locked --release --target x86_64-unknown-linux-musl --bin rtmp-proxy
+      - name: Bundle Topcoat assets
+        env:
+          CARGO_BUILD_TARGET: x86_64-unknown-linux-musl
+        run: topcoat asset bundle --release --bin rtmp-proxy
       - name: Package release asset
         run: |
-          cp target/x86_64-unknown-linux-musl/release/rtmp-proxy rtmp-proxy
-          sha256sum rtmp-proxy > rtmp-proxy.sha256
+          mkdir release
+          cp target/x86_64-unknown-linux-musl/release/rtmp-proxy release/rtmp-proxy
+          cp -R target/x86_64-unknown-linux-musl/release/assets release/assets
+          tar -C release -czf rtmp-proxy.tar.gz .
+          sha256sum rtmp-proxy.tar.gz > rtmp-proxy.tar.gz.sha256
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.release.outputs.tag || github.event.inputs.release_tag }}
-        run: gh release upload "$RELEASE_TAG" rtmp-proxy rtmp-proxy.sha256 --clobber
+        run: gh release upload "$RELEASE_TAG" rtmp-proxy.tar.gz rtmp-proxy.tar.gz.sha256 --clobber
 
   publish-release:
     name: Publish GitHub release

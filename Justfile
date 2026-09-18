@@ -4,13 +4,17 @@ default:
     @just --list
 
 build:
-    cargo build
+    topcoat asset bundle
 
 check:
     cargo check
 
 run:
+    topcoat asset bundle
     cargo run
+
+bundle:
+    topcoat asset bundle --release
 
 test-stream ip key="teststream":
     ffmpeg -re -f lavfi -i testsrc=size=1280x720:rate=30 -f lavfi -i sine=frequency=1000 -c:v libx264 -c:a aac -f flv "rtmp://{{ip}}:1935/live/{{key}}"

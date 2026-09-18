@@ -590,9 +590,21 @@ async fn verify_webhook_crc(cx: &Cx) -> Result<Response> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Once;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_PORT_COUNTER: AtomicU64 = AtomicU64::new(45000);
+    static ASSET_BUNDLE: Once = Once::new();
+
+    fn ensure_asset_bundle() {
+        ASSET_BUNDLE.call_once(|| {
+            let status = std::process::Command::new("topcoat")
+                .args(["asset", "bundle", "--bin", "rtmp-proxy"])
+                .status()
+                .expect("topcoat CLI should be installed");
+            assert!(status.success(), "topcoat asset bundle failed");
+        });
+    }
 
     #[tokio::test]
     async fn overlay_routes_are_registered_and_serve_html() {
@@ -611,7 +623,7 @@ mod tests {
             .await
             .unwrap();
 
-        let _ = crate::embedded_assets::install(TAILWIND_STYLESHEET);
+        ensure_asset_bundle();
 
         let app = Router::builder()
             .discover()
@@ -700,6 +712,117 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(alias_no_auth.status(), reqwest::StatusCode::OK);
+
+        server_task.abort();
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_chat_endpoint_and_acknowledge_flow() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rtmp-chat-test-{}",
+            TEST_PORT_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let config_path = temp_dir.join("config.sqlite3");
+        let client = reqwest::Client::new();
+        let (config_handle, _config) = crate::config::ConfigHandle::open(&config_path)
+            .await
+            .unwrap();
+        let metrics = Arc::new(crate::metrics::Metrics::default());
+        let app_handle = AppHandle::new(metrics, config_handle, client.clone(), 1935)
+            .await
+            .unwrap();
+
+        ensure_asset_bundle();
+
+        let app = Router::builder()
+            .discover()
+            .runtime()
+            .assets(AssetBundle::load().unwrap())
+            .app_context(app_handle.clone())
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let server_task = tokio::spawn(async move {
+            let _ = topcoat::serve(listener, app).await;
+        });
+
+        let html_content = client
+            .get(format!("http://{local_addr}/chat"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+
+        // Extract procedure ID for send_test_chat
+        let proc_id = html_content
+            .split("chat-test-button")
+            .nth(1)
+            .unwrap()
+            .split("Procedure")
+            .nth(1)
+            .unwrap()
+            .split("&quot;id&quot;:&quot;")
+            .nth(1)
+            .unwrap()
+            .split("&quot;")
+            .next()
+            .unwrap();
+        println!("PROCEDURE ID: {proc_id}");
+
+        let proc_resp = client
+            .post(format!(
+                "http://{local_addr}/_topcoat/runtime/procedures/{proc_id}"
+            ))
+            .header("Content-Type", "application/json")
+            .body("null")
+            .send()
+            .await
+            .unwrap();
+        println!("PROCEDURE STATUS: {}", proc_resp.status());
+        let proc_text = proc_resp.text().await.unwrap();
+        println!("PROCEDURE RESPONSE: {proc_text}");
+
+        // 1. Post to /api/chat/test with empty body (generates sample message)
+        let resp = client
+            .post(format!("http://{local_addr}/api/chat/test"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let snapshot: crate::chat::ChatInboxSnapshot = resp.json().await.unwrap();
+        assert_eq!(snapshot.messages.len(), 1);
+        let message_id = snapshot.messages[0].id;
+
+        // 2. Post to /api/chat/test with custom payload
+        let custom_resp = client
+            .post(format!("http://{local_addr}/api/chat/test"))
+            .header("Content-Type", "application/json")
+            .body(r#"{"source":"twitch","author":"CustomTester","text":"Testing custom text"}"#)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(custom_resp.status(), reqwest::StatusCode::OK);
+        let snapshot: crate::chat::ChatInboxSnapshot = custom_resp.json().await.unwrap();
+        assert_eq!(snapshot.messages.len(), 2);
+
+        // 3. Acknowledge first message
+        let ack_resp = client
+            .post(format!("http://{local_addr}/api/chat/acknowledge"))
+            .header("Content-Type", "application/json")
+            .body(format!(r#"{{"id":{message_id}}}"#))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(ack_resp.status(), reqwest::StatusCode::OK);
+        let snapshot_after_ack: crate::chat::ChatInboxSnapshot = ack_resp.json().await.unwrap();
+        assert_eq!(snapshot_after_ack.messages.len(), 1);
+        assert_eq!(snapshot_after_ack.messages[0].author, "CustomTester");
+        assert_eq!(snapshot_after_ack.messages[0].text, "Testing custom text");
 
         server_task.abort();
         let _ = std::fs::remove_dir_all(temp_dir);
