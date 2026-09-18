@@ -50,6 +50,11 @@ jobs:
   check:
     name: Check, lint, and test
     runs-on: ubuntu-latest
+    services:
+      rtmp:
+        image: bluenviron/mediamtx:1.20.1
+        ports:
+          - 1935:1935
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,9 +63,13 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install --yes ffmpeg
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test --all-targets --all-features --locked
+      - name: Test FFmpeg publishing to RTMP
+        run: cargo test --locked server::relay::tests::direct_test_publishes_to_local_rtmp_server -- --ignored --exact
 
   release:
     name: Create draft release
