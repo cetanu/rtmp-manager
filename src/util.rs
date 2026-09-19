@@ -38,6 +38,8 @@ pub fn redact_secrets(text: &str, secrets: &[String]) -> String {
         .map(|part| {
             if part.contains("rtmp://") || part.contains("rtmps://") {
                 "[RTMP_URL_REDACTED]"
+            } else if part.contains("srt://") {
+                "[SRT_URL_REDACTED]"
             } else {
                 part
             }

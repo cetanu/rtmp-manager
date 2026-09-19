@@ -130,7 +130,9 @@ impl StreamActor {
     }
 
     async fn handle_stage_stream(&mut self, stream_key: String) -> Result<()> {
-        self.end_current_stream().await;
+        if self.staged.is_some() {
+            bail!("Another stream is already active");
+        }
         create_preview_dir(&self.preview_dir)?;
 
         let source_url = format!("rtmp://127.0.0.1:{}/live/{stream_key}", self.listen_port);

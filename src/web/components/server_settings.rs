@@ -1,6 +1,6 @@
 use crate::server::state::AppHandle;
 use crate::web::components::ui::card::{card, card_content, card_header, card_title};
-use crate::web::components::ui::form::{form_field, secret_input};
+use crate::web::components::ui::form::{form_field, secret_input, switch_field};
 use crate::web::components::ui::input::input;
 use topcoat::{
     Result,
@@ -28,6 +28,19 @@ pub async fn server_settings(cx: &Cx) -> Result<impl View> {
                                 name="server[listen]"
                                 value=(config.server.listen.to_string())
                                 placeholder="0.0.0.0:1935"
+                            }
+                        )
+                    )
+                    form_field(
+                        control_id: "server_srt_listen",
+                        label_text: "SRT Listen Address",
+                        input(
+                            attrs: attributes! {
+                                type="text"
+                                id="server_srt_listen"
+                                name="server[srt_listen]"
+                                value=(config.server.srt_listen.to_string())
+                                placeholder="0.0.0.0:6000"
                             }
                         )
                     )
@@ -72,6 +85,14 @@ pub async fn server_settings(cx: &Cx) -> Result<impl View> {
                             }
                         )
                     )
+                    <div class="flex items-center pt-6">
+                        switch_field(
+                            control_id: "server_srt_enabled",
+                            name: "server[srt_enabled]",
+                            label_text: "Enable SRT Ingest",
+                            checked: config.server.srt_enabled,
+                        )
+                    </div>
                 </div>
             )
         )

@@ -1,8 +1,11 @@
 pub mod handler;
 pub mod preview;
 pub mod relay;
+pub mod srt;
 pub mod state;
 pub mod stream_actor;
+
+pub use srt::run_srt_server;
 
 use anyhow::{Context, Result};
 use handler::ProxyHandler;

@@ -13,6 +13,12 @@ pub struct ServerSettings {
     #[serde(default = "default_listen")]
     pub listen: SocketAddr,
 
+    #[serde(default = "default_srt_listen")]
+    pub srt_listen: SocketAddr,
+
+    #[serde(default = "default_srt_enabled")]
+    pub srt_enabled: bool,
+
     #[serde(default = "default_api_listen")]
     pub api_listen: SocketAddr,
 
@@ -34,6 +40,14 @@ fn default_listen() -> SocketAddr {
     "0.0.0.0:1935".parse().unwrap()
 }
 
+fn default_srt_listen() -> SocketAddr {
+    "0.0.0.0:6000".parse().unwrap()
+}
+
+fn default_srt_enabled() -> bool {
+    false
+}
+
 fn default_api_listen() -> SocketAddr {
     "0.0.0.0:3000".parse().unwrap()
 }
@@ -46,6 +60,8 @@ impl Default for ServerSettings {
     fn default() -> Self {
         Self {
             listen: default_listen(),
+            srt_listen: default_srt_listen(),
+            srt_enabled: default_srt_enabled(),
             api_listen: default_api_listen(),
             test_stream_duration_secs: default_test_stream_duration_secs(),
             ingest_stream_key: String::new(),
@@ -288,6 +304,12 @@ impl AppConfig {
         if let Some(server) = form.server {
             config.server = ServerSettings {
                 listen: parse_address(server.listen, config.server.listen, "RTMP listen")?,
+                srt_listen: parse_address(
+                    server.srt_listen,
+                    config.server.srt_listen,
+                    "SRT listen",
+                )?,
+                srt_enabled: server.srt_enabled,
                 api_listen: parse_address(
                     server.api_listen,
                     config.server.api_listen,
@@ -468,6 +490,9 @@ fn parse_address(
 #[derive(Debug, Default, Deserialize)]
 pub struct ServerForm {
     pub listen: Option<String>,
+    pub srt_listen: Option<String>,
+    #[serde(default)]
+    pub srt_enabled: bool,
     pub api_listen: Option<String>,
     pub test_stream_duration_secs: Option<u64>,
     pub ingest_stream_key: Option<String>,
@@ -776,6 +801,8 @@ mod tests {
         AppConfig {
             server: ServerSettings {
                 listen: "0.0.0.0:1935".parse().unwrap(),
+                srt_listen: "0.0.0.0:6000".parse().unwrap(),
+                srt_enabled: true,
                 api_listen: "10.0.0.1:3000".parse().unwrap(),
                 test_stream_duration_secs: 15,
                 ingest_stream_key: "existing-ingest-key".into(),
@@ -991,6 +1018,28 @@ mod tests {
         let updated = populated_config().merge_form(form).unwrap();
 
         assert_eq!(updated.server.ingest_stream_key, "new-private-key");
+    }
+
+    #[test]
+    fn srt_settings_are_configurable() {
+        let form: ConfigForm = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str("server%5Bsrt_listen%5D=127.0.0.1%3A6001&server%5Bsrt_enabled%5D=true")
+            .unwrap();
+        let updated = populated_config().merge_form(form).unwrap();
+
+        assert_eq!(
+            updated.server.srt_listen,
+            "127.0.0.1:6001".parse::<SocketAddr>().unwrap()
+        );
+        assert!(updated.server.srt_enabled);
+
+        let form_disabled: ConfigForm = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str("server%5Blisten%5D=0.0.0.0%3A1935")
+            .unwrap();
+        let updated_disabled = populated_config().merge_form(form_disabled).unwrap();
+        assert!(!updated_disabled.server.srt_enabled);
     }
 
     #[test]

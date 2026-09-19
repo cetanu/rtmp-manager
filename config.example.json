@@ -1,6 +1,8 @@
 {
   "server": {
     "listen": "0.0.0.0:1935",
+    "srt_listen": "0.0.0.0:6000",
+    "srt_enabled": false,
     "api_listen": "0.0.0.0:3000",
     "test_stream_duration_secs": 15,
     "ingest_stream_key": "CHANGE_ME_TO_A_PRIVATE_STREAM_KEY"

@@ -80,11 +80,11 @@ Each goal is specified with its context, technical requirements, acceptance crit
 
 ### GOAL-104: SRT (Secure Reliable Transport) Ingest Support
 - **Objective:** Support SRT protocol ingestion alongside RTMP to allow reliable streaming over lossy network connections.
-- **Current State:** Ingest is RTMP-only over TCP using `rtmp-rs` ([`src/server/handler.rs`](src/server/handler.rs)).
+- **Current State:** Implemented via pure Rust `srt-tokio` listener on configurable UDP port (default `0.0.0.0:6000`).
 - **Technical Requirements:**
-  1. Add an SRT listener (e.g., via `srt-rs` or supervised native SRT socket listener) configurable on port 6000 UDP.
-  2. Authenticate SRT streams using `streamid` parameter (e.g., `#!::r=live,m=publish,u=<stream_key>`).
-  3. Demux/pass through incoming MPEG-TS over SRT packets directly to the internal stream dispatcher/relay actor.
+  1. Add an SRT listener (e.g., via `srt-rs` or supervised native SRT socket listener) configurable on port 6000 UDP. *(Completed: `run_srt_server` with `srt-tokio` on port 6000 UDP)*
+  2. Authenticate SRT streams using `streamid` parameter (e.g., `#!::r=live,m=publish,u=<stream_key>`). *(Completed: `validate_srt_stream_id` supports Haivision access control syntax and raw keys)*
+  3. Demux/pass through incoming MPEG-TS over SRT packets to the existing RTMP ingest pipeline. *(Implemented: `handle_srt_session` remuxes incoming MPEG-TS into the internal RTMP listener.)*
 - **Acceptance Criteria:**
   - An OBS client streaming to `srt://<host>:6000?streamid=...` successfully publishes video/audio to all configured destinations with automatic packet-loss recovery.
 

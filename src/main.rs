@@ -14,6 +14,7 @@ use config::ConfigHandle;
 use metrics::Metrics;
 use server::{run_rtmp_server, state::AppHandle};
 use std::fs;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -125,6 +126,12 @@ async fn main() -> Result<()> {
         "Listening for RTMP stream ingest on {}",
         config.server.listen
     );
+    if config.server.srt_enabled {
+        info!(
+            "Listening for SRT stream ingest on {}",
+            config.server.srt_listen
+        );
+    }
 
     for t in &config.targets {
         info!(name = %t.name, enabled = t.enabled, "Target configured");
@@ -132,7 +139,10 @@ async fn main() -> Result<()> {
 
     let web_addr = config.server.api_listen;
     let rtmp_listen = config.server.listen;
+    let srt_listen = config.server.srt_listen;
+    let srt_enabled = config.server.srt_enabled;
     let listen_port = config.server.listen.port();
+    let internal_rtmp_addr = SocketAddr::from(([127, 0, 0, 1], listen_port));
 
     let app = AppHandle::new(metrics, config_handle, http_client, listen_port).await?;
 
@@ -143,6 +153,18 @@ async fn main() -> Result<()> {
             warn!("Web interface server error: {:#}", e);
         }
     });
+
+    // Spawn SRT Ingest Server if enabled
+    if srt_enabled {
+        let srt_app = app.clone();
+        tokio::spawn(async move {
+            if let Err(e) =
+                crate::server::run_srt_server(srt_listen, internal_rtmp_addr, srt_app).await
+            {
+                warn!("SRT ingest server error: {:#}", e);
+            }
+        });
+    }
 
     // Run RTMP Server
     run_rtmp_server(rtmp_listen, app).await

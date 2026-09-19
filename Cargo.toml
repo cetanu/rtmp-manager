@@ -28,11 +28,13 @@ base64 = "0.22.1"
 futures-util = "0.3"
 regex = "1.10"
 aws-lc-rs = "1.17.3"
+srt-tokio = "0.4.4"
 
 [build-dependencies]
 topcoat = { version = "0.8.0", default-features = false, features = ["tailwind"] }
 
 [dev-dependencies]
+bytes = "1.0"
 topcoat-asset = { version = "0.8.0", features = ["bundler"] }
 
 [profile.release]
