@@ -504,6 +504,11 @@ pub fn parse_continuations(continuations: &[serde_json::Value]) -> Option<(Strin
 }
 
 pub fn parse_action_item(action: &serde_json::Value) -> Option<IncomingChatMessage> {
+    let (renderer, kind) = action_renderer(action)?;
+    parse_renderer(renderer, kind)
+}
+
+fn action_renderer(action: &serde_json::Value) -> Option<(&serde_json::Value, MessageKind)> {
     let item = action
         .pointer("/addChatItemAction/item")
         .or_else(|| action.pointer("/addLiveChatTickerItemAction/item"))
@@ -516,10 +521,9 @@ pub fn parse_action_item(action: &serde_json::Value) -> Option<IncomingChatMessa
         ("liveChatPaidStickerRenderer", MessageKind::Sticker),
         ("giftMessageViewModel", MessageKind::Gift),
     ];
-    RENDERERS.into_iter().find_map(|(name, kind)| {
-        item.get(name)
-            .and_then(|renderer| parse_renderer(renderer, kind))
-    })
+    RENDERERS
+        .into_iter()
+        .find_map(|(name, kind)| item.get(name).map(|renderer| (renderer, kind)))
 }
 
 #[derive(Clone, Copy)]

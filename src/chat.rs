@@ -608,26 +608,7 @@ impl ChatActor {
         self.state.youtube_status = None;
         self.state_tx.send_replace(self.state.clone());
 
-        let target = chat
-            .youtube_live_chat_id
-            .as_ref()
-            .filter(|value| !value.trim().is_empty())
-            .cloned()
-            .map(YouTubeChatTarget::LiveChat)
-            .or_else(|| {
-                chat.youtube_video_id
-                    .as_ref()
-                    .filter(|value| !value.trim().is_empty())
-                    .cloned()
-                    .map(YouTubeChatTarget::Video)
-            })
-            .or_else(|| {
-                chat.youtube_channel_id
-                    .as_ref()
-                    .filter(|value| !value.trim().is_empty())
-                    .cloned()
-                    .map(YouTubeChatTarget::Channel)
-            });
+        let target = resolve_youtube_target(chat);
 
         let Some(target) = target else {
             return;
@@ -658,6 +639,28 @@ impl ChatActor {
         self.youtube_task = Some(task);
         tracing::info!("YouTube live chat ingest configured");
     }
+}
+
+fn resolve_youtube_target(chat: &ChatSettings) -> Option<YouTubeChatTarget> {
+    chat.youtube_live_chat_id
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+        .cloned()
+        .map(YouTubeChatTarget::LiveChat)
+        .or_else(|| {
+            chat.youtube_video_id
+                .as_ref()
+                .filter(|value| !value.trim().is_empty())
+                .cloned()
+                .map(YouTubeChatTarget::Video)
+        })
+        .or_else(|| {
+            chat.youtube_channel_id
+                .as_ref()
+                .filter(|value| !value.trim().is_empty())
+                .cloned()
+                .map(YouTubeChatTarget::Channel)
+        })
 }
 
 /// Lightweight, cloneable handle to the ChatActor for lock-free reads and async command dispatch.

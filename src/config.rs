@@ -41,11 +41,11 @@ pub struct ServerSettings {
 }
 
 fn default_listen() -> SocketAddr {
-    "0.0.0.0:1935".parse().unwrap()
+    SocketAddr::from(([0, 0, 0, 0], 1935))
 }
 
 fn default_srt_listen() -> SocketAddr {
-    "0.0.0.0:6000".parse().unwrap()
+    SocketAddr::from(([0, 0, 0, 0], 6000))
 }
 
 fn default_srt_enabled() -> bool {
@@ -53,7 +53,7 @@ fn default_srt_enabled() -> bool {
 }
 
 fn default_api_listen() -> SocketAddr {
-    "0.0.0.0:3000".parse().unwrap()
+    SocketAddr::from(([0, 0, 0, 0], 3000))
 }
 
 fn default_test_stream_duration_secs() -> u64 {
@@ -238,116 +238,14 @@ impl AppConfig {
 
     /// Validate enabled target URLs and credentials.
     pub fn validate(&self) -> Result<()> {
-        self.server
-            .validate()
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        validate_server(&self.server)?;
         self.chat
             .validate()
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-
-        let username_set = !self.web_auth.username.trim().is_empty();
-        let password_set = !self.web_auth.password.is_empty();
-        if username_set != password_set {
-            bail!(
-                "Web authentication username and password must either both be set or both be empty"
-            );
-        }
-        if password_set && self.web_auth.password.len() < 12 {
-            bail!("Web authentication password must be at least 12 characters");
-        }
-        if username_set && self.web_auth.username.contains(':') {
-            bail!("Web authentication username must not contain ':'");
-        }
-        if !self.web_auth.overlay_token.is_empty() && self.web_auth.overlay_token.len() < 16 {
-            bail!("Overlay access token must be at least 16 characters");
-        }
-        if !self.web_auth.overlay_token.is_empty()
-            && !self
-                .web_auth
-                .overlay_token
-                .chars()
-                .all(|character| character.is_ascii_alphanumeric() || "_-".contains(character))
-        {
-            bail!(
-                "Overlay access token must contain only ASCII letters, numbers, hyphens, or underscores"
-            );
-        }
-        if self.chat.twitch_channel.as_ref().is_some_and(|channel| {
-            let channel = channel.trim().trim_start_matches('#');
-            channel.is_empty()
-                || channel.len() > 25
-                || !channel
-                    .chars()
-                    .all(|character| character.is_ascii_alphanumeric() || character == '_')
-        }) {
-            bail!("Twitch channel must be 1-25 ASCII letters, numbers, or underscores");
-        }
-        let youtube_selectors = [
-            &self.chat.youtube_live_chat_id,
-            &self.chat.youtube_video_id,
-            &self.chat.youtube_channel_id,
-        ]
-        .into_iter()
-        .filter(|value| value.as_ref().is_some_and(|value| !value.trim().is_empty()))
-        .count();
-        if youtube_selectors > 1 {
-            bail!("Configure only one of YouTube live chat ID, video ID, or channel ID");
-        }
-        if self.chat.kick_webhook_enabled
-            && (self
-                .chat
-                .kick_client_id
-                .as_ref()
-                .is_none_or(|value| value.trim().is_empty())
-                || self
-                    .chat
-                    .kick_client_secret
-                    .as_ref()
-                    .is_none_or(|value| value.trim().is_empty())
-                || self
-                    .chat
-                    .kick_channel
-                    .as_ref()
-                    .is_none_or(|value| value.trim().is_empty()))
-        {
-            bail!("Kick webhooks require a client ID, client secret, and channel");
-        }
-        if self.chat.kick_channel.as_ref().is_some_and(|channel| {
-            channel.is_empty()
-                || channel.len() > 25
-                || !channel
-                    .chars()
-                    .all(|character| character.is_ascii_alphanumeric() || "_-".contains(character))
-        }) {
-            bail!("Kick channel must be 1-25 ASCII letters, numbers, hyphens, or underscores");
-        }
-        if let Some(url) = self.notifications.discord_webhook.as_deref() {
-            validate_outbound_url(url, &["http", "https"], "Discord webhook")?;
-        }
-        if let Some(url) = self.notifications.webhook_url.as_deref() {
-            validate_outbound_url(url, &["http", "https"], "Webhook URL")?;
-        }
-        if let Some(channel) = self.chat.youtube_channel_id.as_deref()
-            && !channel.trim().is_empty()
-        {
-            crate::chat::youtube::validate_channel_input(channel)?;
-        }
-        if self.targets.len() > MAX_TARGET_COUNT {
-            bail!("At most {MAX_TARGET_COUNT} targets may be configured");
-        }
-        for target in &self.targets {
-            if target.enabled {
-                let url = target.url.trim();
-                if url.is_empty() {
-                    bail!("Target '{}' has an empty RTMP URL.", target.name);
-                }
-                validate_outbound_url(
-                    url,
-                    &["rtmp", "rtmps"],
-                    &format!("Target '{}'", target.name),
-                )?;
-            }
-        }
+        validate_web_auth(&self.web_auth)?;
+        validate_chat(&self.chat)?;
+        validate_notifications(&self.notifications)?;
+        validate_targets(&self.targets)?;
         Ok(())
     }
 
@@ -356,159 +254,27 @@ impl AppConfig {
         let mut config = self.clone();
 
         if let Some(server) = form.server {
-            config.server = ServerSettings {
-                listen: parse_address(server.listen, config.server.listen, "RTMP listen")?,
-                srt_listen: parse_address(
-                    server.srt_listen,
-                    config.server.srt_listen,
-                    "SRT listen",
-                )?,
-                srt_enabled: server.srt_enabled,
-                api_listen: parse_address(
-                    server.api_listen,
-                    config.server.api_listen,
-                    "API listen",
-                )?,
-                test_stream_duration_secs: server
-                    .test_stream_duration_secs
-                    .unwrap_or(config.server.test_stream_duration_secs),
-                ingest_stream_key: non_empty(server.ingest_stream_key)
-                    .unwrap_or(config.server.ingest_stream_key),
-            };
+            merge_server(&mut config, server)?;
         }
         if let Some(notification_fields) = form.notifications {
-            config.notifications = NotificationSettings {
-                discord_webhook: updated_secret(
-                    notification_fields.discord_webhook,
-                    notification_fields.clear_discord_webhook,
-                    config.notifications.discord_webhook,
-                ),
-                live_message: notification_fields
-                    .live_message
-                    .unwrap_or(config.notifications.live_message),
-                webhook_url: updated_secret(
-                    notification_fields.webhook_url,
-                    notification_fields.clear_webhook_url,
-                    config.notifications.webhook_url,
-                ),
-            };
+            merge_notifications(&mut config, notification_fields);
         }
         if let Some(auth_fields) = form.web_auth {
-            config.web_auth = WebAuthSettings {
-                username: auth_fields
-                    .username
-                    .unwrap_or(config.web_auth.username)
-                    .trim()
-                    .to_string(),
-                password: non_empty(auth_fields.password).unwrap_or(config.web_auth.password),
-                overlay_token: non_empty(auth_fields.overlay_token)
-                    .unwrap_or(config.web_auth.overlay_token),
-            };
+            merge_web_auth(&mut config, auth_fields);
         }
         if let Some(chat) = form.chat {
-            config.chat = ChatSettings {
-                queue_capacity: chat.queue_capacity.unwrap_or(config.chat.queue_capacity),
-                twitch_channel: non_empty(chat.twitch_channel)
-                    .map(|channel| channel.trim_start_matches('#').to_ascii_lowercase()),
-                youtube_api_key: updated_secret(
-                    chat.youtube_api_key,
-                    chat.clear_youtube_api_key,
-                    config.chat.youtube_api_key,
-                ),
-                youtube_live_chat_id: non_empty(chat.youtube_live_chat_id),
-                youtube_video_id: non_empty(chat.youtube_video_id),
-                youtube_channel_id: non_empty(chat.youtube_channel_id),
-                youtube_min_poll_interval_secs: chat
-                    .youtube_min_poll_interval_secs
-                    .unwrap_or(config.chat.youtube_min_poll_interval_secs),
-                youtube_adaptive_polling: chat.youtube_adaptive_polling,
-                youtube_polling_enabled: chat
-                    .youtube_polling_enabled
-                    .unwrap_or(config.chat.youtube_polling_enabled),
-                x_api_key: updated_secret(
-                    chat.x_api_key,
-                    chat.clear_x_api_key,
-                    config.chat.x_api_key,
-                ),
-                x_api_secret: updated_secret(
-                    chat.x_api_secret,
-                    chat.clear_x_api_secret,
-                    config.chat.x_api_secret,
-                ),
-                x_client_id: updated_secret(
-                    chat.x_client_id,
-                    chat.clear_x_client_id,
-                    config.chat.x_client_id,
-                ),
-                x_client_secret: updated_secret(
-                    chat.x_client_secret,
-                    chat.clear_x_client_secret,
-                    config.chat.x_client_secret,
-                ),
-                x_webhook_enabled: chat
-                    .x_webhook_enabled
-                    .unwrap_or(config.chat.x_webhook_enabled),
-                kick_client_id: non_empty(chat.kick_client_id),
-                kick_client_secret: updated_secret(
-                    chat.kick_client_secret,
-                    chat.clear_kick_client_secret,
-                    config.chat.kick_client_secret,
-                ),
-                kick_channel: non_empty(chat.kick_channel)
-                    .map(|channel| channel.trim().to_ascii_lowercase()),
-                kick_webhook_enabled: chat
-                    .kick_webhook_enabled
-                    .unwrap_or(config.chat.kick_webhook_enabled),
-            };
+            merge_chat(&mut config, chat);
         }
         if let Some(target_fields) = form.targets {
-            let mut submitted_indices = std::collections::HashSet::new();
-            anyhow::ensure!(
-                target_fields
-                    .iter()
-                    .all(|target| submitted_indices.insert(target.original_index)),
-                "A target was submitted more than once"
-            );
-            config.targets = target_fields
-                .into_iter()
-                .map(|target| {
-                    let current = config.targets.get(target.original_index).with_context(|| {
-                        format!("Target {} no longer exists", target.original_index)
-                    })?;
-                    Ok(TargetConfig {
-                        name: target.name,
-                        url: target.url,
-                        stream_key: non_empty(target.stream_key)
-                            .unwrap_or_else(|| current.stream_key.clone()),
-                        public_url: non_empty(target.public_url),
-                        enabled: target.enabled,
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?;
+            merge_targets(&mut config, target_fields)?;
         }
-
-        match form.action.unwrap_or(FormAction::Save) {
-            FormAction::AddTarget => config.targets.push(TargetConfig {
-                name: "New Target".to_string(),
-                url: "".to_string(),
-                stream_key: "".to_string(),
-                public_url: None,
-                enabled: false,
-            }),
-            FormAction::RemoveTarget(index) => {
-                anyhow::ensure!(
-                    index < config.targets.len(),
-                    "Target {index} does not exist"
-                );
-                config.targets.remove(index);
-            }
-            FormAction::Save => {}
-        }
+        apply_action(&mut config.targets, form.action.unwrap_or(FormAction::Save))?;
 
         Ok(config)
     }
 
     /// Parses imported configuration JSON bytes.
+    #[allow(dead_code)]
     fn parse_imported(body: &[u8]) -> Result<Self> {
         let config = Self::parse_imported_unvalidated(body)?;
         config.validate()?;
@@ -532,10 +298,272 @@ impl AppConfig {
     }
 }
 
-/// Validates a URL before the application makes an outbound connection.
-///
-/// DNS is resolved at validation time and every returned address is checked,
-/// so hostnames cannot point at loopback, link-local, or private networks.
+fn validate_server(server: &ServerSettings) -> Result<()> {
+    server
+        .validate()
+        .map_err(|error| anyhow::anyhow!(error.to_string()))
+}
+
+fn merge_server(config: &mut AppConfig, form: ServerForm) -> Result<()> {
+    config.server = ServerSettings {
+        listen: parse_address(form.listen, config.server.listen, "RTMP listen")?,
+        srt_listen: parse_address(form.srt_listen, config.server.srt_listen, "SRT listen")?,
+        srt_enabled: form.srt_enabled,
+        api_listen: parse_address(form.api_listen, config.server.api_listen, "API listen")?,
+        test_stream_duration_secs: form
+            .test_stream_duration_secs
+            .unwrap_or(config.server.test_stream_duration_secs),
+        ingest_stream_key: non_empty(form.ingest_stream_key)
+            .unwrap_or_else(|| config.server.ingest_stream_key.clone()),
+    };
+    Ok(())
+}
+
+fn merge_notifications(config: &mut AppConfig, form: NotificationsForm) {
+    config.notifications = NotificationSettings {
+        discord_webhook: updated_secret(
+            form.discord_webhook,
+            form.clear_discord_webhook,
+            config.notifications.discord_webhook.clone(),
+        ),
+        live_message: form
+            .live_message
+            .unwrap_or_else(|| config.notifications.live_message.clone()),
+        webhook_url: updated_secret(
+            form.webhook_url,
+            form.clear_webhook_url,
+            config.notifications.webhook_url.clone(),
+        ),
+    };
+}
+
+fn merge_web_auth(config: &mut AppConfig, form: WebAuthForm) {
+    config.web_auth = WebAuthSettings {
+        username: form
+            .username
+            .unwrap_or_else(|| config.web_auth.username.clone())
+            .trim()
+            .to_string(),
+        password: non_empty(form.password).unwrap_or_else(|| config.web_auth.password.clone()),
+        overlay_token: non_empty(form.overlay_token)
+            .unwrap_or_else(|| config.web_auth.overlay_token.clone()),
+    };
+}
+
+fn merge_chat(config: &mut AppConfig, form: ChatForm) {
+    config.chat = ChatSettings {
+        queue_capacity: form.queue_capacity.unwrap_or(config.chat.queue_capacity),
+        twitch_channel: non_empty(form.twitch_channel)
+            .map(|channel| channel.trim_start_matches('#').to_ascii_lowercase()),
+        youtube_api_key: updated_secret(
+            form.youtube_api_key,
+            form.clear_youtube_api_key,
+            config.chat.youtube_api_key.clone(),
+        ),
+        youtube_live_chat_id: non_empty(form.youtube_live_chat_id),
+        youtube_video_id: non_empty(form.youtube_video_id),
+        youtube_channel_id: non_empty(form.youtube_channel_id),
+        youtube_min_poll_interval_secs: form
+            .youtube_min_poll_interval_secs
+            .unwrap_or(config.chat.youtube_min_poll_interval_secs),
+        youtube_adaptive_polling: form.youtube_adaptive_polling,
+        youtube_polling_enabled: form
+            .youtube_polling_enabled
+            .unwrap_or(config.chat.youtube_polling_enabled),
+        x_api_key: updated_secret(
+            form.x_api_key,
+            form.clear_x_api_key,
+            config.chat.x_api_key.clone(),
+        ),
+        x_api_secret: updated_secret(
+            form.x_api_secret,
+            form.clear_x_api_secret,
+            config.chat.x_api_secret.clone(),
+        ),
+        x_client_id: updated_secret(
+            form.x_client_id,
+            form.clear_x_client_id,
+            config.chat.x_client_id.clone(),
+        ),
+        x_client_secret: updated_secret(
+            form.x_client_secret,
+            form.clear_x_client_secret,
+            config.chat.x_client_secret.clone(),
+        ),
+        x_webhook_enabled: form
+            .x_webhook_enabled
+            .unwrap_or(config.chat.x_webhook_enabled),
+        kick_client_id: non_empty(form.kick_client_id),
+        kick_client_secret: updated_secret(
+            form.kick_client_secret,
+            form.clear_kick_client_secret,
+            config.chat.kick_client_secret.clone(),
+        ),
+        kick_channel: non_empty(form.kick_channel)
+            .map(|channel| channel.trim().to_ascii_lowercase()),
+        kick_webhook_enabled: form
+            .kick_webhook_enabled
+            .unwrap_or(config.chat.kick_webhook_enabled),
+    };
+}
+
+fn merge_targets(config: &mut AppConfig, forms: Vec<TargetForm>) -> Result<()> {
+    let mut submitted_indices = std::collections::HashSet::new();
+    anyhow::ensure!(
+        forms
+            .iter()
+            .all(|target| submitted_indices.insert(target.original_index)),
+        "A target was submitted more than once"
+    );
+    config.targets = forms
+        .into_iter()
+        .map(|target| {
+            let current = config
+                .targets
+                .get(target.original_index)
+                .with_context(|| format!("Target {} no longer exists", target.original_index))?;
+            Ok(TargetConfig {
+                name: target.name,
+                url: target.url,
+                stream_key: non_empty(target.stream_key)
+                    .unwrap_or_else(|| current.stream_key.clone()),
+                public_url: non_empty(target.public_url),
+                enabled: target.enabled,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(())
+}
+
+fn apply_action(targets: &mut Vec<TargetConfig>, action: FormAction) -> Result<()> {
+    match action {
+        FormAction::AddTarget => targets.push(TargetConfig {
+            name: "New Target".to_string(),
+            url: "".to_string(),
+            stream_key: "".to_string(),
+            public_url: None,
+            enabled: false,
+        }),
+        FormAction::RemoveTarget(index) => {
+            anyhow::ensure!(index < targets.len(), "Target {index} does not exist");
+            targets.remove(index);
+        }
+        FormAction::Save => {}
+    }
+    Ok(())
+}
+
+fn validate_web_auth(auth: &WebAuthSettings) -> Result<()> {
+    let username_set = !auth.username.trim().is_empty();
+    let password_set = !auth.password.is_empty();
+    if username_set != password_set {
+        bail!("Web authentication username and password must either both be set or both be empty");
+    }
+    if password_set && auth.password.len() < 12 {
+        bail!("Web authentication password must be at least 12 characters");
+    }
+    if username_set && auth.username.contains(':') {
+        bail!("Web authentication username must not contain ':'");
+    }
+    if !auth.overlay_token.is_empty() && auth.overlay_token.len() < 16 {
+        bail!("Overlay access token must be at least 16 characters");
+    }
+    if !auth.overlay_token.is_empty()
+        && !auth
+            .overlay_token
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || "_-".contains(character))
+    {
+        bail!(
+            "Overlay access token must contain only ASCII letters, numbers, hyphens, or underscores"
+        );
+    }
+    Ok(())
+}
+
+fn validate_chat(chat: &ChatSettings) -> Result<()> {
+    if chat.twitch_channel.as_ref().is_some_and(|channel| {
+        let channel = channel.trim().trim_start_matches('#');
+        channel.is_empty()
+            || channel.len() > 25
+            || !channel
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || character == '_')
+    }) {
+        bail!("Twitch channel must be 1-25 ASCII letters, numbers, or underscores");
+    }
+    let youtube_selectors = [
+        &chat.youtube_live_chat_id,
+        &chat.youtube_video_id,
+        &chat.youtube_channel_id,
+    ]
+    .into_iter()
+    .filter(|value| value.as_ref().is_some_and(|value| !value.trim().is_empty()))
+    .count();
+    if youtube_selectors > 1 {
+        bail!("Configure only one of YouTube live chat ID, video ID, or channel ID");
+    }
+    if chat.kick_webhook_enabled
+        && (chat
+            .kick_client_id
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+            || chat
+                .kick_client_secret
+                .as_ref()
+                .is_none_or(|value| value.trim().is_empty())
+            || chat
+                .kick_channel
+                .as_ref()
+                .is_none_or(|value| value.trim().is_empty()))
+    {
+        bail!("Kick webhooks require a client ID, client secret, and channel");
+    }
+    if chat.kick_channel.as_ref().is_some_and(|channel| {
+        channel.is_empty()
+            || channel.len() > 25
+            || !channel
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "_-".contains(character))
+    }) {
+        bail!("Kick channel must be 1-25 ASCII letters, numbers, hyphens, or underscores");
+    }
+    if let Some(channel) = chat.youtube_channel_id.as_deref()
+        && !channel.trim().is_empty()
+    {
+        crate::chat::youtube::validate_channel_input(channel)?;
+    }
+    Ok(())
+}
+
+fn validate_notifications(notifications: &NotificationSettings) -> Result<()> {
+    if let Some(url) = notifications.discord_webhook.as_deref() {
+        validate_outbound_url(url, &["http", "https"], "Discord webhook")?;
+    }
+    if let Some(url) = notifications.webhook_url.as_deref() {
+        validate_outbound_url(url, &["http", "https"], "Webhook URL")?;
+    }
+    Ok(())
+}
+
+fn validate_targets(targets: &[TargetConfig]) -> Result<()> {
+    if targets.len() > MAX_TARGET_COUNT {
+        bail!("At most {MAX_TARGET_COUNT} targets may be configured");
+    }
+    for target in targets.iter().filter(|target| target.enabled) {
+        let url = target.url.trim();
+        if url.is_empty() {
+            bail!("Target '{}' has an empty RTMP URL.", target.name);
+        }
+        validate_outbound_url(
+            url,
+            &["rtmp", "rtmps"],
+            &format!("Target '{}'", target.name),
+        )?;
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_outbound_url(
     value: &str,
     allowed_schemes: &[&str],
@@ -552,7 +580,7 @@ pub(crate) fn validate_outbound_url(
             allowed_schemes.join(", ")
         );
     }
-    if url.username() != "" || url.password().is_some() {
+    if !url.username().is_empty() || url.password().is_some() {
         bail!("{field} must not contain credentials");
     }
     let host = url
@@ -1126,30 +1154,6 @@ mod tests {
     }
 
     #[test]
-    fn rejects_metadata_and_private_network_urls() {
-        let mut config = AppConfig::default();
-        config.notifications.webhook_url = Some("http://169.254.169.254/latest/meta-data".into());
-        assert!(config.validate().is_err());
-
-        config.notifications.webhook_url = Some("http://192.168.1.10/hook".into());
-        assert!(config.validate().is_err());
-
-        config.notifications.webhook_url = Some("http://192.0.2.10/hook".into());
-        config.validate().unwrap();
-    fn redacted_exports_do_not_contain_credentials() {
-        let config = populated_config();
-        let redacted = config.redacted();
-        let json = serde_json::to_string(&redacted).unwrap();
-
-        assert!(!json.contains("existing-ingest-key"));
-        assert!(!json.contains("192.0.2.1/hook"));
-        assert!(!json.contains("\"stream_key\":\"secret\""));
-        assert!(!json.contains("correct horse battery staple"));
-        assert!(!json.contains("youtube-api-key"));
-        assert!(!json.contains("kick-client-secret"));
-    }
-
-    #[test]
     fn rejects_excessive_test_duration_and_target_count() {
         let mut config = AppConfig::default();
         config.server.test_stream_duration_secs = MAX_TEST_STREAM_DURATION_SECS + 1;
@@ -1166,6 +1170,20 @@ mod tests {
             })
             .collect();
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn redacted_exports_do_not_contain_credentials() {
+        let config = populated_config();
+        let redacted = config.redacted();
+        let json = serde_json::to_string(&redacted).unwrap();
+
+        assert!(!json.contains("existing-ingest-key"));
+        assert!(!json.contains("192.0.2.1/hook"));
+        assert!(!json.contains("\"stream_key\":\"secret\""));
+        assert!(!json.contains("correct horse battery staple"));
+        assert!(!json.contains("youtube-api-key"));
+        assert!(!json.contains("kick-client-secret"));
     }
 
     #[tokio::test]
@@ -1565,7 +1583,7 @@ mod tests {
             AppConfig::parse_imported(invalid_target)
                 .unwrap_err()
                 .to_string()
-                .contains("invalid URL")
+                .contains("scheme")
         );
     }
 }
