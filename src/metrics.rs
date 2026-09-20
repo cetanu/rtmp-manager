@@ -3,6 +3,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use tokio::sync::watch;
 
 pub struct Metrics {
@@ -11,10 +12,11 @@ pub struct Metrics {
     last_sample_ingest_bytes: AtomicU64,
     target_bitrates: RwLock<HashMap<String, Arc<TargetBitrate>>>,
     history: RwLock<VecDeque<MetricsSample>>,
+    history_window: Duration,
     samples: watch::Sender<Option<MetricsSample>>,
 }
 
-const HISTORY_SECONDS: usize = 300;
+const HISTORY_WINDOW: Duration = Duration::from_secs(300);
 
 #[derive(Default)]
 pub struct TargetBitrate {
@@ -36,19 +38,24 @@ pub struct MetricsSample {
 
 impl Default for Metrics {
     fn default() -> Self {
+        Self::with_history_window(HISTORY_WINDOW)
+    }
+}
+
+impl Metrics {
+    pub fn with_history_window(history_window: Duration) -> Self {
         let (samples, _) = watch::channel(None);
         Self {
             ingest_bytes: AtomicU64::new(0),
             ingest_bps: AtomicU64::new(0),
             last_sample_ingest_bytes: AtomicU64::new(0),
             target_bitrates: RwLock::new(HashMap::new()),
-            history: RwLock::new(VecDeque::with_capacity(HISTORY_SECONDS)),
+            history: RwLock::new(VecDeque::new()),
+            history_window,
             samples,
         }
     }
-}
 
-impl Metrics {
     pub fn register_target(&self, name: String) -> Arc<TargetBitrate> {
         let bitrate = Arc::new(TargetBitrate::default());
         self.target_bitrates
@@ -93,7 +100,11 @@ impl Metrics {
         };
         {
             let mut history = self.history.write().unwrap();
-            if history.len() == HISTORY_SECONDS {
+            let oldest_timestamp = timestamp_ms.saturating_sub(self.history_window.as_millis());
+            while history
+                .front()
+                .is_some_and(|sample| sample.timestamp_ms < oldest_timestamp)
+            {
                 history.pop_front();
             }
             history.push_back(sample.clone());
