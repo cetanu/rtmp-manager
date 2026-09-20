@@ -154,7 +154,13 @@ async fn handle_srt_session(
         }
     };
 
-    let mut stdin = bridge_child.stdin.take().expect("piped stdin");
+    let mut stdin = match require_piped_stdin(bridge_child.stdin.take()) {
+        Ok(stdin) => stdin,
+        Err(error) => {
+            error!(%error, "SRT bridge FFmpeg did not provide a piped stdin");
+            return;
+        }
+    };
     let secrets = [rtmp_target.clone(), stream_key.clone()];
 
     let stderr_task = bridge_child.stderr.take().map(|stderr| {
@@ -207,6 +213,10 @@ async fn handle_srt_session(
     info!(client_ip = %client_ip, "SRT ingest session ended");
 }
 
+fn require_piped_stdin<T>(stdin: Option<T>) -> Result<T> {
+    stdin.context("FFmpeg stdin was not piped")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,6 +265,11 @@ mod tests {
         ));
         assert!(!validate_srt_stream_id("", "my-secret-key"));
         assert!(!validate_srt_stream_id("my-secret-key", ""));
+    }
+
+    #[test]
+    fn missing_ffmpeg_stdin_is_reported_without_panicking() {
+        assert!(require_piped_stdin::<()>(None).is_err());
     }
 
     #[tokio::test]

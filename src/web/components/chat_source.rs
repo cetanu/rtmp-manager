@@ -59,10 +59,12 @@ const SOURCE_STYLES: [(Source, SourceStyle); 4] = [
 ];
 
 fn source_style(source: Source) -> &'static SourceStyle {
-    SOURCE_STYLES
-        .iter()
-        .find_map(|(candidate, style)| (*candidate == source).then_some(style))
-        .expect("every chat source must have a style")
+    match source {
+        Source::Twitch => &SOURCE_STYLES[0].1,
+        Source::YouTube => &SOURCE_STYLES[1].1,
+        Source::Kick => &SOURCE_STYLES[2].1,
+        Source::X => &SOURCE_STYLES[3].1,
+    }
 }
 
 pub(crate) fn source_color(source: Source) -> &'static str {

@@ -91,9 +91,11 @@ fn install_systemd(work_dir: &Path, config_path: &Path) -> Result<()> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let (_, log_layer) = log_buffer::init();
-    let log_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "rtmp_proxy=info,rtmp_rs=off".into())
-        .add_directive("rtmp_rs=off".parse().expect("valid log directive"));
+    let mut log_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "rtmp_proxy=info,rtmp_rs=off".into());
+    if let Ok(directive) = "rtmp_rs=off".parse() {
+        log_filter = log_filter.add_directive(directive);
+    }
     tracing_subscriber::registry()
         .with(log_filter)
         .with(tracing_subscriber::fmt::layer())

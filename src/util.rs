@@ -39,19 +39,25 @@ pub fn redact_secrets(text: &str, secrets: &[String]) -> String {
 }
 
 fn redact_urls(text: &str) -> String {
-    static URL_PATTERN: OnceLock<Regex> = OnceLock::new();
-    let pattern = URL_PATTERN.get_or_init(|| {
-        Regex::new(r#"(?i)(rtmps?|srt)://[^\s"'<>]+"#).expect("valid stream URL pattern")
-    });
+    static URL_PATTERN: OnceLock<Option<Regex>> = OnceLock::new();
+    let Some(pattern) = URL_PATTERN
+        .get_or_init(|| Regex::new(r#"(?i)(rtmps?|srt)://[^\s"'<>]+"#).ok())
+        .as_ref()
+    else {
+        return text.to_owned();
+    };
 
     pattern
         .replace_all(text, |captures: &regex::Captures<'_>| {
-            let url = captures
-                .get(0)
-                .expect("URL match has a full capture")
-                .as_str();
+            let Some(url_match) = captures.get(0) else {
+                return String::new();
+            };
+            let url = url_match.as_str();
             let (url, trailing) = trim_url_punctuation(url);
-            let scheme = &url[..url.find("://").expect("URL match has a scheme")];
+            let Some(scheme_end) = url.find("://") else {
+                return url.to_string();
+            };
+            let scheme = &url[..scheme_end];
             let authority_start = scheme.len() + 3;
             let authority_end = url[authority_start..]
                 .find(['/', '?', '#'])
