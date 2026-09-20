@@ -8,7 +8,8 @@ use reqwest::{Client, RequestBuilder, Response};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
-use std::sync::OnceLock;
+use std::sync::LazyLock;
+use time::{Duration as TimeDuration, OffsetDateTime, format_description::well_known::Rfc3339};
 
 const KICK_PUBLIC_KEY: &str = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq/+l1WnlRrGSolDMA+A86rAhMbQGmQ2SapVcGM3zq8ANXjnhDWocMqfWcTd95btDydITa10kDvHzw9WQOqp2MZI7ZyrfzJuz5nhTPCiJwTwnEtWft7nV14BYRDHvlfqPUaZ+1KR4OCaO/wWIk/rQL/TjY0M70gse8rlBkbo2a8rKhu69RQTRsoaf4DVhDPEeSeI5jVrRDGAMGL3cGuyY6CLKGdjVEM78g3JfYOvDU/RvfqD7L89TZ3iN94jrmWdGz34JNlEI5hqK8dd7C5EFBEbZ5jgB8s8ReQV8H+MkuffjdAj3ajDDX3DOJMIut1lBrUVD1AaSrGCKHooWoL2etwIDAQAB";
 
@@ -77,6 +78,7 @@ struct CreatedSubscription {
 const KICK_TOKEN_URL: &str = "https://id.kick.com/oauth/token";
 const KICK_CHANNELS_URL: &str = "https://api.kick.com/public/v1/channels";
 const KICK_SUBSCRIPTIONS_URL: &str = "https://api.kick.com/public/v1/events/subscriptions";
+const KICK_TIMESTAMP_TOLERANCE: TimeDuration = TimeDuration::seconds(5 * 60);
 
 pub fn verify_webhook(
     message_id: &str,
@@ -95,18 +97,33 @@ pub fn verify_webhook(
 }
 
 fn kick_public_key() -> Result<&'static ParsedPublicKey> {
-    static PUBLIC_KEY: OnceLock<Result<ParsedPublicKey, String>> = OnceLock::new();
-
-    match PUBLIC_KEY.get_or_init(|| {
+    static PUBLIC_KEY: LazyLock<Result<ParsedPublicKey, String>> = LazyLock::new(|| {
         let public_key = STANDARD
             .decode(KICK_PUBLIC_KEY)
             .map_err(|error| format!("Kick public key is invalid base64: {error}"))?;
         ParsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, public_key)
             .map_err(|error| format!("Kick public key is invalid: {error}"))
-    }) {
+    });
+
+    match &*PUBLIC_KEY {
         Ok(public_key) => Ok(public_key),
         Err(error) => Err(anyhow::anyhow!(error.clone())),
     }
+}
+
+fn validate_timestamp(timestamp: &str) -> Result<()> {
+    let sent_at = OffsetDateTime::parse(timestamp, &Rfc3339)
+        .context("Kick webhook timestamp is not valid RFC3339")?;
+    let now = OffsetDateTime::now_utc();
+    let age = if sent_at > now {
+        sent_at - now
+    } else {
+        now - sent_at
+    };
+    if age > KICK_TIMESTAMP_TOLERANCE {
+        bail!("Kick webhook timestamp is outside the five-minute replay window");
+    }
+    Ok(())
 }
 
 pub fn parse_chat_event(body: &[u8]) -> Result<IncomingChatMessage> {
@@ -137,6 +154,7 @@ pub fn process_event(config: &ChatSettings, event: &WebhookEvent) -> Result<Inco
     let signature = event
         .header("kick-event-signature")
         .context("Kick webhook is missing its signature")?;
+    validate_timestamp(timestamp)?;
     verify_webhook(message_id, timestamp, &event.body, signature)?;
     if event.header("kick-event-type") != Some("chat.message.sent")
         || event.header("kick-event-version") != Some("1")
@@ -365,6 +383,17 @@ mod tests {
         let signature = STANDARD.encode([0_u8; 256]);
         let error = verify_webhook("message", "timestamp", b"{}", &signature).unwrap_err();
         assert!(error.to_string().contains("signature verification failed"));
+    }
+
+    #[test]
+    fn rejects_stale_and_invalid_timestamps() {
+        assert!(validate_timestamp("not-a-timestamp").is_err());
+        assert!(validate_timestamp("2020-01-01T00:00:00Z").is_err());
+
+        let current = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .expect("current timestamp should format");
+        assert!(validate_timestamp(&current).is_ok());
     }
 
     #[test]

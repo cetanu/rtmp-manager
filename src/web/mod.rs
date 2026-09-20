@@ -52,6 +52,7 @@ pub(crate) const APP_NAVIGATION_SCRIPT: Asset = asset!("static/app-navigation.js
 pub(crate) const LOG_VIEWER_SCRIPT: Asset = asset!("static/log-viewer.js");
 pub(crate) const METRICS_CHARTS_SCRIPT: Asset = asset!("static/metrics-charts.js");
 pub(crate) const SECRET_FIELDS_SCRIPT: Asset = asset!("static/secret-fields.js");
+const MAX_WEBHOOK_SIZE: usize = 128 * 1024;
 
 pub async fn run_web_server(
     app_handle: AppHandle,
@@ -63,6 +64,7 @@ pub async fn run_web_server(
         .discover()
         .runtime()
         .assets(AssetBundle::load()?)
+        .layer(topcoat::router::BodyLimit::max(MAX_WEBHOOK_SIZE).at("/api/webhook"))
         .app_context(app_handle)
         .build();
 
@@ -571,7 +573,10 @@ async fn service_logs(
 
 #[route(POST "/api/webhook")]
 async fn receive_webhook(cx: &Cx, body: Bytes) -> Result<Response> {
-    const MAX_WEBHOOK_SIZE: usize = 128 * 1024;
+    if body.len() > MAX_WEBHOOK_SIZE {
+        return Err(bad_request("Webhook body exceeds 128 KiB").into());
+    }
+
     let app: &AppHandle = app_context(cx);
     let headers = headers(cx)
         .iter()
@@ -588,14 +593,6 @@ async fn receive_webhook(cx: &Cx, body: Bytes) -> Result<Response> {
         body: body.to_vec(),
     };
     let platform = Platform::from_event(&event);
-    app.webhook_audit.record(
-        platform.map_or("unknown", Platform::as_str),
-        event.header("content-type"),
-        &event.body,
-    );
-    if event.body.len() > MAX_WEBHOOK_SIZE {
-        return Err(bad_request("Webhook body exceeds 128 KiB").into());
-    }
     let settings = app.config.get().chat.clone();
     let Some(platform) = platform else {
         tracing::warn!("Rejected webhook without a recognized platform signature");
@@ -618,10 +615,29 @@ async fn receive_webhook(cx: &Cx, body: Bytes) -> Result<Response> {
         },
     };
     if let Some(message) = message {
-        app.chat
+        let outcome = app
+            .chat
             .enqueue(message)
             .await
             .map_err(internal_server_error)?;
+        match outcome {
+            crate::chat::EnqueueOutcome::Accepted | crate::chat::EnqueueOutcome::Dropped => {
+                app.webhook_audit.record(
+                    platform.as_str(),
+                    event.header("content-type"),
+                    &event.body,
+                );
+            }
+            crate::chat::EnqueueOutcome::Duplicate => {
+                tracing::info!(
+                    platform = platform.as_str(),
+                    "Ignored duplicate webhook event"
+                );
+            }
+        }
+    } else {
+        app.webhook_audit
+            .record(platform.as_str(), event.header("content-type"), &event.body);
     }
     tracing::info!(platform = platform.as_str(), body_bytes, "Webhook accepted");
     topcoat::router::StatusCode::OK.into_response(cx)
@@ -730,6 +746,7 @@ mod tests {
             .discover()
             .runtime()
             .assets(test_asset_bundle())
+            .layer(topcoat::router::BodyLimit::max(MAX_WEBHOOK_SIZE).at("/api/webhook"))
             .app_context(app_handle.clone())
             .build();
 
@@ -879,6 +896,7 @@ mod tests {
             .discover()
             .runtime()
             .assets(test_asset_bundle())
+            .layer(topcoat::router::BodyLimit::max(MAX_WEBHOOK_SIZE).at("/api/webhook"))
             .app_context(app_handle.clone())
             .build();
 
