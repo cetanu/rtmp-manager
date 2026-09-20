@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.18](https://github.com/cetanu/rtmp-manager/compare/v0.3.17...v0.3.18) - 2026-09-20
+
+### Fixed
+
+- use toggle for youtube polling state
+- *(logging)* preserve context when redacting URLs
+- *(overlay)* validate and bound query parameters
+- *(logging)* avoid initialization panic and record typed fields
+- *(config)* make form updates explicit and preserve target secrets
+
+### Other
+
+- clippy lints
+- deduplicate chat rendering and webhook dispatch
+- *(youtube)* narrow parser helper visibility
+- *(kick)* centralize API request handling
+- *(config)* share chat flag updates
+- *(chat)* centralize actor command calls
+- *(metrics)* retain history by time window
+- *(web)* share chat source rendering helpers
+- *(chat)* centralize shared ingest state
+- *(chat)* decouple webhook events from server state
+- *(web)* apply component formatting
+- *(chat)* harden chat ingestion and use typed states
+
 ## [0.3.17](https://github.com/cetanu/rtmp-manager/compare/v0.3.16...v0.3.17) - 2026-09-19
 
 ### Added
