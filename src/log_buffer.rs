@@ -1,8 +1,9 @@
+use parking_lot::Mutex;
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use tokio::sync::broadcast;
 use tracing::{Event, Subscriber};
 use tracing_subscriber::Layer;
@@ -49,12 +50,7 @@ impl LogBuffer {
     }
 
     pub fn snapshot(&self) -> Vec<LogEntry> {
-        self.entries
-            .lock()
-            .expect("log buffer lock poisoned")
-            .iter()
-            .cloned()
-            .collect()
+        self.entries.lock().iter().cloned().collect()
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<LogEntry> {
@@ -63,7 +59,7 @@ impl LogBuffer {
 
     fn push(&self, mut entry: LogEntry) {
         entry.id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let mut entries = self.entries.lock().expect("log buffer lock poisoned");
+        let mut entries = self.entries.lock();
         if entries.len() == CAPACITY {
             entries.pop_front();
         }

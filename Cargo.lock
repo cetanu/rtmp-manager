@@ -2006,6 +2006,7 @@ dependencies = [
  "clap",
  "futures-util",
  "hmac",
+ "parking_lot",
  "regex",
  "reqwest",
  "rtmp-rs",

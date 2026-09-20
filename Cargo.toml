@@ -27,6 +27,7 @@ toasty = { version = "0.9", features = ["sqlite"] }
 base64 = "0.22.1"
 futures-util = "0.3"
 regex = "1.10"
+parking_lot = "0.12"
 aws-lc-rs = "1.17.3"
 srt-tokio = "0.4.4"
 

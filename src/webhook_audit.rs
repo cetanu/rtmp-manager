@@ -1,5 +1,5 @@
+use parking_lot::Mutex;
 use std::collections::VecDeque;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const CAPACITY: usize = 10;
@@ -41,7 +41,7 @@ impl WebhookAudit {
                 .into_owned(),
             body_bytes: body.len(),
         };
-        let mut entries = self.entries.lock().expect("webhook audit lock poisoned");
+        let mut entries = self.entries.lock();
         if entries.len() == CAPACITY {
             entries.pop_front();
         }
@@ -49,13 +49,7 @@ impl WebhookAudit {
     }
 
     pub fn snapshot(&self) -> Vec<WebhookAuditEntry> {
-        self.entries
-            .lock()
-            .expect("webhook audit lock poisoned")
-            .iter()
-            .rev()
-            .cloned()
-            .collect()
+        self.entries.lock().iter().rev().cloned().collect()
     }
 }
 

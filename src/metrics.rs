@@ -1,7 +1,7 @@
+use parking_lot::RwLock;
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::sync::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::watch;
@@ -60,20 +60,18 @@ impl Metrics {
         let bitrate = Arc::new(TargetBitrate::default());
         self.target_bitrates
             .write()
-            .unwrap()
             .insert(name, Arc::clone(&bitrate));
         bitrate
     }
 
     pub fn unregister_target(&self, name: &str) {
-        self.target_bitrates.write().unwrap().remove(name);
+        self.target_bitrates.write().remove(name);
     }
 
     pub fn current_target_bitrates(&self) -> Vec<TargetBitrateSample> {
         let mut samples = self
             .target_bitrates
             .read()
-            .unwrap()
             .iter()
             .map(|(name, bitrate)| TargetBitrateSample {
                 name: name.clone(),
@@ -99,7 +97,7 @@ impl Metrics {
             targets: self.current_target_bitrates(),
         };
         {
-            let mut history = self.history.write().unwrap();
+            let mut history = self.history.write();
             let oldest_timestamp = timestamp_ms.saturating_sub(self.history_window.as_millis());
             while history
                 .front()
@@ -113,7 +111,7 @@ impl Metrics {
     }
 
     pub fn history(&self) -> Vec<MetricsSample> {
-        self.history.read().unwrap().iter().cloned().collect()
+        self.history.read().iter().cloned().collect()
     }
 
     pub fn subscribe(&self) -> watch::Receiver<Option<MetricsSample>> {
