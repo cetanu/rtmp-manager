@@ -31,12 +31,12 @@ pub struct StreamStatus {
     pub state: StreamState,
 }
 
-pub fn create_preview_dir(path: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(path)?;
+pub async fn create_preview_dir(path: &Path) -> std::io::Result<()> {
+    tokio::fs::create_dir_all(path).await?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+        tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).await?;
     }
     Ok(())
 }

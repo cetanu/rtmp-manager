@@ -133,7 +133,7 @@ impl StreamActor {
         if self.staged.is_some() {
             bail!("Another stream is already active");
         }
-        create_preview_dir(&self.preview_dir)?;
+        create_preview_dir(&self.preview_dir).await?;
 
         let source_url = format!("rtmp://127.0.0.1:{}/live/{stream_key}", self.listen_port);
         let playlist = self.preview_dir.join("index.m3u8");
@@ -313,7 +313,7 @@ impl StreamHandle {
         let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let preview_dir =
             std::env::temp_dir().join(format!("rtmp-manager-hls-{}-{unique}", std::process::id()));
-        create_preview_dir(&preview_dir)?;
+        create_preview_dir(&preview_dir).await?;
 
         let (status_tx, status_rx) = watch::channel(StreamStatus {
             state: StreamState::Offline,
