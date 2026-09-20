@@ -167,6 +167,7 @@ struct StoredChatMessage {
 
 #[derive(Debug, toasty::Model)]
 #[table = "chat_seen"]
+#[index(source, external_id)]
 struct StoredChatSeen {
     #[key]
     #[auto]
@@ -277,14 +278,14 @@ impl ChatInbox {
         )
         .await?;
 
-        let mut messages = ordered_messages(&mut transaction).await?;
-        let message_count = messages.len();
+        let message_count = count_messages(&mut transaction).await?;
         if message_count >= self.capacity {
             increment_dropped(&mut transaction, 1).await?;
             if self.capacity == 1 {
                 transaction.commit().await?;
                 return Ok(EnqueueOutcome::Dropped);
             }
+            let mut messages = ordered_messages(&mut transaction, 2).await?;
             remove_oldest_waiting(&mut messages, &mut transaction).await?;
         }
 
@@ -305,7 +306,7 @@ impl ChatInbox {
 
     pub async fn acknowledge(&mut self, expected_id: u64) -> Result<bool> {
         let mut database = self.database.clone();
-        let Some(message) = ordered_messages(&mut database).await?.into_iter().next() else {
+        let Some(message) = ordered_messages(&mut database, 1).await?.into_iter().next() else {
             return Ok(false);
         };
         if message.id != expected_id {
@@ -317,11 +318,10 @@ impl ChatInbox {
 
     pub async fn snapshot(&self) -> Result<ChatInboxSnapshot> {
         let mut database = self.database.clone();
-        let messages = ordered_messages(&mut database).await?;
-        let queued = messages.len();
+        let messages = ordered_messages(&mut database, INBOX_PREVIEW_LIMIT).await?;
+        let queued = count_messages(&mut database).await?;
         let messages = messages
             .iter()
-            .take(INBOX_PREVIEW_LIMIT)
             .map(chat_message_from_model)
             .collect::<Result<_>>()?;
         let dropped = load_state(&mut database).await?.dropped;
@@ -342,11 +342,9 @@ impl ChatInbox {
     async fn trim_to_capacity(&mut self) -> Result<()> {
         let mut database = self.database.clone();
         let mut transaction = database.transaction().await?;
-        let mut messages = ordered_messages(&mut transaction).await?;
-        let excess = messages.len().saturating_sub(self.capacity);
-        for _ in 0..excess {
-            remove_oldest_waiting(&mut messages, &mut transaction).await?;
-        }
+        let message_count = count_messages(&mut transaction).await?;
+        let excess = message_count.saturating_sub(self.capacity);
+        delete_oldest_waiting_messages(&mut transaction, excess).await?;
         if excess > 0 {
             increment_dropped(&mut transaction, excess).await?;
         }
@@ -387,11 +385,48 @@ async fn remove_oldest_waiting(
     Ok(())
 }
 
-async fn ordered_messages(executor: &mut dyn Executor) -> Result<Vec<StoredChatMessage>> {
+async fn ordered_messages(
+    executor: &mut dyn Executor,
+    limit: usize,
+) -> Result<Vec<StoredChatMessage>> {
     Ok(StoredChatMessage::all()
         .order_by(StoredChatMessage::fields().id().asc())
+        .limit(limit)
         .exec(executor)
         .await?)
+}
+
+async fn count_messages(executor: &mut dyn Executor) -> Result<usize> {
+    let count = StoredChatMessage::all().count().exec(executor).await?;
+    usize::try_from(count).context("Chat message count exceeds platform limits")
+}
+
+async fn delete_oldest_waiting_messages(executor: &mut dyn Executor, amount: usize) -> Result<()> {
+    if amount == 0 {
+        return Ok(());
+    }
+
+    let current = ordered_messages(executor, 1)
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Cannot evict from an empty chat inbox"))?;
+    let boundary = StoredChatMessage::all()
+        .order_by(StoredChatMessage::fields().id().asc())
+        .limit(1)
+        .offset(amount + 1)
+        .exec(executor)
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Chat inbox eviction boundary is missing"))?;
+
+    toasty::sql::statement("DELETE FROM chat_messages WHERE id > ?1 AND id < ?2")
+        .bind(current.id)
+        .bind(boundary.id)
+        .exec(executor)
+        .await?;
+    Ok(())
 }
 
 async fn increment_dropped(executor: &mut dyn Executor, amount: usize) -> Result<()> {
@@ -402,13 +437,22 @@ async fn increment_dropped(executor: &mut dyn Executor, amount: usize) -> Result
 }
 
 async fn trim_seen(executor: &mut dyn Executor, capacity: usize) -> Result<()> {
-    let mut seen = StoredChatSeen::all()
+    let Some(boundary) = StoredChatSeen::all()
         .order_by(StoredChatSeen::fields().id().asc())
+        .limit(1)
+        .offset(capacity)
+        .exec(executor)
+        .await?
+        .into_iter()
+        .next()
+    else {
+        return Ok(());
+    };
+
+    toasty::sql::statement("DELETE FROM chat_seen WHERE id < ?1")
+        .bind(boundary.id)
         .exec(executor)
         .await?;
-    while seen.len() > capacity {
-        seen.remove(0).delete().exec(executor).await?;
-    }
     Ok(())
 }
 
