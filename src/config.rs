@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{Mutex, watch};
 
+pub const MAX_TARGET_COUNT: usize = 10;
+pub const MAX_TEST_STREAM_DURATION_SECS: u64 = 300;
+
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Validate)]
 pub struct ServerSettings {
     #[serde(default = "default_listen")]
@@ -25,7 +28,7 @@ pub struct ServerSettings {
 
     #[serde(default = "default_test_stream_duration_secs")]
     #[validate(minimum = 1)]
-    #[validate(maximum = 86_400)]
+    #[validate(maximum = MAX_TEST_STREAM_DURATION_SECS)]
     pub test_stream_duration_secs: u64,
 
     #[serde(default)]
@@ -328,6 +331,9 @@ impl AppConfig {
             && !channel.trim().is_empty()
         {
             crate::chat::youtube::validate_channel_input(channel)?;
+        }
+        if self.targets.len() > MAX_TARGET_COUNT {
+            bail!("At most {MAX_TARGET_COUNT} targets may be configured");
         }
         for target in &self.targets {
             if target.enabled {
@@ -1141,6 +1147,25 @@ mod tests {
         assert!(!json.contains("correct horse battery staple"));
         assert!(!json.contains("youtube-api-key"));
         assert!(!json.contains("kick-client-secret"));
+    }
+
+    #[test]
+    fn rejects_excessive_test_duration_and_target_count() {
+        let mut config = AppConfig::default();
+        config.server.test_stream_duration_secs = MAX_TEST_STREAM_DURATION_SECS + 1;
+        assert!(config.validate().is_err());
+
+        config.server.test_stream_duration_secs = 15;
+        config.targets = (0..=MAX_TARGET_COUNT)
+            .map(|index| TargetConfig {
+                name: format!("target-{index}"),
+                url: "rtmp://192.0.2.10/live".into(),
+                stream_key: String::new(),
+                public_url: None,
+                enabled: false,
+            })
+            .collect();
+        assert!(config.validate().is_err());
     }
 
     #[tokio::test]

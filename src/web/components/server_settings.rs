@@ -67,7 +67,7 @@ pub async fn server_settings(cx: &Cx) -> Result<impl View> {
                                 name="server[test_stream_duration_secs]"
                                 value=(config.server.test_stream_duration_secs.to_string())
                                 min="1"
-                                max="86400"
+                                max="300"
                                 step="1"
                             }
                         )

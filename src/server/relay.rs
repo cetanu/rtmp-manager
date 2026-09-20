@@ -1,13 +1,19 @@
-use crate::config::TargetConfig;
+use crate::config::{MAX_TARGET_COUNT, MAX_TEST_STREAM_DURATION_SECS, TargetConfig};
 use crate::metrics::Metrics;
 use crate::util::redact_secrets;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::watch;
+use tokio::sync::{Semaphore, watch};
 use tokio::task::JoinHandle;
+
+const MAX_CONCURRENT_FFMPEG_PROCESSES: usize = MAX_TARGET_COUNT;
+// Deployment-level CPU and memory cgroup limits remain a follow-up under GOAL-302.
+static FFMPEG_SLOTS: LazyLock<Arc<Semaphore>> =
+    LazyLock::new(|| Arc::new(Semaphore::new(MAX_CONCURRENT_FFMPEG_PROCESSES)));
 
 pub struct RelayProcess {
     pub cancel: watch::Sender<bool>,
@@ -47,6 +53,18 @@ pub fn run_direct_test(
     duration_secs: u64,
     targets: Vec<TargetConfig>,
 ) -> bool {
+    if duration_secs == 0
+        || duration_secs > MAX_TEST_STREAM_DURATION_SECS
+        || targets.is_empty()
+        || targets.len() > MAX_TARGET_COUNT
+    {
+        tracing::warn!(
+            duration_secs,
+            target_count = targets.len(),
+            "Rejected direct test stream outside configured resource limits"
+        );
+        return false;
+    }
     if running.swap(true, Ordering::SeqCst) {
         tracing::warn!("Direct test stream is already in progress; ignoring duplicate request");
         return false;
@@ -70,6 +88,13 @@ pub fn run_direct_test(
         for target in targets {
             let metrics = Arc::clone(&metrics);
             tasks.spawn(async move {
+                let _ffmpeg_slot = match FFMPEG_SLOTS.clone().acquire_owned().await {
+                    Ok(slot) => slot,
+                    Err(error) => {
+                        tracing::error!(%error, "FFmpeg process limiter closed");
+                        return;
+                    }
+                };
                 let bitrate = metrics.register_target(target.name.clone());
                 let destination = target_destination(&target);
                 let secrets = [destination.clone(), target.stream_key.clone()];
@@ -299,6 +324,13 @@ async fn supervise_relay(
             break;
         }
         attempt += 1;
+        let _ffmpeg_slot = match FFMPEG_SLOTS.clone().acquire_owned().await {
+            Ok(slot) => slot,
+            Err(error) => {
+                tracing::error!(%error, "FFmpeg process limiter closed");
+                break;
+            }
+        };
         let started_at = tokio::time::Instant::now();
         let child = tokio::process::Command::new("ffmpeg")
             .args([
@@ -563,6 +595,32 @@ mod tests {
 
         running.store(false, Ordering::SeqCst);
         assert!(!running.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn direct_test_rejects_resource_exhausting_inputs() {
+        let metrics = Arc::new(Metrics::default());
+        let running = Arc::new(AtomicBool::new(false));
+        let target = TargetConfig {
+            name: "test".into(),
+            url: "rtmp://192.0.2.10/live".into(),
+            stream_key: String::new(),
+            public_url: None,
+            enabled: true,
+        };
+
+        assert!(!run_direct_test(
+            Arc::clone(&metrics),
+            Arc::clone(&running),
+            MAX_TEST_STREAM_DURATION_SECS + 1,
+            vec![target.clone()],
+        ));
+        assert!(!run_direct_test(
+            metrics,
+            running,
+            15,
+            vec![target; MAX_TARGET_COUNT + 1],
+        ));
     }
 
     #[test]

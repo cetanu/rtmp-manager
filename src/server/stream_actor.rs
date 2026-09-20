@@ -1,4 +1,4 @@
-use crate::config::{AppConfig, TargetConfig};
+use crate::config::{AppConfig, MAX_TARGET_COUNT, MAX_TEST_STREAM_DURATION_SECS, TargetConfig};
 use crate::metrics::Metrics;
 use crate::notifications::{NotificationDispatcher, NotificationTarget};
 use crate::server::preview::{
@@ -401,6 +401,14 @@ impl StreamHandle {
     }
 
     pub fn run_test_stream(&self, duration_secs: u64, targets: Vec<TargetConfig>) -> Result<()> {
+        anyhow::ensure!(
+            (1..=MAX_TEST_STREAM_DURATION_SECS).contains(&duration_secs),
+            "Test stream duration must be between 1 and {MAX_TEST_STREAM_DURATION_SECS} seconds"
+        );
+        anyhow::ensure!(
+            !targets.is_empty() && targets.len() <= MAX_TARGET_COUNT,
+            "Test stream must have between 1 and {MAX_TARGET_COUNT} targets"
+        );
         if run_direct_test(
             Arc::clone(&self.metrics),
             Arc::clone(&self.test_stream_running),
