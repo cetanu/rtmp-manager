@@ -53,6 +53,8 @@ pub(crate) const LOG_VIEWER_SCRIPT: Asset = asset!("static/log-viewer.js");
 pub(crate) const METRICS_CHARTS_SCRIPT: Asset = asset!("static/metrics-charts.js");
 pub(crate) const SECRET_FIELDS_SCRIPT: Asset = asset!("static/secret-fields.js");
 const MAX_WEBHOOK_SIZE: usize = 128 * 1024;
+const MAX_CONFIG_BODY_SIZE: usize = 1024 * 1024;
+const MAX_CHAT_TEST_BODY_SIZE: usize = 64 * 1024;
 
 pub async fn run_web_server(
     app_handle: AppHandle,
@@ -65,6 +67,10 @@ pub async fn run_web_server(
         .runtime()
         .assets(AssetBundle::load()?)
         .layer(topcoat::router::BodyLimit::max(MAX_WEBHOOK_SIZE).at("/api/webhook"))
+        .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config"))
+        .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import"))
+        .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import-file"))
+        .layer(topcoat::router::BodyLimit::max(MAX_CHAT_TEST_BODY_SIZE).at("/api/chat/test"))
         .app_context(app_handle)
         .build();
 
@@ -348,15 +354,10 @@ async fn import_config(cx: &Cx, body: Bytes) -> Result<Response> {
 
 #[route(POST "/api/config/import-file")]
 async fn import_config_file(cx: &Cx, mut multipart: Multipart) -> Result<Response> {
-    const MAX_CONFIG_SIZE: usize = 1024 * 1024;
-
     let mut config_bytes = None;
     while let Some(field) = multipart.next_field().await? {
         if field.name() == Some("config_file") {
             let bytes = field.bytes().await?;
-            if bytes.len() > MAX_CONFIG_SIZE {
-                return Err(bad_request("JSON configuration must be no larger than 1 MiB").into());
-            }
             config_bytes = Some(bytes);
             break;
         }
@@ -747,6 +748,12 @@ mod tests {
             .runtime()
             .assets(test_asset_bundle())
             .layer(topcoat::router::BodyLimit::max(MAX_WEBHOOK_SIZE).at("/api/webhook"))
+            .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config"))
+            .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import"))
+            .layer(
+                topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import-file"),
+            )
+            .layer(topcoat::router::BodyLimit::max(MAX_CHAT_TEST_BODY_SIZE).at("/api/chat/test"))
             .app_context(app_handle.clone())
             .build();
 
@@ -897,6 +904,12 @@ mod tests {
             .runtime()
             .assets(test_asset_bundle())
             .layer(topcoat::router::BodyLimit::max(MAX_WEBHOOK_SIZE).at("/api/webhook"))
+            .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config"))
+            .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import"))
+            .layer(
+                topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import-file"),
+            )
+            .layer(topcoat::router::BodyLimit::max(MAX_CHAT_TEST_BODY_SIZE).at("/api/chat/test"))
             .app_context(app_handle.clone())
             .build();
 
@@ -905,6 +918,20 @@ mod tests {
         let server_task = tokio::spawn(async move {
             let _ = topcoat::serve(listener, app).await;
         });
+
+        for path_and_limit in [
+            ("/api/config", MAX_CONFIG_BODY_SIZE),
+            ("/api/config/import", MAX_CONFIG_BODY_SIZE),
+            ("/api/chat/test", MAX_CHAT_TEST_BODY_SIZE),
+        ] {
+            let response = client
+                .post(format!("http://{local_addr}{}", path_and_limit.0))
+                .body(vec![b'x'; path_and_limit.1 + 1])
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE);
+        }
 
         let html_content = client
             .get(format!("http://{local_addr}/chat"))
