@@ -532,7 +532,7 @@ mod tests {
         let detail = safe_ffmpeg_failure(stderr, &["private-key".to_owned()]);
         assert_eq!(
             detail,
-            "[RTMP_URL_REDACTED] Invalid data found when processing input"
+            "rtmp://example.test/[RTMP_URL_REDACTED]: Invalid data found when processing input"
         );
     }
 
