@@ -438,7 +438,7 @@ enum ChatCommand {
     },
     SetYouTubePolling {
         config: ChatSettings,
-        respond_to: oneshot::Sender<()>,
+        respond_to: oneshot::Sender<Result<()>>,
     },
     UpdateYouTubeStatus {
         state: YouTubeIngestState,
@@ -493,7 +493,7 @@ impl ChatActor {
                 }
                 ChatCommand::SetYouTubePolling { config, respond_to } => {
                     self.configure_youtube(&config, &handle).await;
-                    let _ = respond_to.send(());
+                    let _ = respond_to.send(Ok(()));
                 }
                 ChatCommand::UpdateYouTubeStatus {
                     state,
@@ -654,15 +654,14 @@ impl ChatHandle {
     }
 
     pub async fn enqueue(&self, message: IncomingChatMessage) -> Result<EnqueueOutcome> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(ChatCommand::Enqueue {
+        self.call(
+            |respond_to| ChatCommand::Enqueue {
                 message,
-                respond_to: tx,
-            })
-            .await
-            .map_err(|_| anyhow::anyhow!("Chat actor stopped"))?;
-        rx.await.context("Chat actor dropped enqueue response")?
+                respond_to,
+            },
+            "Chat actor dropped enqueue response",
+        )
+        .await
     }
 
     pub async fn enqueue_test(
@@ -704,51 +703,51 @@ impl ChatHandle {
     }
 
     pub async fn acknowledge(&self, expected_id: u64) -> Result<bool> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(ChatCommand::Acknowledge {
+        self.call(
+            |respond_to| ChatCommand::Acknowledge {
                 expected_id,
-                respond_to: tx,
-            })
-            .await
-            .map_err(|_| anyhow::anyhow!("Chat actor stopped"))?;
-        rx.await
-            .context("Chat actor dropped acknowledge response")?
+                respond_to,
+            },
+            "Chat actor dropped acknowledge response",
+        )
+        .await
     }
 
     pub async fn snapshot(&self) -> Result<ChatInboxSnapshot> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(ChatCommand::Snapshot { respond_to: tx })
-            .await
-            .map_err(|_| anyhow::anyhow!("Chat actor stopped"))?;
-        rx.await.context("Chat actor dropped snapshot response")?
+        self.call(
+            |respond_to| ChatCommand::Snapshot { respond_to },
+            "Chat actor dropped snapshot response",
+        )
+        .await
     }
 
     pub async fn apply_config(&self, config: ChatSettings) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(ChatCommand::ApplyConfig {
-                config,
-                respond_to: tx,
-            })
-            .await
-            .map_err(|_| anyhow::anyhow!("Chat actor stopped"))?;
-        rx.await
-            .context("Chat actor dropped apply_config response")?
+        self.call(
+            |respond_to| ChatCommand::ApplyConfig { config, respond_to },
+            "Chat actor dropped apply_config response",
+        )
+        .await
     }
 
     pub async fn set_youtube_polling(&self, config: ChatSettings) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
+        self.call(
+            |respond_to| ChatCommand::SetYouTubePolling { config, respond_to },
+            "Chat actor dropped set_youtube_polling response",
+        )
+        .await
+    }
+
+    async fn call<T>(
+        &self,
+        command: impl FnOnce(oneshot::Sender<Result<T>>) -> ChatCommand,
+        response_context: &'static str,
+    ) -> Result<T> {
+        let (respond_to, response) = oneshot::channel();
         self.sender
-            .send(ChatCommand::SetYouTubePolling {
-                config,
-                respond_to: tx,
-            })
+            .send(command(respond_to))
             .await
             .map_err(|_| anyhow::anyhow!("Chat actor stopped"))?;
-        rx.await
-            .context("Chat actor dropped set_youtube_polling response")
+        response.await.context(response_context)?
     }
 
     pub fn update_youtube_status(
