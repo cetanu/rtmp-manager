@@ -4,8 +4,10 @@ use crate::config::ChatSettings;
 use anyhow::{Context, Result, bail};
 use aws_lc_rs::signature::{ParsedPublicKey, RSA_PKCS1_2048_8192_SHA256};
 use base64::{Engine, engine::general_purpose::STANDARD};
-use reqwest::{Client, Response};
+use reqwest::{Client, RequestBuilder, Response};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 
 const KICK_PUBLIC_KEY: &str = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq/+l1WnlRrGSolDMA+A86rAhMbQGmQ2SapVcGM3zq8ANXjnhDWocMqfWcTd95btDydITa10kDvHzw9WQOqp2MZI7ZyrfzJuz5nhTPCiJwTwnEtWft7nV14BYRDHvlfqPUaZ+1KR4OCaO/wWIk/rQL/TjY0M70gse8rlBkbo2a8rKhu69RQTRsoaf4DVhDPEeSeI5jVrRDGAMGL3cGuyY6CLKGdjVEM78g3JfYOvDU/RvfqD7L89TZ3iN94jrmWdGz34JNlEI5hqK8dd7C5EFBEbZ5jgB8s8ReQV8H+MkuffjdAj3ajDDX3DOJMIut1lBrUVD1AaSrGCKHooWoL2etwIDAQAB";
 
@@ -168,18 +170,16 @@ async fn resolve_broadcaster_user_id(
     access_token: &str,
     channel: &str,
 ) -> Result<u64> {
-    let response = http_client
-        .get(KICK_CHANNELS_URL)
-        .bearer_auth(access_token)
-        .query(&[("slug", channel)])
-        .send()
-        .await
-        .with_context(|| format!("Failed to look up Kick channel '{channel}'"))?;
-    let response = require_success(response, "look up the Kick channel").await?;
-    let response: KickApiResponse<Vec<KickChannel>> = response
-        .json()
-        .await
-        .context("Kick returned an invalid channel lookup response")?;
+    let response: KickApiResponse<Vec<KickChannel>> = send_json(
+        http_client
+            .get(KICK_CHANNELS_URL)
+            .bearer_auth(access_token)
+            .query(&[("slug", channel)]),
+        format!("Failed to look up Kick channel '{channel}'"),
+        "look up the Kick channel",
+        "Kick returned an invalid channel lookup response",
+    )
+    .await?;
     response
         .data
         .into_iter()
@@ -200,21 +200,17 @@ async fn app_access_token(
     client_id: &str,
     client_secret: &str,
 ) -> Result<String> {
-    let response = http_client
-        .post(KICK_TOKEN_URL)
-        .form(&[
+    let token: KickAccessToken = send_json(
+        http_client.post(KICK_TOKEN_URL).form(&[
             ("grant_type", "client_credentials"),
             ("client_id", client_id),
             ("client_secret", client_secret),
-        ])
-        .send()
-        .await
-        .context("Failed to request a Kick app access token")?;
-    let response = require_success(response, "request a Kick app access token").await?;
-    let token: KickAccessToken = response
-        .json()
-        .await
-        .context("Kick returned an invalid app access token response")?;
+        ]),
+        "Failed to request a Kick app access token",
+        "request a Kick app access token",
+        "Kick returned an invalid app access token response",
+    )
+    .await?;
     if token.access_token.is_empty() {
         bail!("Kick returned an empty app access token");
     }
@@ -226,19 +222,17 @@ async fn list_subscriptions(
     access_token: &str,
     broadcaster_user_id: u64,
 ) -> Result<Vec<KickSubscription>> {
-    let response = http_client
-        .get(KICK_SUBSCRIPTIONS_URL)
-        .bearer_auth(access_token)
-        .query(&[("broadcaster_user_id", broadcaster_user_id)])
-        .send()
-        .await
-        .context("Failed to list Kick webhook subscriptions")?;
-    require_success(response, "list Kick webhook subscriptions")
-        .await?
-        .json::<KickApiResponse<Vec<KickSubscription>>>()
-        .await
-        .map(|response| response.data)
-        .context("Kick returned an invalid webhook subscription list")
+    let response: KickApiResponse<Vec<KickSubscription>> = send_json(
+        http_client
+            .get(KICK_SUBSCRIPTIONS_URL)
+            .bearer_auth(access_token)
+            .query(&[("broadcaster_user_id", broadcaster_user_id)]),
+        "Failed to list Kick webhook subscriptions",
+        "list Kick webhook subscriptions",
+        "Kick returned an invalid webhook subscription list",
+    )
+    .await?;
+    Ok(response.data)
 }
 
 async fn create_subscription(
@@ -254,18 +248,16 @@ async fn create_subscription(
             version: 1,
         }],
     };
-    let response = http_client
-        .post(KICK_SUBSCRIPTIONS_URL)
-        .bearer_auth(access_token)
-        .json(&request)
-        .send()
-        .await
-        .context("Failed to create the Kick chat webhook subscription")?;
-    let response = require_success(response, "create the Kick chat webhook subscription").await?;
-    let response: KickApiResponse<Vec<CreatedSubscription>> = response
-        .json()
-        .await
-        .context("Kick returned an invalid webhook subscription response")?;
+    let response: KickApiResponse<Vec<CreatedSubscription>> = send_json(
+        http_client
+            .post(KICK_SUBSCRIPTIONS_URL)
+            .bearer_auth(access_token)
+            .json(&request),
+        "Failed to create the Kick chat webhook subscription",
+        "create the Kick chat webhook subscription",
+        "Kick returned an invalid webhook subscription response",
+    )
+    .await?;
     let created = response
         .data
         .into_iter()
@@ -289,15 +281,38 @@ async fn delete_subscriptions(
         .iter()
         .map(|subscription| ("id", subscription.id.as_str()))
         .collect();
-    let response = http_client
-        .delete(KICK_SUBSCRIPTIONS_URL)
-        .bearer_auth(access_token)
-        .query(&query)
-        .send()
-        .await
-        .context("Failed to delete the Kick chat webhook subscription")?;
-    require_success(response, "delete the Kick chat webhook subscription").await?;
+    send_request(
+        http_client
+            .delete(KICK_SUBSCRIPTIONS_URL)
+            .bearer_auth(access_token)
+            .query(&query),
+        "Failed to delete the Kick chat webhook subscription",
+        "delete the Kick chat webhook subscription",
+    )
+    .await?;
     Ok(())
+}
+
+async fn send_json<T: DeserializeOwned>(
+    request: RequestBuilder,
+    send_context: impl Display + Send + Sync + 'static,
+    action: &str,
+    json_context: &'static str,
+) -> Result<T> {
+    send_request(request, send_context, action)
+        .await?
+        .json()
+        .await
+        .context(json_context)
+}
+
+async fn send_request(
+    request: RequestBuilder,
+    send_context: impl Display + Send + Sync + 'static,
+    action: &str,
+) -> Result<Response> {
+    let response = request.send().await.context(send_context)?;
+    require_success(response, action).await
 }
 
 async fn require_success(response: Response, action: &str) -> Result<Response> {
