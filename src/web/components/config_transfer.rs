@@ -58,7 +58,7 @@ pub async fn config_transfer(cx: &Cx) -> Result<impl View> {
 pub async fn exported_config(cx: &Cx, open: bool) -> Result<impl View> {
     let app: &AppHandle = app_context(cx);
     let config_json = if open {
-        Some(serde_json::to_string_pretty(&*app.config.get())?)
+        Some(app.config.export_json()?)
     } else {
         None
     };

@@ -1,5 +1,6 @@
 use crate::util::non_empty;
 use anyhow::{Context, Result, bail};
+use parking_lot::Mutex as ParkingMutex;
 use serde::{Deserialize, Serialize};
 use serde_valid::Validate;
 use std::fs;
@@ -741,6 +742,7 @@ pub struct ConfigHandle {
     store: ConfigStore,
     current: watch::Sender<Arc<AppConfig>>,
     update_lock: Arc<Mutex<()>>,
+    export_json_cache: Arc<ParkingMutex<Option<String>>>,
 }
 
 impl ConfigHandle {
@@ -754,6 +756,7 @@ impl ConfigHandle {
                 store,
                 current,
                 update_lock: Arc::new(Mutex::new(())),
+                export_json_cache: Arc::new(ParkingMutex::new(None)),
             },
             config_arc,
         ))
@@ -767,6 +770,16 @@ impl ConfigHandle {
     /// Subscribes to live configuration change events.
     pub fn subscribe(&self) -> watch::Receiver<Arc<AppConfig>> {
         self.current.subscribe()
+    }
+
+    pub fn export_json(&self) -> Result<String> {
+        if let Some(json) = self.export_json_cache.lock().as_ref() {
+            return Ok(json.clone());
+        }
+
+        let json = serde_json::to_string_pretty(&*self.get())?;
+        let mut cached = self.export_json_cache.lock();
+        Ok(cached.get_or_insert(json).clone())
     }
 
     /// Merges form updates, validates, persists to SQLite, and broadcasts the updated config.
@@ -824,6 +837,7 @@ impl ConfigHandle {
         if changed {
             self.store.save(&updated).await?;
             let new_arc = Arc::new(updated);
+            self.export_json_cache.lock().take();
             self.current.send_replace(Arc::clone(&new_arc));
             Ok((new_arc, true, chat_changed))
         } else {
@@ -962,6 +976,7 @@ mod tests {
         let database_path = directory.join("config.sqlite3");
         let (handle, _) = ConfigHandle::open(&database_path).await.unwrap();
         let mut rx = handle.subscribe();
+        let exported_before = handle.export_json().unwrap();
 
         let form: ConfigForm = serde_qs::Config::new()
             .use_form_encoding(true)
@@ -972,6 +987,9 @@ mod tests {
         rx.changed().await.unwrap();
         assert_eq!(rx.borrow().server.test_stream_duration_secs, 42);
         assert_eq!(handle.get().server.test_stream_duration_secs, 42);
+        let exported_after = handle.export_json().unwrap();
+        assert_ne!(exported_before, exported_after);
+        assert!(exported_after.contains("\"test_stream_duration_secs\": 42"));
 
         fs::remove_dir_all(directory).unwrap();
     }
