@@ -1,4 +1,5 @@
 use crate::config::ChatSettings;
+use crate::metrics::Metrics;
 use crate::util::{non_empty, now_unix_ms};
 use anyhow::{Context, Result};
 use reqwest::Client;
@@ -478,6 +479,7 @@ impl ChatActor {
                     if let Ok(outcome) = &outcome
                         && matches!(outcome, EnqueueOutcome::Accepted | EnqueueOutcome::Dropped)
                     {
+                        handle.metrics.add_chat_messages_received(1);
                         self.notify_changed();
                     }
                     let _ = respond_to.send(outcome);
@@ -632,11 +634,17 @@ fn resolve_youtube_target(chat: &ChatSettings) -> Option<YouTubeChatTarget> {
 pub struct ChatHandle {
     sender: mpsc::Sender<ChatCommand>,
     state_rx: watch::Receiver<ChatState>,
+    metrics: Arc<Metrics>,
     test_message_sequence: Arc<AtomicU64>,
 }
 
 impl ChatHandle {
-    pub async fn spawn(path: &Path, capacity: usize, http_client: Client) -> Result<Self> {
+    pub async fn spawn(
+        path: &Path,
+        capacity: usize,
+        http_client: Client,
+        metrics: Arc<Metrics>,
+    ) -> Result<Self> {
         let inbox = ChatInbox::open(path, capacity).await?;
         let (state_tx, state_rx) = watch::channel(ChatState::default());
         let (sender, receiver) = mpsc::channel(ACTOR_COMMAND_CAPACITY);
@@ -644,6 +652,7 @@ impl ChatHandle {
         let handle = Self {
             sender,
             state_rx,
+            metrics,
             test_message_sequence: Arc::new(AtomicU64::new(1)),
         };
 
@@ -1056,7 +1065,9 @@ mod tests {
     #[tokio::test]
     async fn chat_handle_actor_processes_commands() {
         let path = database_path();
-        let handle = ChatHandle::spawn(&path, 5, Client::new()).await.unwrap();
+        let handle = ChatHandle::spawn(&path, 5, Client::new(), Arc::new(Metrics::default()))
+            .await
+            .unwrap();
         let mut rev_rx = handle.subscribe_changes();
 
         let outcome = handle
@@ -1103,9 +1114,10 @@ mod tests {
         let handle_path = database_path();
         let inbox = ChatInbox::open(&actor_path, 5).await.unwrap();
         let (state_tx, _) = watch::channel(ChatState::default());
-        let handle = ChatHandle::spawn(&handle_path, 5, Client::new())
-            .await
-            .unwrap();
+        let handle =
+            ChatHandle::spawn(&handle_path, 5, Client::new(), Arc::new(Metrics::default()))
+                .await
+                .unwrap();
         let mut actor = ChatActor {
             inbox,
             twitch_task: None,
@@ -1136,7 +1148,9 @@ mod tests {
     #[tokio::test]
     async fn enqueue_test_generates_valid_messages_and_can_be_acknowledged() {
         let path = database_path();
-        let handle = ChatHandle::spawn(&path, 5, Client::new()).await.unwrap();
+        let handle = ChatHandle::spawn(&path, 5, Client::new(), Arc::new(Metrics::default()))
+            .await
+            .unwrap();
 
         let outcome = handle.enqueue_test(None).await.unwrap();
         assert_eq!(outcome, EnqueueOutcome::Accepted);

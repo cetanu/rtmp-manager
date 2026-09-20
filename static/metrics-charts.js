@@ -1,7 +1,8 @@
 (() => {
   const cards = Array.from(document.querySelectorAll("[data-target-metric]"));
   const ingestCard = document.querySelector("[data-ingest-metric]");
-  if (!cards.length && !ingestCard) return;
+  const chatMessagesCard = document.querySelector("[data-chat-messages-metric]");
+  if (!cards.length && !ingestCard && !chatMessagesCard) return;
   let samples = [];
 
   const formatRate = (bps) => {
@@ -10,7 +11,7 @@
     return `${bps || 0} bps`;
   };
 
-  function draw(canvas, values, color, label) {
+  function draw(canvas, values, color, label, formatValue, minimum) {
     const rect = canvas.getBoundingClientRect();
     const ratio = window.devicePixelRatio || 1;
     const width = Math.max(180, Math.floor(rect.width));
@@ -21,7 +22,7 @@
     context.scale(ratio, ratio);
     context.clearRect(0, 0, width, height);
 
-    const maximum = Math.max(1_000_000, ...values);
+    const maximum = Math.max(minimum, ...values);
     const left = 44;
     const top = 12;
     const plotWidth = width - left - 8;
@@ -36,7 +37,7 @@
       context.moveTo(left, y);
       context.lineTo(width - 8, y);
       context.stroke();
-      context.fillText(formatRate(maximum * (1 - index / 3)), 0, y + 4);
+      context.fillText(formatValue(maximum * (1 - index / 3)), 0, y + 4);
     }
 
     context.strokeStyle = color;
@@ -66,6 +67,8 @@
         samples.map((sample) => sample.ingest_bps || 0),
         "rgb(56, 189, 248)",
         "Ingest",
+        formatRate,
+        1_000_000,
       );
     }
     cards.forEach((card) => {
@@ -79,8 +82,23 @@
           sample.targets.find((target) => target.name === name)?.outbound_bps || 0),
         "rgb(167, 139, 250)",
         "Outbound",
+        formatRate,
+        1_000_000,
       );
     });
+    if (chatMessagesCard) {
+      const latest = samples.at(-1)?.chat_messages_received || 0;
+      chatMessagesCard.querySelector("[data-chat-messages-received]").textContent =
+        latest.toLocaleString();
+      draw(
+        chatMessagesCard.querySelector("canvas"),
+        samples.map((sample) => sample.chat_messages_received || 0),
+        "rgb(74, 222, 128)",
+        "Messages",
+        (value) => Math.round(value).toLocaleString(),
+        1,
+      );
+    }
     if (status) status.textContent = "Live · updated now";
   }
 

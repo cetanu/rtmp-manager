@@ -32,6 +32,7 @@ impl AppHandle {
             config_handle.path(),
             initial_config.chat.queue_capacity,
             http_client.clone(),
+            Arc::clone(&metrics),
         )
         .await?;
 

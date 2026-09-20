@@ -21,6 +21,7 @@ fn format_bitrate(bits_per_second: u64) -> String {
 pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
     let app: &AppHandle = app_context(cx);
     let ingest_bps = app.metrics.current_ingest_bps();
+    let chat_messages_received = app.metrics.current_chat_messages_received();
     let current = app
         .metrics
         .current_target_bitrates()
@@ -125,6 +126,49 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
             if targets.is_empty() {
                 "No targets configured. Add a target to begin collecting throughput metrics."
             }
+        </section>
+        <section aria-labelledby="chat-messages-heading" class="mt-6">
+            <div class="mb-2 flex items-end justify-between gap-4">
+                <div>
+                    <h2 id="chat-messages-heading" class="text-base font-semibold">
+                        "Chat"
+                    </h2>
+                </div>
+            </div>
+            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                card(
+                    attrs: attributes! {
+                        class="!gap-3 !rounded-lg !py-3"
+                        data-chat-messages-metric="true"
+                    },
+                    card_header(
+                        attrs: attributes! { class="!px-3" },
+                        <div class="flex items-center justify-between gap-3">
+                            card_title("Messages received")
+                            <span class="text-xs text-muted-foreground">"All sources"</span>
+                        </div>
+                    )
+                    card_content(
+                        attrs: attributes! { class="!px-3" },
+                        <div class="mb-2">
+                            <div class="text-xs uppercase tracking-wide text-muted-foreground">
+                                "Total messages"
+                            </div>
+                            <div
+                                class="text-base font-semibold"
+                                data-chat-messages-received="true"
+                            >
+                                (chat_messages_received.to_string())
+                            </div>
+                        </div>
+                        <canvas
+                            class="h-28 w-full"
+                            height="112"
+                            aria-label="Chat messages received history"
+                        ></canvas>
+                    )
+                )
+            </div>
         </section>
     })
 }

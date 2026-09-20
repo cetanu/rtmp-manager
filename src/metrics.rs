@@ -9,6 +9,7 @@ use tokio::sync::watch;
 pub struct Metrics {
     ingest_bytes: AtomicU64,
     ingest_bps: AtomicU64,
+    chat_messages_received: AtomicU64,
     last_sample_ingest_bytes: AtomicU64,
     last_sample_timestamp_ms: AtomicU64,
     target_bitrates: RwLock<HashMap<String, Arc<TargetBitrate>>>,
@@ -34,6 +35,7 @@ pub struct TargetBitrateSample {
 pub struct MetricsSample {
     pub timestamp_ms: u128,
     pub ingest_bps: u64,
+    pub chat_messages_received: u64,
     pub targets: Vec<TargetBitrateSample>,
 }
 
@@ -49,6 +51,7 @@ impl Metrics {
         Self {
             ingest_bytes: AtomicU64::new(0),
             ingest_bps: AtomicU64::new(0),
+            chat_messages_received: AtomicU64::new(0),
             last_sample_ingest_bytes: AtomicU64::new(0),
             last_sample_timestamp_ms: AtomicU64::new(0),
             target_bitrates: RwLock::new(HashMap::new()),
@@ -105,6 +108,7 @@ impl Metrics {
         let sample = MetricsSample {
             timestamp_ms,
             ingest_bps,
+            chat_messages_received: self.current_chat_messages_received(),
             targets: self.current_target_bitrates(),
         };
         {
@@ -135,6 +139,15 @@ impl Metrics {
 
     pub fn current_ingest_bps(&self) -> u64 {
         self.ingest_bps.load(Ordering::Relaxed)
+    }
+
+    pub fn add_chat_messages_received(&self, count: u64) {
+        self.chat_messages_received
+            .fetch_add(count, Ordering::Relaxed);
+    }
+
+    pub fn current_chat_messages_received(&self) -> u64 {
+        self.chat_messages_received.load(Ordering::Relaxed)
     }
 }
 
@@ -168,9 +181,11 @@ mod tests {
     #[test]
     fn ingest_sample_is_the_byte_delta_in_bits_per_second() {
         let metrics = Metrics::default();
+        metrics.add_chat_messages_received(3);
         metrics.add_ingest_bytes(125);
         metrics.record_sample();
         assert_eq!(metrics.history()[0].ingest_bps, 0);
+        assert_eq!(metrics.history()[0].chat_messages_received, 3);
 
         metrics
             .last_sample_timestamp_ms
