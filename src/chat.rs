@@ -15,10 +15,14 @@ use tokio::task::JoinHandle;
 
 pub mod kick;
 pub mod twitch;
+pub mod types;
+pub mod util;
 pub mod x;
 pub mod youtube;
 
-pub use youtube::{YouTubeChatConfig, YouTubeChatTarget, YouTubeIngestState, YouTubeIngestStatus};
+pub use types::{
+    ChatState, YouTubeChatConfig, YouTubeChatTarget, YouTubeIngestState, YouTubeIngestStatus,
+};
 
 const INBOX_PREVIEW_LIMIT: usize = 10;
 const SEEN_ID_RETENTION_MULTIPLIER: usize = 4;
@@ -449,10 +453,8 @@ struct ChatActor {
     inbox: ChatInbox,
     twitch_task: Option<JoinHandle<()>>,
     youtube_task: Option<JoinHandle<()>>,
-    youtube_status: Option<YouTubeIngestStatus>,
-    revision: u64,
-    revision_tx: watch::Sender<u64>,
-    youtube_status_tx: watch::Sender<Option<YouTubeIngestStatus>>,
+    state: ChatState,
+    state_tx: watch::Sender<ChatState>,
     http_client: Client,
 }
 
@@ -503,6 +505,7 @@ impl ChatActor {
                         continue;
                     }
                     let status = self
+                        .state
                         .youtube_status
                         .get_or_insert_with(YouTubeIngestStatus::default);
                     status.state = state;
@@ -514,16 +517,15 @@ impl ChatActor {
                         status.messages_received =
                             status.messages_received.saturating_add(newly_received);
                     }
-                    self.youtube_status_tx
-                        .send_replace(self.youtube_status.clone());
+                    self.state_tx.send_replace(self.state.clone());
                 }
             }
         }
     }
 
     fn notify_changed(&mut self) {
-        self.revision = self.revision.wrapping_add(1);
-        self.revision_tx.send_replace(self.revision);
+        self.state.revision = self.state.revision.wrapping_add(1);
+        self.state_tx.send_replace(self.state.clone());
     }
 
     async fn handle_apply_config(
@@ -559,8 +561,8 @@ impl ChatActor {
             task.abort();
             let _ = task.await;
         }
-        self.youtube_status = None;
-        self.youtube_status_tx.send_replace(None);
+        self.state.youtube_status = None;
+        self.state_tx.send_replace(self.state.clone());
 
         let target = chat
             .youtube_live_chat_id
@@ -593,8 +595,7 @@ impl ChatActor {
                 detail: "Polling is off. Turn it on when the YouTube stream is live.".into(),
                 ..YouTubeIngestStatus::default()
             };
-            self.youtube_status = Some(status.clone());
-            self.youtube_status_tx.send_replace(Some(status));
+            self.state.youtube_status = Some(status);
             self.notify_changed();
             tracing::info!("YouTube live chat polling is off");
             return;
@@ -619,22 +620,19 @@ impl ChatActor {
 #[derive(Clone)]
 pub struct ChatHandle {
     sender: mpsc::Sender<ChatCommand>,
-    revision_rx: watch::Receiver<u64>,
-    youtube_status_rx: watch::Receiver<Option<YouTubeIngestStatus>>,
+    state_rx: watch::Receiver<ChatState>,
     test_message_sequence: Arc<AtomicU64>,
 }
 
 impl ChatHandle {
     pub async fn spawn(path: &Path, capacity: usize, http_client: Client) -> Result<Self> {
         let inbox = ChatInbox::open(path, capacity).await?;
-        let (revision_tx, revision_rx) = watch::channel(0);
-        let (youtube_status_tx, youtube_status_rx) = watch::channel(None);
+        let (state_tx, state_rx) = watch::channel(ChatState::default());
         let (sender, receiver) = mpsc::channel(ACTOR_COMMAND_CAPACITY);
 
         let handle = Self {
             sender,
-            revision_rx,
-            youtube_status_rx,
+            state_rx,
             test_message_sequence: Arc::new(AtomicU64::new(1)),
         };
 
@@ -642,10 +640,8 @@ impl ChatHandle {
             inbox,
             twitch_task: None,
             youtube_task: None,
-            youtube_status: None,
-            revision: 0,
-            revision_tx,
-            youtube_status_tx,
+            state: ChatState::default(),
+            state_tx,
             http_client,
         };
 
@@ -770,12 +766,12 @@ impl ChatHandle {
         });
     }
 
-    pub fn subscribe_changes(&self) -> watch::Receiver<u64> {
-        self.revision_rx.clone()
+    pub fn subscribe_changes(&self) -> watch::Receiver<ChatState> {
+        self.state_rx.clone()
     }
 
     pub fn youtube_status(&self) -> Option<YouTubeIngestStatus> {
-        self.youtube_status_rx.borrow().clone()
+        self.state_rx.borrow().youtube_status.clone()
     }
 }
 
@@ -1047,8 +1043,7 @@ mod tests {
         let actor_path = database_path();
         let handle_path = database_path();
         let inbox = ChatInbox::open(&actor_path, 5).await.unwrap();
-        let (revision_tx, _) = watch::channel(0);
-        let (youtube_status_tx, _) = watch::channel(None);
+        let (state_tx, _) = watch::channel(ChatState::default());
         let handle = ChatHandle::spawn(&handle_path, 5, Client::new())
             .await
             .unwrap();
@@ -1056,10 +1051,8 @@ mod tests {
             inbox,
             twitch_task: None,
             youtube_task: None,
-            youtube_status: None,
-            revision: 0,
-            revision_tx,
-            youtube_status_tx,
+            state: ChatState::default(),
+            state_tx,
             http_client: Client::new(),
         };
 

@@ -1,10 +1,10 @@
+use crate::chat::types::{YouTubeChatConfig, YouTubeChatTarget, YouTubeIngestState};
 use crate::chat::{ChatHandle, IncomingChatMessage, Source};
 use crate::util::now_unix_ms;
 use anyhow::{Context, Result, bail};
 use regex::Regex;
 use reqwest::Client;
 use reqwest::header::{ACCEPT_LANGUAGE, USER_AGENT};
-use serde::Serialize;
 use std::time::Duration;
 
 const DEFAULT_INNERTUBE_API_KEY: &str = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
@@ -29,51 +29,6 @@ const DIRECT_RESOLUTION_MAX_DELAY: Duration = Duration::from_secs(60);
 const POLL_TIMEOUT_MIN_MS: u64 = 1_000;
 const POLL_TIMEOUT_MAX_MS: u64 = 60_000;
 const INNERTUBE_CLIENT_VERSION: &str = "2.20240101.00.00";
-
-#[derive(Debug, Clone)]
-pub struct YouTubeChatConfig {
-    pub target: YouTubeChatTarget,
-    pub min_poll_interval: Duration,
-    pub adaptive_polling: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum YouTubeChatTarget {
-    LiveChat(String),
-    Video(String),
-    Channel(String),
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum YouTubeIngestState {
-    #[default]
-    Off,
-    Resolving,
-    Connected,
-    Polling,
-    Error,
-}
-
-impl YouTubeIngestState {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Off => "off",
-            Self::Resolving => "resolving",
-            Self::Connected => "connected",
-            Self::Polling => "polling",
-            Self::Error => "error",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct YouTubeIngestStatus {
-    pub state: YouTubeIngestState,
-    pub detail: String,
-    pub last_success_at_unix_ms: Option<u64>,
-    pub messages_received: u64,
-}
 
 #[derive(Debug, Clone)]
 struct LiveChatSession {
