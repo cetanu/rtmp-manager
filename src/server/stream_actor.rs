@@ -54,12 +54,15 @@ pub struct StreamActor {
 
 impl StreamActor {
     pub async fn run(mut self, mut receiver: mpsc::Receiver<StreamCommand>) {
-        let mut status_check_interval = tokio::time::interval(Duration::from_millis(500));
+        let mut status_check = Box::pin(tokio::time::sleep(Duration::from_secs(5)));
 
         loop {
             tokio::select! {
-                _ = status_check_interval.tick() => {
+                _ = &mut status_check => {
                     self.check_preview_process_health();
+                    status_check.as_mut().reset(
+                        tokio::time::Instant::now() + self.preview_health_check_interval(),
+                    );
                 }
                 cmd = receiver.recv() => {
                     let Some(cmd) = cmd else {
@@ -85,6 +88,9 @@ impl StreamActor {
                             }
                         }
                     }
+                    status_check.as_mut().reset(
+                        tokio::time::Instant::now() + self.preview_health_check_interval(),
+                    );
                 }
             }
         }
@@ -93,9 +99,10 @@ impl StreamActor {
     }
 
     fn check_preview_process_health(&mut self) {
-        if let Some(stream) = self.staged.as_mut()
-            && !stream.preview_failed
-        {
+        let Some(stream) = self.staged.as_mut() else {
+            return;
+        };
+        if !stream.preview_failed {
             match stream.preview_process.try_wait() {
                 Ok(Some(status)) => {
                     tracing::error!(%status, "HLS preview process stopped unexpectedly");
@@ -109,6 +116,14 @@ impl StreamActor {
             }
         }
         self.update_status();
+    }
+
+    fn preview_health_check_interval(&self) -> Duration {
+        if self.staged.is_some() {
+            Duration::from_millis(500)
+        } else {
+            Duration::from_secs(5)
+        }
     }
 
     fn compute_status(&self) -> StreamStatus {

@@ -1,5 +1,5 @@
 use crate::config::ConfigForm;
-use crate::server::state::{AppHandle, StreamStatus};
+use crate::server::state::{AppHandle, StreamState, StreamStatus};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -51,6 +51,7 @@ pub async fn run_web_server(
     addr: std::net::SocketAddr,
 ) -> anyhow::Result<()> {
     let sampler_metrics = Arc::clone(&app_handle.metrics);
+    let mut stream_status = app_handle.stream.subscribe_status();
     let app = Router::builder()
         .discover()
         .runtime()
@@ -59,10 +60,28 @@ pub async fn run_web_server(
         .build();
 
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        let mut sample_timer = Box::pin(tokio::time::sleep(metrics_sample_interval(
+            *stream_status.borrow(),
+        )));
         loop {
-            interval.tick().await;
-            sampler_metrics.record_sample();
+            tokio::select! {
+                _ = &mut sample_timer => {
+                    sampler_metrics.record_sample();
+                    sample_timer.as_mut().reset(
+                        tokio::time::Instant::now()
+                            + metrics_sample_interval(*stream_status.borrow()),
+                    );
+                }
+                changed = stream_status.changed() => {
+                    if changed.is_err() {
+                        break;
+                    }
+                    sample_timer.as_mut().reset(
+                        tokio::time::Instant::now()
+                            + metrics_sample_interval(*stream_status.borrow()),
+                    );
+                }
+            }
         }
     });
 
@@ -73,6 +92,14 @@ pub async fn run_web_server(
     );
     topcoat::serve(listener, app).await?;
     Ok(())
+}
+
+fn metrics_sample_interval(status: StreamStatus) -> Duration {
+    if status.state == StreamState::Offline {
+        Duration::from_secs(5)
+    } else {
+        Duration::from_secs(1)
+    }
 }
 
 #[component]
