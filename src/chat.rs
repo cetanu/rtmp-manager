@@ -768,10 +768,6 @@ impl ChatHandle {
     pub fn subscribe_changes(&self) -> watch::Receiver<ChatState> {
         self.state_rx.clone()
     }
-
-    pub fn youtube_status(&self) -> Option<YouTubeIngestStatus> {
-        self.state_rx.borrow().youtube_status.clone()
-    }
 }
 
 #[cfg(test)]
@@ -1022,7 +1018,7 @@ mod tests {
             Some(2),
         );
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        assert!(handle.youtube_status().is_none());
+        assert!(rev_rx.borrow().youtube_status.is_none());
 
         let settings = ChatSettings {
             youtube_api_key: Some("api-key".into()),
@@ -1031,7 +1027,7 @@ mod tests {
             ..ChatSettings::default()
         };
         handle.set_youtube_polling(settings).await.unwrap();
-        let status = handle.youtube_status().unwrap();
+        let status = rev_rx.borrow().youtube_status.clone().unwrap();
         assert_eq!(status.state, YouTubeIngestState::Off);
 
         std::fs::remove_file(path).unwrap();

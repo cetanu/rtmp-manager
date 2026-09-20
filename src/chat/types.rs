@@ -26,18 +26,6 @@ pub enum YouTubeIngestState {
     Error,
 }
 
-impl YouTubeIngestState {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Off => "off",
-            Self::Resolving => "resolving",
-            Self::Connected => "connected",
-            Self::Polling => "polling",
-            Self::Error => "error",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct YouTubeIngestStatus {
     pub state: YouTubeIngestState,

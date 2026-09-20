@@ -105,7 +105,6 @@ fn first_message_id(snapshot: &crate::chat::ChatInboxSnapshot) -> String {
 pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
     let app: &AppHandle = app_context(cx);
     let initial_id = first_message_id(&app.chat.snapshot().await?);
-    let youtube_status = app.chat.youtube_status();
     let chat = app.config.get().chat.clone();
     let youtube_configured = [
         &chat.youtube_live_chat_id,
@@ -163,18 +162,6 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                     >
                         $(polling_error.get())
                     </p>
-                    if let Some(status) = youtube_status {
-                        <p
-                            class="max-w-md truncate text-xs text-muted-foreground"
-                            title=(status.detail.clone())
-                        >
-                            (format!(
-                                "YouTube {}: {}",
-                                status.state.as_str(),
-                                status.detail,
-                            ))
-                        </p>
-                    }
                 </div>
                 <div class="ml-auto flex items-center gap-2">
                     <button
