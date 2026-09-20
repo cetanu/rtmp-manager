@@ -45,29 +45,30 @@ body[data-highlight="false"] .chat-overlay-message[data-highlighted="true"] {
     border-color: rgba(255, 255, 255, 0.1) !important;
     box-shadow: none !important;
 }
-body[data-limit="1"] .chat-overlay-message:nth-child(n+2) { display: none !important; }
-body[data-limit="2"] .chat-overlay-message:nth-child(n+3) { display: none !important; }
-body[data-limit="3"] .chat-overlay-message:nth-child(n+4) { display: none !important; }
-body[data-limit="4"] .chat-overlay-message:nth-child(n+5) { display: none !important; }
-body[data-limit="5"] .chat-overlay-message:nth-child(n+6) { display: none !important; }
-body[data-limit="6"] .chat-overlay-message:nth-child(n+7) { display: none !important; }
-body[data-limit="7"] .chat-overlay-message:nth-child(n+8) { display: none !important; }
-body[data-limit="8"] .chat-overlay-message:nth-child(n+9) { display: none !important; }
-body[data-limit="9"] .chat-overlay-message:nth-child(n+10) { display: none !important; }
 "#;
 
 const OVERLAY_JS: &str = r#"
 (() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.has("theme")) document.body.dataset.theme = params.get("theme");
-    if (params.has("size")) document.body.dataset.size = params.get("size");
-    if (params.has("limit")) document.body.dataset.limit = params.get("limit");
-    if (params.has("align")) document.body.dataset.align = params.get("align");
-    if (params.has("direction")) document.body.dataset.direction = params.get("direction");
-    if (params.has("highlight")) document.body.dataset.highlight = params.get("highlight");
+    const setChoice = (name, allowed) => {
+        const value = params.get(name);
+        if (allowed.includes(value)) document.body.dataset[name] = value;
+    };
+    setChoice("theme", ["plain", "solid"]);
+    setChoice("size", ["sm", "lg", "xl"]);
+    setChoice("align", ["top", "bottom"]);
+    setChoice("direction", ["down", "up", "reverse"]);
+    setChoice("highlight", ["true", "false"]);
 
-    const fade = parseInt(params.get("fade"), 10);
-    if (fade > 0) {
+    const limit = Number.parseInt(params.get("limit"), 10);
+    if (Number.isInteger(limit) && limit >= 1 && limit <= 100) {
+        const style = document.createElement("style");
+        style.textContent = `.chat-overlay-message:nth-child(n+${limit + 1}) { display: none !important; }`;
+        document.head.appendChild(style);
+    }
+
+    const fade = Number.parseInt(params.get("fade"), 10);
+    if (Number.isInteger(fade) && fade > 0 && fade <= 3600) {
         const style = document.createElement("style");
         style.textContent = "@keyframes chatOverlayFade { 0%, 75% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-4px); pointer-events: none; } } .chat-overlay-message { animation: chatOverlayFade " + fade + "s forwards ease-in-out; }";
         document.head.appendChild(style);
