@@ -1,5 +1,6 @@
 use crate::chat::types::{YouTubeChatConfig, YouTubeChatTarget, YouTubeIngestState};
 use crate::chat::{ChatHandle, IncomingChatMessage, Source};
+use crate::config::validate_outbound_url;
 use crate::util::now_unix_ms;
 use anyhow::{Context, Result, bail};
 use regex::Regex;
@@ -229,20 +230,41 @@ async fn resolve_live_chat_session(
     }
 }
 
-pub fn normalize_channel_url(channel_input: &str) -> String {
+pub(crate) fn validate_channel_input(channel_input: &str) -> Result<()> {
+    let url = normalize_channel_url(channel_input)?;
+    validate_outbound_url(&url, &["http", "https"], "YouTube channel URL")?;
+    let parsed = reqwest::Url::parse(&url)?;
+    if !matches!(
+        parsed.host_str(),
+        Some("youtube.com" | "www.youtube.com" | "m.youtube.com")
+    ) {
+        bail!("YouTube channel URL must use a YouTube host");
+    }
+    Ok(())
+}
+
+pub fn normalize_channel_url(channel_input: &str) -> Result<String> {
     let trimmed = channel_input.trim();
     if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        let parsed =
+            reqwest::Url::parse(trimmed).context("YouTube channel input is not a valid URL")?;
+        if !matches!(
+            parsed.host_str(),
+            Some("youtube.com" | "www.youtube.com" | "m.youtube.com")
+        ) {
+            bail!("YouTube channel URL must use a YouTube host");
+        }
         if trimmed.ends_with("/live") {
-            trimmed.to_string()
+            Ok(trimmed.to_string())
         } else {
-            format!("{}/live", trimmed.trim_end_matches('/'))
+            Ok(format!("{}/live", trimmed.trim_end_matches('/')))
         }
     } else if trimmed.starts_with('@') {
-        format!("https://www.youtube.com/{trimmed}/live")
+        Ok(format!("https://www.youtube.com/{trimmed}/live"))
     } else if trimmed.starts_with("UC") && trimmed.len() == CHANNEL_ID_LENGTH {
-        format!("https://www.youtube.com/channel/{trimmed}/live")
+        Ok(format!("https://www.youtube.com/channel/{trimmed}/live"))
     } else {
-        format!("https://www.youtube.com/@{trimmed}/live")
+        Ok(format!("https://www.youtube.com/@{trimmed}/live"))
     }
 }
 
@@ -265,7 +287,8 @@ pub fn extract_video_id(input: &str) -> Option<String> {
 }
 
 async fn resolve_channel_live_video(client: &Client, channel_input: &str) -> Result<String> {
-    let url = normalize_channel_url(channel_input);
+    let url = normalize_channel_url(channel_input)?;
+    validate_channel_input(channel_input)?;
     let response = client
         .get(&url)
         .header(USER_AGENT, BROWSER_USER_AGENT)
@@ -670,19 +693,19 @@ mod tests {
     #[test]
     fn normalizes_various_channel_inputs() {
         assert_eq!(
-            normalize_channel_url("LofiGirl"),
+            normalize_channel_url("LofiGirl").unwrap(),
             "https://www.youtube.com/@LofiGirl/live"
         );
         assert_eq!(
-            normalize_channel_url("@LofiGirl"),
+            normalize_channel_url("@LofiGirl").unwrap(),
             "https://www.youtube.com/@LofiGirl/live"
         );
         assert_eq!(
-            normalize_channel_url("UCkszU2WH9gy1mb0dV-11UJg"),
+            normalize_channel_url("UCkszU2WH9gy1mb0dV-11UJg").unwrap(),
             "https://www.youtube.com/channel/UCkszU2WH9gy1mb0dV-11UJg/live"
         );
         assert_eq!(
-            normalize_channel_url("https://www.youtube.com/@LofiGirl"),
+            normalize_channel_url("https://www.youtube.com/@LofiGirl").unwrap(),
             "https://www.youtube.com/@LofiGirl/live"
         );
     }

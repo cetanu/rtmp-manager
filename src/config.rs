@@ -4,7 +4,7 @@ use parking_lot::Mutex as ParkingMutex;
 use serde::{Deserialize, Serialize};
 use serde_valid::Validate;
 use std::fs;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{Mutex, watch};
@@ -297,18 +297,28 @@ impl AppConfig {
         }) {
             bail!("Kick channel must be 1-25 ASCII letters, numbers, hyphens, or underscores");
         }
+        if let Some(url) = self.notifications.discord_webhook.as_deref() {
+            validate_outbound_url(url, &["http", "https"], "Discord webhook")?;
+        }
+        if let Some(url) = self.notifications.webhook_url.as_deref() {
+            validate_outbound_url(url, &["http", "https"], "Webhook URL")?;
+        }
+        if let Some(channel) = self.chat.youtube_channel_id.as_deref()
+            && !channel.trim().is_empty()
+        {
+            crate::chat::youtube::validate_channel_input(channel)?;
+        }
         for target in &self.targets {
             if target.enabled {
                 let url = target.url.trim();
                 if url.is_empty() {
                     bail!("Target '{}' has an empty RTMP URL.", target.name);
                 }
-                if !url.starts_with("rtmp://") && !url.starts_with("rtmps://") {
-                    bail!(
-                        "Target '{}' has an invalid URL. It must start with rtmp:// or rtmps://",
-                        target.name
-                    );
-                }
+                validate_outbound_url(
+                    url,
+                    &["rtmp", "rtmps"],
+                    &format!("Target '{}'", target.name),
+                )?;
             }
         }
         Ok(())
@@ -489,6 +499,90 @@ impl AppConfig {
             serde_json::from_value(value).context("Invalid configuration structure")?;
         config.validate()?;
         Ok(config)
+    }
+}
+
+/// Validates a URL before the application makes an outbound connection.
+///
+/// DNS is resolved at validation time and every returned address is checked,
+/// so hostnames cannot point at loopback, link-local, or private networks.
+pub(crate) fn validate_outbound_url(
+    value: &str,
+    allowed_schemes: &[&str],
+    field: &str,
+) -> Result<()> {
+    let url = reqwest::Url::parse(value.trim())
+        .with_context(|| format!("{field} must be a valid URL"))?;
+    if !allowed_schemes
+        .iter()
+        .any(|scheme| url.scheme().eq_ignore_ascii_case(scheme))
+    {
+        bail!(
+            "{field} must use one of these schemes: {}",
+            allowed_schemes.join(", ")
+        );
+    }
+    if url.username() != "" || url.password().is_some() {
+        bail!("{field} must not contain credentials");
+    }
+    let host = url
+        .host_str()
+        .filter(|host| !host.trim().is_empty())
+        .with_context(|| format!("{field} must contain a host"))?;
+    let port = url
+        .port_or_known_default()
+        .or_else(|| match url.scheme() {
+            "rtmp" => Some(1935),
+            "rtmps" => Some(443),
+            _ => None,
+        })
+        .with_context(|| format!("{field} must specify a port for its scheme"))?;
+    let addresses = if let Ok(ip) = host.parse::<IpAddr>() {
+        vec![SocketAddr::new(ip, port)]
+    } else {
+        (host, port)
+            .to_socket_addrs()
+            .with_context(|| format!("{field} host could not be resolved"))?
+            .collect::<Vec<_>>()
+    };
+    if addresses.is_empty() {
+        bail!("{field} host did not resolve to any addresses");
+    }
+    if let Some(address) = addresses
+        .iter()
+        .find(|address| is_private_or_local(address.ip()))
+    {
+        bail!(
+            "{field} must not target private, loopback, link-local, multicast, or unspecified address {}",
+            address.ip()
+        );
+    }
+    Ok(())
+}
+
+fn is_private_or_local(address: IpAddr) -> bool {
+    match address {
+        IpAddr::V4(address) => {
+            address.is_private()
+                || address.is_loopback()
+                || address.is_link_local()
+                || address.is_broadcast()
+                || address.is_unspecified()
+                || address.is_multicast()
+        }
+        IpAddr::V6(address) => {
+            let segments = address.segments();
+            let unique_local = (segments[0] & 0xfe00) == 0xfc00;
+            let link_local = (segments[0] & 0xffc0) == 0xfe80;
+            unique_local
+                || link_local
+                || address.is_loopback()
+                || address.is_unspecified()
+                || address.is_multicast()
+                || address
+                    .to_ipv4()
+                    .is_some_and(|mapped| is_private_or_local(mapped.into()))
+        }
     }
 }
 
@@ -893,15 +987,15 @@ mod tests {
                 ingest_stream_key: "existing-ingest-key".into(),
             },
             notifications: NotificationSettings {
-                discord_webhook: Some("https://discord.test/hook".into()),
+                discord_webhook: Some("https://192.0.2.1/hook".into()),
                 live_message: "Still live".into(),
-                webhook_url: Some("https://example.test/hook".into()),
+                webhook_url: Some("https://192.0.2.2/hook".into()),
             },
             targets: vec![TargetConfig {
                 name: "Twitch".into(),
-                url: "rtmps://example.test/app".into(),
+                url: "rtmps://192.0.2.3/app".into(),
                 stream_key: "secret".into(),
-                public_url: Some("https://example.test/watch".into()),
+                public_url: Some("https://192.0.2.4/watch".into()),
                 enabled: true,
             }],
             web_auth: WebAuthSettings {
@@ -951,6 +1045,19 @@ mod tests {
                 .to_string()
                 .contains("letters, numbers, hyphens, or underscores")
         );
+    }
+
+    #[test]
+    fn rejects_metadata_and_private_network_urls() {
+        let mut config = AppConfig::default();
+        config.notifications.webhook_url = Some("http://169.254.169.254/latest/meta-data".into());
+        assert!(config.validate().is_err());
+
+        config.notifications.webhook_url = Some("http://192.168.1.10/hook".into());
+        assert!(config.validate().is_err());
+
+        config.notifications.webhook_url = Some("http://192.0.2.10/hook".into());
+        config.validate().unwrap();
     }
 
     #[tokio::test]
@@ -1141,7 +1248,7 @@ mod tests {
             .deserialize_str(
                 "targets%5B0%5D%5Bname%5D=Twitch&\
                  targets%5B0%5D%5Boriginal_index%5D=0&\
-                 targets%5B0%5D%5Burl%5D=rtmps%3A%2F%2Fexample.test%2Fapp&\
+                 targets%5B0%5D%5Burl%5D=rtmps%3A%2F%2F192.0.2.3%2Fapp&\
                  targets%5B0%5D%5Bstream_key%5D=secret&action=save",
             )
             .unwrap();
@@ -1157,7 +1264,7 @@ mod tests {
             .deserialize_str(
                 "targets%5B0%5D%5Bname%5D=Twitch&\
                  targets%5B0%5D%5Boriginal_index%5D=0&\
-                 targets%5B0%5D%5Burl%5D=rtmps%3A%2F%2Fexample.test%2Fapp&\
+                 targets%5B0%5D%5Burl%5D=rtmps%3A%2F%2F192.0.2.3%2Fapp&\
                  targets%5B0%5D%5Bstream_key%5D=secret&\
                  targets%5B0%5D%5Benabled%5D=true&action=save",
             )
@@ -1178,7 +1285,7 @@ mod tests {
                  notifications%5Bwebhook_url%5D=&\
                  targets%5B0%5D%5Bname%5D=Twitch&\
                  targets%5B0%5D%5Boriginal_index%5D=0&\
-                 targets%5B0%5D%5Burl%5D=rtmps%3A%2F%2Fexample.test%2Fapp&\
+                 targets%5B0%5D%5Burl%5D=rtmps%3A%2F%2F192.0.2.3%2Fapp&\
                  targets%5B0%5D%5Bstream_key%5D=&action=save",
             )
             .unwrap();
@@ -1187,11 +1294,11 @@ mod tests {
         assert_eq!(updated.targets[0].stream_key, "secret");
         assert_eq!(
             updated.notifications.discord_webhook.as_deref(),
-            Some("https://discord.test/hook")
+            Some("https://192.0.2.1/hook")
         );
         assert_eq!(
             updated.notifications.webhook_url.as_deref(),
-            Some("https://example.test/hook")
+            Some("https://192.0.2.2/hook")
         );
     }
 
