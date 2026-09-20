@@ -10,6 +10,7 @@ pub struct Metrics {
     ingest_bytes: AtomicU64,
     ingest_bps: AtomicU64,
     last_sample_ingest_bytes: AtomicU64,
+    last_sample_timestamp_ms: AtomicU64,
     target_bitrates: RwLock<HashMap<String, Arc<TargetBitrate>>>,
     history: RwLock<VecDeque<MetricsSample>>,
     history_window: Duration,
@@ -49,6 +50,7 @@ impl Metrics {
             ingest_bytes: AtomicU64::new(0),
             ingest_bps: AtomicU64::new(0),
             last_sample_ingest_bytes: AtomicU64::new(0),
+            last_sample_timestamp_ms: AtomicU64::new(0),
             target_bitrates: RwLock::new(HashMap::new()),
             history: RwLock::new(VecDeque::new()),
             history_window,
@@ -89,7 +91,16 @@ impl Metrics {
             .as_millis();
         let bytes = self.ingest_bytes.load(Ordering::Relaxed);
         let previous = self.last_sample_ingest_bytes.swap(bytes, Ordering::Relaxed);
-        let ingest_bps = bytes.saturating_sub(previous).saturating_mul(8);
+        let previous_timestamp_ms = self.last_sample_timestamp_ms.swap(
+            timestamp_ms.try_into().unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
+        let ingest_bps = calculate_ingest_bps(
+            bytes,
+            previous,
+            previous_timestamp_ms,
+            timestamp_ms.try_into().unwrap_or(u64::MAX),
+        );
         self.ingest_bps.store(ingest_bps, Ordering::Relaxed);
         let sample = MetricsSample {
             timestamp_ms,
@@ -127,6 +138,22 @@ impl Metrics {
     }
 }
 
+fn calculate_ingest_bps(
+    bytes: u64,
+    previous_bytes: u64,
+    previous_timestamp_ms: u64,
+    timestamp_ms: u64,
+) -> u64 {
+    if previous_timestamp_ms == 0 {
+        return 0;
+    }
+
+    let elapsed_ms = timestamp_ms.saturating_sub(previous_timestamp_ms).max(1);
+    let bits_per_second = u128::from(bytes.saturating_sub(previous_bytes)).saturating_mul(8_000)
+        / u128::from(elapsed_ms);
+    u64::try_from(bits_per_second).unwrap_or(u64::MAX)
+}
+
 impl TargetBitrate {
     pub fn update_from_ffmpeg(&self, bits_per_second: u64) {
         self.outbound_bps.store(bits_per_second, Ordering::Relaxed);
@@ -135,16 +162,26 @@ impl TargetBitrate {
 
 #[cfg(test)]
 mod tests {
-    use super::Metrics;
+    use super::{Metrics, calculate_ingest_bps};
+    use std::sync::atomic::Ordering;
 
     #[test]
     fn ingest_sample_is_the_byte_delta_in_bits_per_second() {
         let metrics = Metrics::default();
         metrics.add_ingest_bytes(125);
         metrics.record_sample();
-        assert_eq!(metrics.history()[0].ingest_bps, 1_000);
+        assert_eq!(metrics.history()[0].ingest_bps, 0);
 
+        metrics
+            .last_sample_timestamp_ms
+            .fetch_sub(1_000, Ordering::Relaxed);
+        metrics.add_ingest_bytes(125);
         metrics.record_sample();
-        assert_eq!(metrics.history()[1].ingest_bps, 0);
+        assert_eq!(metrics.history()[1].ingest_bps, 1_000);
+    }
+
+    #[test]
+    fn ingest_sample_uses_actual_elapsed_time() {
+        assert_eq!(calculate_ingest_bps(250, 125, 1_000, 2_500), 666);
     }
 }
