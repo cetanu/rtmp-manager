@@ -332,7 +332,7 @@ async fn get_config(cx: &Cx) -> Result<Response> {
     let app: &AppHandle = app_context(cx);
     (
         [(topcoat::router::header::CACHE_CONTROL, "no-store, private")],
-        Json(app.config.get().as_ref().clone()),
+        Json(app.config.get().redacted()),
     )
         .into_response(cx)
 }

@@ -212,6 +212,27 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
+    /// Returns the configuration shape safe for API and JSON export.
+    pub fn redacted(&self) -> Self {
+        let mut redacted = self.clone();
+        redacted.server.ingest_stream_key.clear();
+        redacted.notifications.discord_webhook = None;
+        redacted.notifications.webhook_url = None;
+        for target in &mut redacted.targets {
+            target.stream_key.clear();
+        }
+        redacted.web_auth.password.clear();
+        redacted.web_auth.overlay_token.clear();
+        redacted.chat.youtube_api_key = None;
+        redacted.chat.x_api_key = None;
+        redacted.chat.x_api_secret = None;
+        redacted.chat.x_client_id = None;
+        redacted.chat.x_client_secret = None;
+        redacted.chat.kick_client_id = None;
+        redacted.chat.kick_client_secret = None;
+        redacted
+    }
+
     /// Validate enabled target URLs and credentials.
     pub fn validate(&self) -> Result<()> {
         self.server
@@ -482,7 +503,13 @@ impl AppConfig {
     }
 
     /// Parses imported configuration JSON bytes.
-    pub fn parse_imported(body: &[u8]) -> Result<Self> {
+    fn parse_imported(body: &[u8]) -> Result<Self> {
+        let config = Self::parse_imported_unvalidated(body)?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    fn parse_imported_unvalidated(body: &[u8]) -> Result<Self> {
         let value: serde_json::Value =
             serde_json::from_slice(body).context("Invalid JSON configuration")?;
         let object = value
@@ -495,10 +522,7 @@ impl AppConfig {
             }
         }
 
-        let config: AppConfig =
-            serde_json::from_value(value).context("Invalid configuration structure")?;
-        config.validate()?;
-        Ok(config)
+        serde_json::from_value(value).context("Invalid configuration structure")
     }
 }
 
@@ -890,7 +914,7 @@ impl ConfigHandle {
             return Ok(json.clone());
         }
 
-        let json = serde_json::to_string_pretty(&*self.get())?;
+        let json = serde_json::to_string_pretty(&self.get().redacted())?;
         let mut cached = self.export_json_cache.lock();
         Ok(cached.get_or_insert(json).clone())
     }
@@ -961,14 +985,62 @@ impl ConfigHandle {
     /// Parses imported JSON configuration, persists it, and broadcasts the new config.
     pub async fn import(&self, body: &[u8]) -> Result<(Arc<AppConfig>, bool, bool)> {
         let _guard = self.update_lock.lock().await;
-        let imported = AppConfig::parse_imported(body)?;
         let current_config = self.get();
+        let imported = restore_redacted_secrets(
+            &current_config,
+            AppConfig::parse_imported_unvalidated(body)?,
+        );
         self.save_updated(current_config, imported).await
     }
 
     pub fn path(&self) -> &Path {
         self.store.path()
     }
+}
+
+fn restore_redacted_secrets(current: &AppConfig, mut imported: AppConfig) -> AppConfig {
+    if imported.server.ingest_stream_key.is_empty() {
+        imported.server.ingest_stream_key = current.server.ingest_stream_key.clone();
+    }
+    if imported.notifications.discord_webhook.is_none() {
+        imported.notifications.discord_webhook = current.notifications.discord_webhook.clone();
+    }
+    if imported.notifications.webhook_url.is_none() {
+        imported.notifications.webhook_url = current.notifications.webhook_url.clone();
+    }
+    if imported.web_auth.password.is_empty() {
+        imported.web_auth.password = current.web_auth.password.clone();
+    }
+    if imported.web_auth.overlay_token.is_empty() {
+        imported.web_auth.overlay_token = current.web_auth.overlay_token.clone();
+    }
+    if imported.chat.youtube_api_key.is_none() {
+        imported.chat.youtube_api_key = current.chat.youtube_api_key.clone();
+    }
+    if imported.chat.x_api_key.is_none() {
+        imported.chat.x_api_key = current.chat.x_api_key.clone();
+    }
+    if imported.chat.x_api_secret.is_none() {
+        imported.chat.x_api_secret = current.chat.x_api_secret.clone();
+    }
+    if imported.chat.x_client_id.is_none() {
+        imported.chat.x_client_id = current.chat.x_client_id.clone();
+    }
+    if imported.chat.x_client_secret.is_none() {
+        imported.chat.x_client_secret = current.chat.x_client_secret.clone();
+    }
+    if imported.chat.kick_client_id.is_none() {
+        imported.chat.kick_client_id = current.chat.kick_client_id.clone();
+    }
+    if imported.chat.kick_client_secret.is_none() {
+        imported.chat.kick_client_secret = current.chat.kick_client_secret.clone();
+    }
+    for (imported_target, current_target) in imported.targets.iter_mut().zip(&current.targets) {
+        if imported_target.stream_key.is_empty() {
+            imported_target.stream_key = current_target.stream_key.clone();
+        }
+    }
+    imported
 }
 
 #[cfg(test)]
@@ -1058,6 +1130,17 @@ mod tests {
 
         config.notifications.webhook_url = Some("http://192.0.2.10/hook".into());
         config.validate().unwrap();
+    fn redacted_exports_do_not_contain_credentials() {
+        let config = populated_config();
+        let redacted = config.redacted();
+        let json = serde_json::to_string(&redacted).unwrap();
+
+        assert!(!json.contains("existing-ingest-key"));
+        assert!(!json.contains("192.0.2.1/hook"));
+        assert!(!json.contains("\"stream_key\":\"secret\""));
+        assert!(!json.contains("correct horse battery staple"));
+        assert!(!json.contains("youtube-api-key"));
+        assert!(!json.contains("kick-client-secret"));
     }
 
     #[tokio::test]
