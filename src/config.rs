@@ -779,26 +779,35 @@ impl ConfigHandle {
     }
 
     pub async fn set_youtube_polling(&self, enabled: bool) -> Result<(Arc<AppConfig>, bool, bool)> {
-        let _guard = self.update_lock.lock().await;
-        let current_config = self.get();
-        let mut updated = (*current_config).clone();
-        updated.chat.youtube_polling_enabled = enabled;
-        self.save_updated(current_config, updated).await
+        self.set_chat_flag(enabled, |chat, enabled| {
+            chat.youtube_polling_enabled = enabled;
+        })
+        .await
     }
 
     pub async fn set_x_webhook(&self, enabled: bool) -> Result<(Arc<AppConfig>, bool, bool)> {
-        let _guard = self.update_lock.lock().await;
-        let current_config = self.get();
-        let mut updated = (*current_config).clone();
-        updated.chat.x_webhook_enabled = enabled;
-        self.save_updated(current_config, updated).await
+        self.set_chat_flag(enabled, |chat, enabled| {
+            chat.x_webhook_enabled = enabled;
+        })
+        .await
     }
 
     pub async fn set_kick_webhook(&self, enabled: bool) -> Result<(Arc<AppConfig>, bool, bool)> {
+        self.set_chat_flag(enabled, |chat, enabled| {
+            chat.kick_webhook_enabled = enabled;
+        })
+        .await
+    }
+
+    async fn set_chat_flag(
+        &self,
+        enabled: bool,
+        update: impl FnOnce(&mut ChatSettings, bool),
+    ) -> Result<(Arc<AppConfig>, bool, bool)> {
         let _guard = self.update_lock.lock().await;
         let current_config = self.get();
         let mut updated = (*current_config).clone();
-        updated.chat.kick_webhook_enabled = enabled;
+        update(&mut updated.chat, enabled);
         self.save_updated(current_config, updated).await
     }
 
