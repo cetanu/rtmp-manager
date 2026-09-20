@@ -394,6 +394,11 @@ mod tests {
             .format(&Rfc3339)
             .expect("current timestamp should format");
         assert!(validate_timestamp(&current).is_ok());
+
+        let future = (OffsetDateTime::now_utc() + TimeDuration::minutes(6))
+            .format(&Rfc3339)
+            .expect("future timestamp should format");
+        assert!(validate_timestamp(&future).is_err());
     }
 
     #[test]
