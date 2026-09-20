@@ -1,6 +1,6 @@
+use crate::chat::util::WebhookEvent;
 use crate::chat::{IncomingChatMessage, Source};
 use crate::config::ChatSettings;
-use crate::server::state::WebhookEvent;
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use hmac::{Hmac, Mac};
@@ -118,7 +118,7 @@ mod tests {
         );
         WebhookEvent {
             headers,
-            body: BODY.to_vec().into(),
+            body: BODY.to_vec(),
         }
     }
 

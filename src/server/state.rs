@@ -5,22 +5,7 @@ use crate::server::stream_actor::StreamHandle;
 use crate::webhook_audit::WebhookAudit;
 use anyhow::Result;
 use reqwest::Client;
-use std::collections::HashMap;
 use std::sync::Arc;
-
-#[derive(Debug, Clone)]
-pub struct WebhookEvent {
-    pub headers: HashMap<String, String>,
-    pub body: topcoat::router::request::Bytes,
-}
-
-impl WebhookEvent {
-    pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers
-            .get(&name.to_ascii_lowercase())
-            .map(String::as_str)
-    }
-}
 
 pub use crate::server::preview::{StreamState, StreamStatus};
 

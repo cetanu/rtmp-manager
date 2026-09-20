@@ -500,7 +500,10 @@ async fn receive_webhook(cx: &Cx, body: Bytes) -> Result<Response> {
         })
         .collect();
     let body_bytes = body.len();
-    let event = crate::server::state::WebhookEvent { headers, body };
+    let event = crate::chat::util::WebhookEvent {
+        headers,
+        body: body.to_vec(),
+    };
     let platform = if event.header("kick-event-signature").is_some() {
         "kick"
     } else if event.header("x-twitter-webhooks-signature").is_some() {

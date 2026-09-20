@@ -1,6 +1,6 @@
+use crate::chat::util::WebhookEvent;
 use crate::chat::{IncomingChatMessage, Source};
 use crate::config::ChatSettings;
-use crate::server::state::WebhookEvent;
 use anyhow::{Context, Result, bail};
 use aws_lc_rs::signature::{ParsedPublicKey, RSA_PKCS1_2048_8192_SHA256};
 use base64::{Engine, engine::general_purpose::STANDARD};
