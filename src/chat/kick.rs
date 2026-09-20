@@ -8,6 +8,7 @@ use reqwest::{Client, RequestBuilder, Response};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
+use std::sync::OnceLock;
 
 const KICK_PUBLIC_KEY: &str = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq/+l1WnlRrGSolDMA+A86rAhMbQGmQ2SapVcGM3zq8ANXjnhDWocMqfWcTd95btDydITa10kDvHzw9WQOqp2MZI7ZyrfzJuz5nhTPCiJwTwnEtWft7nV14BYRDHvlfqPUaZ+1KR4OCaO/wWIk/rQL/TjY0M70gse8rlBkbo2a8rKhu69RQTRsoaf4DVhDPEeSeI5jVrRDGAMGL3cGuyY6CLKGdjVEM78g3JfYOvDU/RvfqD7L89TZ3iN94jrmWdGz34JNlEI5hqK8dd7C5EFBEbZ5jgB8s8ReQV8H+MkuffjdAj3ajDDX3DOJMIut1lBrUVD1AaSrGCKHooWoL2etwIDAQAB";
 
@@ -86,15 +87,26 @@ pub fn verify_webhook(
     let signature = STANDARD
         .decode(signature)
         .context("Kick signature is not valid base64")?;
-    let public_key = STANDARD
-        .decode(KICK_PUBLIC_KEY)
-        .context("Kick public key is invalid base64")?;
-    let public_key = ParsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, public_key)
-        .context("Kick public key is invalid")?;
+    let public_key = kick_public_key()?;
     let payload = [message_id.as_bytes(), timestamp.as_bytes(), body].join(&b'.');
     public_key
         .verify_sig(&payload, &signature)
         .map_err(|_| anyhow::anyhow!("Kick webhook signature verification failed"))
+}
+
+fn kick_public_key() -> Result<&'static ParsedPublicKey> {
+    static PUBLIC_KEY: OnceLock<Result<ParsedPublicKey, String>> = OnceLock::new();
+
+    match PUBLIC_KEY.get_or_init(|| {
+        let public_key = STANDARD
+            .decode(KICK_PUBLIC_KEY)
+            .map_err(|error| format!("Kick public key is invalid base64: {error}"))?;
+        ParsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, public_key)
+            .map_err(|error| format!("Kick public key is invalid: {error}"))
+    }) {
+        Ok(public_key) => Ok(public_key),
+        Err(error) => Err(anyhow::anyhow!(error.clone())),
+    }
 }
 
 pub fn parse_chat_event(body: &[u8]) -> Result<IncomingChatMessage> {

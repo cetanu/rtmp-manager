@@ -508,14 +508,38 @@ enum MessageKind {
     Gift,
 }
 
+struct CommonFields {
+    external_id: String,
+    author: String,
+    avatar_url: Option<String>,
+    sent_at: Option<String>,
+}
+
 fn parse_renderer(renderer: &serde_json::Value, kind: MessageKind) -> Option<IncomingChatMessage> {
+    let CommonFields {
+        external_id,
+        author,
+        avatar_url,
+        sent_at,
+    } = common_fields(renderer, kind)?;
+    let text = renderer_text(renderer, kind);
+    Some(IncomingChatMessage {
+        source: Source::YouTube,
+        external_id,
+        author,
+        text,
+        avatar_url,
+        sent_at,
+    })
+}
+
+fn common_fields(renderer: &serde_json::Value, kind: MessageKind) -> Option<CommonFields> {
     let external_id = renderer.get("id")?.as_str()?.trim().to_string();
     let author = renderer
         .get("authorName")
         .map(extract_runs)
         .filter(|author| !author.trim().is_empty())
         .unwrap_or_else(|| "YouTube viewer".to_string());
-    let text = renderer_text(renderer, kind);
     let avatar_field = match kind {
         MessageKind::Gift => "authorAvatar",
         _ => "authorPhoto",
@@ -525,11 +549,9 @@ fn parse_renderer(renderer: &serde_json::Value, kind: MessageKind) -> Option<Inc
         .get("timestampUsec")
         .and_then(|value| value.as_str())
         .and_then(format_timestamp_usec);
-    Some(IncomingChatMessage {
-        source: Source::YouTube,
+    Some(CommonFields {
         external_id,
         author,
-        text,
         avatar_url,
         sent_at,
     })

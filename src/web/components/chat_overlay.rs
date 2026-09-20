@@ -1,6 +1,6 @@
 use crate::chat::ChatMessage;
 use crate::server::state::AppHandle;
-use crate::web::components::chat_source::{chat_source_icon, source_color};
+use crate::web::components::chat_message::chat_message_card;
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -163,22 +163,14 @@ pub(crate) fn overlay_message_class(highlighted: bool) -> &'static str {
 #[component]
 pub async fn chat_overlay_message(message: ChatMessage, highlighted: bool) -> Result<impl View> {
     let row_class = overlay_message_class(highlighted);
-    let author_color = source_color(message.source);
 
     Ok(view! {
-        <article
-            class=(row_class)
-            data-source=(message.source.to_string())
-            data-highlighted=(if highlighted { "true" } else { "false" })
-        >
-            chat_source_icon(source: message.source)
-            <p class="min-w-0 break-words text-sm leading-snug">
-                <span class=(format!("mr-1 font-semibold {author_color}"))>
-                    (message.author)
-                </span>
-                <span class="text-zinc-100">(message.text)</span>
-            </p>
-        </article>
+        chat_message_card(
+            message: message,
+            row_class: row_class,
+            highlighted: highlighted,
+            overlay: true,
+        )
     })
 }
 

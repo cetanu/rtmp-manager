@@ -14,7 +14,6 @@ use topcoat::{
 pub(crate) fn is_public_path(path: &str) -> bool {
     path == "/api/webhook"
         || path == "/overlay/chat"
-        || path == "/chat/overlay"
         || path == "/api/chat"
         || path == "/api/events"
         || path.starts_with("/assets/")
@@ -116,7 +115,6 @@ mod tests {
     fn public_paths_include_overlay_and_assets() {
         assert!(is_public_path("/api/webhook"));
         assert!(is_public_path("/overlay/chat"));
-        assert!(is_public_path("/chat/overlay"));
         assert!(is_public_path("/api/chat"));
         assert!(is_public_path("/api/events"));
         assert!(is_public_path("/assets/tailwind-123.css"));

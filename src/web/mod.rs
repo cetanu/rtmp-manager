@@ -161,11 +161,6 @@ async fn chat_overlay_route() -> Result<impl View> {
     Ok(view! { chat_overlay_page() })
 }
 
-#[page("/chat/overlay")]
-async fn chat_overlay_alias_route() -> Result<impl View> {
-    Ok(view! { chat_overlay_page() })
-}
-
 #[page("/logs")]
 async fn logs_page() -> Result<impl View> {
     Ok(view! { app_page(active_page: "logs") })
@@ -504,53 +499,69 @@ async fn receive_webhook(cx: &Cx, body: Bytes) -> Result<Response> {
         headers,
         body: body.to_vec(),
     };
-    let platform = if event.header("kick-event-signature").is_some() {
-        "kick"
-    } else if event.header("x-twitter-webhooks-signature").is_some() {
-        "x"
-    } else {
-        "unknown"
-    };
-    app.webhook_audit
-        .record(platform, event.header("content-type"), &event.body);
+    let platform = Platform::from_event(&event);
+    app.webhook_audit.record(
+        platform.map_or("unknown", Platform::as_str),
+        event.header("content-type"),
+        &event.body,
+    );
     if event.body.len() > MAX_WEBHOOK_SIZE {
         return Err(bad_request("Webhook body exceeds 128 KiB").into());
     }
     let settings = app.config.get().chat.clone();
-    let platform = if event.header("kick-event-signature").is_some() {
-        let message = match crate::chat::kick::process_event(&settings, &event) {
-            Ok(message) => message,
+    let Some(platform) = platform else {
+        tracing::warn!("Rejected webhook without a recognized platform signature");
+        return Err(bad_request("Webhook signature is missing").into());
+    };
+    let message = match platform {
+        Platform::Kick => match crate::chat::kick::process_event(&settings, &event) {
+            Ok(message) => Some(message),
             Err(error) => {
                 tracing::warn!("Rejected Kick webhook: {error:#}");
                 return Err(bad_request("Rejected Kick webhook").into());
             }
-        };
-        app.chat
-            .enqueue(message)
-            .await
-            .map_err(internal_server_error)?;
-        "kick"
-    } else if event.header("x-twitter-webhooks-signature").is_some() {
-        let message = match crate::chat::x::process_event(&settings, &event) {
+        },
+        Platform::X => match crate::chat::x::process_event(&settings, &event) {
             Ok(message) => message,
             Err(error) => {
                 tracing::warn!("Rejected X webhook: {error:#}");
                 return Err(bad_request("Rejected X webhook").into());
             }
-        };
-        if let Some(message) = message {
-            app.chat
-                .enqueue(message)
-                .await
-                .map_err(internal_server_error)?;
-        }
-        "x"
-    } else {
-        tracing::warn!("Rejected webhook without a recognized platform signature");
-        return Err(bad_request("Webhook signature is missing").into());
+        },
     };
-    tracing::info!(platform, body_bytes, "Webhook accepted");
+    if let Some(message) = message {
+        app.chat
+            .enqueue(message)
+            .await
+            .map_err(internal_server_error)?;
+    }
+    tracing::info!(platform = platform.as_str(), body_bytes, "Webhook accepted");
     topcoat::router::StatusCode::OK.into_response(cx)
+}
+
+#[derive(Clone, Copy)]
+enum Platform {
+    Kick,
+    X,
+}
+
+impl Platform {
+    fn from_event(event: &crate::chat::util::WebhookEvent) -> Option<Self> {
+        if event.header("kick-event-signature").is_some() {
+            Some(Self::Kick)
+        } else if event.header("x-twitter-webhooks-signature").is_some() {
+            Some(Self::X)
+        } else {
+            None
+        }
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Kick => "kick",
+            Self::X => "x",
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -665,16 +676,6 @@ mod tests {
         assert!(body1.contains("OBS overlay test message"));
         assert!(body1.contains("data-source=\"twitch\""));
 
-        let resp2 = client
-            .get(format!("http://{local_addr}/chat/overlay"))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(resp2.status(), reqwest::StatusCode::OK);
-        let body2 = resp2.text().await.unwrap();
-        assert!(body2.contains("RTMP-Manager Chat Overlay"));
-        assert!(body2.contains("TestViewer"));
-
         // Verify web auth with query token works
         let mut authed_config = app_handle.config.get().as_ref().clone();
         authed_config.web_auth.username = "admin".into();
@@ -706,14 +707,6 @@ mod tests {
         let overlay_body = overlay_no_auth.text().await.unwrap();
         assert!(overlay_body.contains("RTMP-Manager Chat Overlay"));
         assert!(overlay_body.contains("TestViewer"));
-
-        // Overlay alias (/chat/overlay) also works without authentication
-        let alias_no_auth = client
-            .get(format!("http://{local_addr}/chat/overlay"))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(alias_no_auth.status(), reqwest::StatusCode::OK);
 
         server_task.abort();
         let _ = std::fs::remove_dir_all(temp_dir);

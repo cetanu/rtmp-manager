@@ -1,6 +1,6 @@
 use crate::chat::ChatMessage;
 use crate::server::state::AppHandle;
-use crate::web::components::chat_source::{chat_source_icon, source_color};
+use crate::web::components::chat_message::chat_message_card as shared_chat_message_card;
 use crate::web::components::ui::button::{ButtonSize, ButtonVariant, button_variants};
 use crate::web::components::ui::card::{card, card_content, card_footer};
 use topcoat::{
@@ -25,6 +25,49 @@ async fn acknowledge_chat(cx: &Cx, displayed_id: String) -> Result<String> {
     Ok(first_message_id(&app.chat.snapshot().await?))
 }
 
+#[component]
+async fn chat_toggle(
+    label: &'static str,
+    platform: String,
+    enabled: &topcoat::runtime::Signal<bool>,
+    pending: &topcoat::runtime::Signal<bool>,
+    error: &topcoat::runtime::Signal<String>,
+) -> Result<impl View> {
+    let enabled = enabled.clone();
+    let pending = pending.clone();
+    let error = error.clone();
+
+    Ok(view! {
+        <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+            <button
+                type="button"
+                role="switch"
+                aria-label=(format!("Toggle {label}"))
+                class="group relative inline-flex h-4.5 w-8 shrink-0 rounded-full bg-foreground/20 shadow-xs transition-colors outline-none data-[checked]:bg-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50"
+                :aria-checked=$(if enabled.get() { "true" } else { "false" })
+                :data-checked=$(enabled.get())
+                :disabled=$(pending.get())
+                @click=$(async move |_event| {
+                    let next_enabled = !enabled.get();
+                    enabled.set(next_enabled);
+                    pending.set(true);
+                    let next_error = set_chat_toggle(platform, next_enabled).await;
+                    if !next_error.is_empty() {
+                        enabled.set(!next_enabled);
+                    }
+                    error.set(next_error);
+                    pending.set(false);
+                })
+            >
+                <span
+                    class="pointer-events-none absolute top-1/2 left-0.5 size-3.5 -translate-y-1/2 rounded-full bg-background shadow-xs transition-transform group-data-[checked]:translate-x-3.5"
+                ></span>
+            </button>
+            <span>(label)</span>
+        </div>
+    })
+}
+
 #[procedure]
 async fn send_test_chat(cx: &Cx) -> Result<String> {
     let app: &AppHandle = app_context(cx);
@@ -39,23 +82,14 @@ async fn refresh_chat(cx: &Cx) -> Result<String> {
 }
 
 #[procedure]
-async fn set_youtube_polling(cx: &Cx, enabled: bool) -> Result<String> {
+async fn set_chat_toggle(cx: &Cx, platform: String, enabled: bool) -> Result<String> {
     let app: &AppHandle = app_context(cx);
-    app.set_youtube_polling(enabled).await?;
-    Ok(String::new())
-}
-
-#[procedure]
-async fn set_x_webhook(cx: &Cx, enabled: bool) -> Result<String> {
-    let app: &AppHandle = app_context(cx);
-    app.set_x_webhook(enabled).await?;
-    Ok(String::new())
-}
-
-#[procedure]
-async fn set_kick_webhook(cx: &Cx, enabled: bool) -> Result<String> {
-    let app: &AppHandle = app_context(cx);
-    app.set_kick_webhook(enabled).await?;
+    match platform.as_str() {
+        "youtube" => app.set_youtube_polling(enabled).await?,
+        "x" => app.set_x_webhook(enabled).await?,
+        "kick" => app.set_kick_webhook(enabled).await?,
+        _ => return Err(anyhow::anyhow!("Unsupported chat toggle platform").into()),
+    }
     Ok(String::new())
 }
 
@@ -101,106 +135,28 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                 attrs: attributes! { class="justify-between" },
                 <div class="flex items-center gap-4">
                     if youtube_configured {
-                        <div
-                            class="flex items-center gap-2 text-xs font-medium text-muted-foreground"
-                        >
-                            <button
-                                type="button"
-                                role="switch"
-                                aria-label="Toggle YouTube polling"
-                                class="group relative inline-flex h-4.5 w-8 shrink-0 rounded-full bg-foreground/20 shadow-xs transition-colors outline-none data-[checked]:bg-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50"
-                                :aria-checked=$(if youtube_polling_enabled.get() {
-                                    "true"
-                                } else {
-                                    "false"
-                                })
-                                :data-checked=$(youtube_polling_enabled.get())
-                                :disabled=$(youtube_toggle_pending.get())
-                                @click=$(async |_event| {
-                                    let enabled = !youtube_polling_enabled.get();
-                                    youtube_polling_enabled.set(enabled);
-                                    youtube_toggle_pending.set(true);
-                                    let error = set_youtube_polling(enabled).await;
-                                    if !error.is_empty() {
-                                        youtube_polling_enabled.set(!enabled);
-                                    }
-                                    polling_error.set(error);
-                                    youtube_toggle_pending.set(false);
-                                })
-                            >
-                                <span
-                                    class="pointer-events-none absolute top-1/2 left-0.5 size-3.5 -translate-y-1/2 rounded-full bg-background shadow-xs transition-transform group-data-[checked]:translate-x-3.5"
-                                ></span>
-                            </button>
-                            <span>"YouTube polling"</span>
-                        </div>
+                        chat_toggle(
+                            label: "YouTube polling",
+                            platform: "youtube".to_string(),
+                            enabled: &youtube_polling_enabled,
+                            pending: &youtube_toggle_pending,
+                            error: &polling_error,
+                        )
                     }
-                    <div
-                        class="flex items-center gap-2 text-xs font-medium text-muted-foreground"
-                    >
-                        <button
-                            type="button"
-                            role="switch"
-                            aria-label="Toggle X webhook"
-                            class="group relative inline-flex h-4.5 w-8 shrink-0 rounded-full bg-foreground/20 shadow-xs transition-colors outline-none data-[checked]:bg-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50"
-                            :aria-checked=$(if x_webhook_enabled.get() {
-                                "true"
-                            } else {
-                                "false"
-                            })
-                            :data-checked=$(x_webhook_enabled.get())
-                            :disabled=$(x_toggle_pending.get())
-                            @click=$(async |_event| {
-                                let enabled = !x_webhook_enabled.get();
-                                x_webhook_enabled.set(enabled);
-                                x_toggle_pending.set(true);
-                                let error = set_x_webhook(enabled).await;
-                                if !error.is_empty() {
-                                    x_webhook_enabled.set(!enabled);
-                                }
-                                polling_error.set(error);
-                                x_toggle_pending.set(false);
-                            })
-                        >
-                            <span
-                                class="pointer-events-none absolute top-1/2 left-0.5 size-3.5 -translate-y-1/2 rounded-full bg-background shadow-xs transition-transform group-data-[checked]:translate-x-3.5"
-                            ></span>
-                        </button>
-                        <span>"X chat"</span>
-                    </div>
-                    <div
-                        class="flex items-center gap-2 text-xs font-medium text-muted-foreground"
-                    >
-                        <button
-                            type="button"
-                            role="switch"
-                            aria-label="Toggle Kick chat"
-                            class="group relative inline-flex h-4.5 w-8 shrink-0 rounded-full bg-foreground/20 shadow-xs transition-colors outline-none data-[checked]:bg-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50"
-                            :aria-checked=$(if kick_webhook_enabled.get() {
-                                "true"
-                            } else {
-                                "false"
-                            })
-                            :data-checked=$(kick_webhook_enabled.get())
-                            :disabled=$(kick_toggle_pending.get())
-                            @click=$(async |_event| {
-                                let enabled = !kick_webhook_enabled.get();
-                                kick_webhook_enabled.set(enabled);
-                                kick_toggle_pending.set(true);
-                                let error = set_kick_webhook(enabled).await;
-                                if !error.is_empty() {
-                                    kick_webhook_enabled.set(!enabled);
-                                }
-                                polling_error.set(error);
-                                kick_toggle_pending.set(false);
-                            })
-                        >
-                            <span
-                                class="pointer-events-none absolute top-1/2 left-0.5 size-3.5 -translate-y-1/2 rounded-full bg-background shadow-xs transition-transform group-data-[checked]:translate-x-3.5"
-                            ></span>
-                        </button>
-                        <span>"Kick chat"</span>
-                    </div>
+                    chat_toggle(
+                        label: "X chat",
+                        platform: "x".to_string(),
+                        enabled: &x_webhook_enabled,
+                        pending: &x_toggle_pending,
+                        error: &polling_error,
+                    )
+                    chat_toggle(
+                        label: "Kick chat",
+                        platform: "kick".to_string(),
+                        enabled: &kick_webhook_enabled,
+                        pending: &kick_toggle_pending,
+                        error: &polling_error,
+                    )
                     <p
                         :hidden=$(polling_error.get().is_empty())
                         class="text-xs text-destructive"
@@ -332,17 +288,12 @@ pub async fn chat_message_card(message: ChatMessage, highlighted: bool) -> Resul
     } else {
         "grid grid-cols-[1.25rem_minmax(0,1fr)] gap-2 px-2 py-1.5"
     };
-    let author_color = source_color(message.source);
-
     Ok(view! {
-        <article class=(row_class)>
-            chat_source_icon(source: message.source)
-            <p class="min-w-0 break-words text-sm leading-snug">
-                <span class=(format!("mr-1 font-semibold {author_color}"))>
-                    (message.author)
-                </span>
-                (message.text)
-            </p>
-        </article>
+        shared_chat_message_card(
+            message: message,
+            row_class: row_class,
+            highlighted: highlighted,
+            overlay: false,
+        )
     })
 }
