@@ -90,7 +90,7 @@ pub async fn server_settings(cx: &Cx) -> Result<impl View> {
                             control_id: "server_srt_enabled",
                             name: "server[srt_enabled]",
                             label_text: "Enable SRT Ingest",
-                            checked: config.server.srt_enabled,
+                            checked: config.server.srt_enabled
                         )
                     </div>
                 </div>

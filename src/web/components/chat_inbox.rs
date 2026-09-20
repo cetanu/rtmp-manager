@@ -211,7 +211,11 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                             class="max-w-md truncate text-xs text-muted-foreground"
                             title=(status.detail.clone())
                         >
-                            (format!("YouTube {}: {}", status.state.as_str(), status.detail))
+                            (format!(
+                                "YouTube {}: {}",
+                                status.state.as_str(),
+                                status.detail,
+                            ))
                         </p>
                     }
                 </div>
