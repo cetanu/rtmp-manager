@@ -59,6 +59,11 @@ pub async fn target_item(index: usize, target: TargetConfig) -> Result<impl View
         <div
             class="mb-4 flex flex-col items-start gap-6 border bg-surface p-6 transition-all hover:border-primary hover:bg-foreground/5 hover:shadow-sm md:flex-row md:items-center"
         >
+            <input
+                type="hidden"
+                name=(format!("targets[{index}][original_index]"))
+                value=(index.to_string())
+            />
             <div class="flex w-full flex-1 flex-col gap-1">
                 <div class="grid gap-1 md:grid-cols-2">
                     form_field(

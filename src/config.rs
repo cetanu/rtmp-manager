@@ -366,7 +366,9 @@ impl AppConfig {
                     .youtube_min_poll_interval_secs
                     .unwrap_or(config.chat.youtube_min_poll_interval_secs),
                 youtube_adaptive_polling: chat.youtube_adaptive_polling,
-                youtube_polling_enabled: config.chat.youtube_polling_enabled,
+                youtube_polling_enabled: chat
+                    .youtube_polling_enabled
+                    .unwrap_or(config.chat.youtube_polling_enabled),
                 x_api_key: updated_secret(
                     chat.x_api_key,
                     chat.clear_x_api_key,
@@ -387,7 +389,9 @@ impl AppConfig {
                     chat.clear_x_client_secret,
                     config.chat.x_client_secret,
                 ),
-                x_webhook_enabled: config.chat.x_webhook_enabled,
+                x_webhook_enabled: chat
+                    .x_webhook_enabled
+                    .unwrap_or(config.chat.x_webhook_enabled),
                 kick_client_id: non_empty(chat.kick_client_id),
                 kick_client_secret: updated_secret(
                     chat.kick_client_secret,
@@ -396,44 +400,53 @@ impl AppConfig {
                 ),
                 kick_channel: non_empty(chat.kick_channel)
                     .map(|channel| channel.trim().to_ascii_lowercase()),
-                kick_webhook_enabled: config.chat.kick_webhook_enabled,
+                kick_webhook_enabled: chat
+                    .kick_webhook_enabled
+                    .unwrap_or(config.chat.kick_webhook_enabled),
             };
         }
         if let Some(target_fields) = form.targets {
+            let mut submitted_indices = std::collections::HashSet::new();
+            anyhow::ensure!(
+                target_fields
+                    .iter()
+                    .all(|target| submitted_indices.insert(target.original_index)),
+                "A target was submitted more than once"
+            );
             config.targets = target_fields
                 .into_iter()
-                .enumerate()
-                .map(|(index, target)| TargetConfig {
-                    name: target.name,
-                    url: target.url,
-                    stream_key: non_empty(target.stream_key).unwrap_or_else(|| {
-                        config
-                            .targets
-                            .get(index)
-                            .map(|target| target.stream_key.clone())
-                            .unwrap_or_default()
-                    }),
-                    public_url: non_empty(target.public_url),
-                    enabled: target.enabled,
+                .map(|target| {
+                    let current = config.targets.get(target.original_index).with_context(|| {
+                        format!("Target {} no longer exists", target.original_index)
+                    })?;
+                    Ok(TargetConfig {
+                        name: target.name,
+                        url: target.url,
+                        stream_key: non_empty(target.stream_key)
+                            .unwrap_or_else(|| current.stream_key.clone()),
+                        public_url: non_empty(target.public_url),
+                        enabled: target.enabled,
+                    })
                 })
-                .collect();
+                .collect::<Result<Vec<_>>>()?;
         }
 
-        let action = form.action.as_deref().unwrap_or_default();
-        if action == "add_target" {
-            config.targets.push(TargetConfig {
+        match form.action.unwrap_or(FormAction::Save) {
+            FormAction::AddTarget => config.targets.push(TargetConfig {
                 name: "New Target".to_string(),
                 url: "".to_string(),
                 stream_key: "".to_string(),
                 public_url: None,
                 enabled: false,
-            });
-        } else if action.starts_with("remove_target:")
-            && let Some(idx_str) = action.split(':').nth(1)
-            && let Ok(idx) = idx_str.parse::<usize>()
-            && idx < config.targets.len()
-        {
-            config.targets.remove(idx);
+            }),
+            FormAction::RemoveTarget(index) => {
+                anyhow::ensure!(
+                    index < config.targets.len(),
+                    "Target {index} does not exist"
+                );
+                config.targets.remove(index);
+            }
+            FormAction::Save => {}
         }
 
         Ok(config)
@@ -528,6 +541,7 @@ pub struct ChatForm {
     pub youtube_min_poll_interval_secs: Option<u64>,
     #[serde(default)]
     pub youtube_adaptive_polling: bool,
+    pub youtube_polling_enabled: Option<bool>,
     pub x_api_key: Option<String>,
     #[serde(default)]
     pub clear_x_api_key: bool,
@@ -540,15 +554,18 @@ pub struct ChatForm {
     pub x_client_secret: Option<String>,
     #[serde(default)]
     pub clear_x_client_secret: bool,
+    pub x_webhook_enabled: Option<bool>,
     pub kick_client_id: Option<String>,
     pub kick_client_secret: Option<String>,
     #[serde(default)]
     pub clear_kick_client_secret: bool,
     pub kick_channel: Option<String>,
+    pub kick_webhook_enabled: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct TargetForm {
+    pub original_index: usize,
     pub name: String,
     pub url: String,
     #[serde(default)]
@@ -558,6 +575,34 @@ pub struct TargetForm {
     pub enabled: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormAction {
+    Save,
+    AddTarget,
+    RemoveTarget(usize),
+}
+
+impl<'de> Deserialize<'de> for FormAction {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "save" => Ok(Self::Save),
+            "add_target" => Ok(Self::AddTarget),
+            _ => {
+                let index = value
+                    .strip_prefix("remove_target:")
+                    .ok_or_else(|| serde::de::Error::custom("unknown form action"))?
+                    .parse()
+                    .map_err(|_| serde::de::Error::custom("invalid target index"))?;
+                Ok(Self::RemoveTarget(index))
+            }
+        }
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 pub struct ConfigForm {
     pub server: Option<ServerForm>,
@@ -565,7 +610,7 @@ pub struct ConfigForm {
     pub chat: Option<ChatForm>,
     pub notifications: Option<NotificationsForm>,
     pub targets: Option<Vec<TargetForm>>,
-    pub action: Option<String>,
+    pub action: Option<FormAction>,
     pub return_to: Option<String>,
 }
 
@@ -762,9 +807,7 @@ impl ConfigHandle {
         current_config: Arc<AppConfig>,
         updated: AppConfig,
     ) -> Result<(Arc<AppConfig>, bool, bool)> {
-        if let Err(error) = updated.validate() {
-            bail!(error);
-        }
+        updated.validate()?;
 
         let changed = updated != *current_config;
         let chat_changed = updated.chat != current_config.chat;
@@ -1048,6 +1091,7 @@ mod tests {
             .use_form_encoding(true)
             .deserialize_str(
                 "targets%5B0%5D%5Bname%5D=Twitch&\
+                 targets%5B0%5D%5Boriginal_index%5D=0&\
                  targets%5B0%5D%5Burl%5D=rtmps%3A%2F%2Fexample.test%2Fapp&\
                  targets%5B0%5D%5Bstream_key%5D=secret&action=save",
             )
@@ -1063,6 +1107,7 @@ mod tests {
             .use_form_encoding(true)
             .deserialize_str(
                 "targets%5B0%5D%5Bname%5D=Twitch&\
+                 targets%5B0%5D%5Boriginal_index%5D=0&\
                  targets%5B0%5D%5Burl%5D=rtmps%3A%2F%2Fexample.test%2Fapp&\
                  targets%5B0%5D%5Bstream_key%5D=secret&\
                  targets%5B0%5D%5Benabled%5D=true&action=save",
@@ -1083,6 +1128,7 @@ mod tests {
                  notifications%5Bdiscord_webhook%5D=&\
                  notifications%5Bwebhook_url%5D=&\
                  targets%5B0%5D%5Bname%5D=Twitch&\
+                 targets%5B0%5D%5Boriginal_index%5D=0&\
                  targets%5B0%5D%5Burl%5D=rtmps%3A%2F%2Fexample.test%2Fapp&\
                  targets%5B0%5D%5Bstream_key%5D=&action=save",
             )

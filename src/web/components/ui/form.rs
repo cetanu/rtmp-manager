@@ -81,6 +81,12 @@ pub async fn clearable_secret_field(
     #[into] empty_placeholder: String,
     #[into] value: String,
 ) -> Result<impl View> {
+    let clear_name = name
+        .strip_suffix(']')
+        .and_then(|name| name.rsplit_once('['))
+        .map(|(group, field)| format!("{group}[clear_{field}]"))
+        .unwrap_or_else(|| format!("clear_{name}"));
+    let configured = !value.is_empty();
     Ok(view! {
         form_field(
             control_id: control_id.clone(),
@@ -93,6 +99,15 @@ pub async fn clearable_secret_field(
                     placeholder=(empty_placeholder)
                 }
             )
+            <label class="flex items-center gap-2 text-xs text-muted-foreground">
+                <input
+                    type="checkbox"
+                    name=(clear_name)
+                    value="true"
+                    disabled=(!configured)
+                />
+                "Clear configured value"
+            </label>
         )
     })
 }
