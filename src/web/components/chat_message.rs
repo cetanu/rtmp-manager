@@ -14,8 +14,8 @@ pub(crate) async fn chat_message_card(
 ) -> Result<impl View> {
     let author_color = source_color(message.source);
     let data_source = overlay.then(|| message.source.to_string());
-    let data_highlighted = overlay.then(|| if highlighted { "true" } else { "false" });
-    let text_class = overlay.then_some("text-zinc-100").unwrap_or_default();
+    let data_highlighted = overlay.then_some(if highlighted { "true" } else { "false" });
+    let text_class = if overlay { "text-zinc-100" } else { "" };
 
     Ok(view! {
         <article
