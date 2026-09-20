@@ -1,4 +1,4 @@
-use crate::chat::ChatMessage;
+use crate::chat::{ChatMessage, Source};
 use crate::server::state::AppHandle;
 use crate::web::components::ui::button::{ButtonSize, ButtonVariant, button_variants};
 use crate::web::components::ui::card::{card, card_content, card_footer};
@@ -12,8 +12,14 @@ use topcoat::{
 #[procedure]
 async fn acknowledge_chat(cx: &Cx, displayed_id: String) -> Result<String> {
     let app: &AppHandle = app_context(cx);
-    if let Ok(displayed_id) = displayed_id.parse() {
-        let _ = app.chat.acknowledge(displayed_id).await?;
+    let displayed_id = displayed_id
+        .parse()
+        .map_err(|error| anyhow::anyhow!("Invalid displayed chat message ID: {error}"))?;
+    if !app.chat.acknowledge(displayed_id).await? {
+        return Err(anyhow::anyhow!(
+            "The displayed message changed before it could be acknowledged"
+        )
+        .into());
     }
     Ok(first_message_id(&app.chat.snapshot().await?))
 }
@@ -21,7 +27,7 @@ async fn acknowledge_chat(cx: &Cx, displayed_id: String) -> Result<String> {
 #[procedure]
 async fn send_test_chat(cx: &Cx) -> Result<String> {
     let app: &AppHandle = app_context(cx);
-    let _ = app.chat.enqueue_test(None).await?;
+    app.chat.enqueue_test(None).await?;
     Ok(first_message_id(&app.chat.snapshot().await?))
 }
 
@@ -34,34 +40,22 @@ async fn refresh_chat(cx: &Cx) -> Result<String> {
 #[procedure]
 async fn set_youtube_polling(cx: &Cx, enabled: bool) -> Result<String> {
     let app: &AppHandle = app_context(cx);
-    Ok(app
-        .set_youtube_polling(enabled)
-        .await
-        .err()
-        .map(|error| error.to_string())
-        .unwrap_or_default())
+    app.set_youtube_polling(enabled).await?;
+    Ok(String::new())
 }
 
 #[procedure]
 async fn set_x_webhook(cx: &Cx, enabled: bool) -> Result<String> {
     let app: &AppHandle = app_context(cx);
-    Ok(app
-        .set_x_webhook(enabled)
-        .await
-        .err()
-        .map(|error| error.to_string())
-        .unwrap_or_default())
+    app.set_x_webhook(enabled).await?;
+    Ok(String::new())
 }
 
 #[procedure]
 async fn set_kick_webhook(cx: &Cx, enabled: bool) -> Result<String> {
     let app: &AppHandle = app_context(cx);
-    Ok(app
-        .set_kick_webhook(enabled)
-        .await
-        .err()
-        .map(|error| error.to_string())
-        .unwrap_or_default())
+    app.set_kick_webhook(enabled).await?;
+    Ok(String::new())
 }
 
 fn first_message_id(snapshot: &crate::chat::ChatInboxSnapshot) -> String {
@@ -76,6 +70,7 @@ fn first_message_id(snapshot: &crate::chat::ChatInboxSnapshot) -> String {
 pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
     let app: &AppHandle = app_context(cx);
     let initial_id = first_message_id(&app.chat.snapshot().await?);
+    let youtube_status = app.chat.youtube_status();
     let chat = app.config.get().chat.clone();
     let youtube_configured = [
         &chat.youtube_live_chat_id,
@@ -211,6 +206,14 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                     >
                         $(polling_error.get())
                     </p>
+                    if let Some(status) = youtube_status {
+                        <p
+                            class="max-w-md truncate text-xs text-muted-foreground"
+                            title=(status.detail.clone())
+                        >
+                            (format!("YouTube {}: {}", status.state.as_str(), status.detail))
+                        </p>
+                    }
                 </div>
                 <div class="ml-auto flex items-center gap-2">
                     <button
@@ -317,22 +320,53 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
     })
 }
 
-pub(crate) fn source_color(source: &str) -> &'static str {
+pub(crate) const fn source_color(source: Source) -> &'static str {
     match source {
-        "twitch" => "text-[#9146ff]",
-        "youtube" => "text-[#ff0033]",
-        "kick" => "text-[#53fc18]",
-        "x" => "text-sky-500",
-        _ => "text-muted-foreground",
+        Source::Twitch => "text-[#9146ff]",
+        Source::YouTube => "text-[#ff0033]",
+        Source::Kick => "text-[#53fc18]",
+        Source::X => "text-sky-500",
     }
 }
 
 #[component]
-pub(crate) async fn chat_source_icon(source: String) -> Result<impl View> {
-    let color = source_color(&source);
+pub(crate) async fn chat_source_icon(source: Source) -> Result<impl View> {
+    let color = source_color(source);
+    let svg = match source {
+        Source::Twitch => {
+            r#"
+            <path
+                d="M4 3h5v7.2L16.2 3H22l-8.5 9 8.5 9h-5.8L9 13.7V21H4V3Z"
+                fill="currentColor"
+                stroke="none"
+            />
+        "#
+        }
+        Source::YouTube => {
+            r#"
+            <path
+                d="M21.5 7.2a2.8 2.8 0 0 0-2-2C17.7 4.7 12 4.7 12 4.7s-5.7 0-7.5.5a2.8 2.8 0 0 0-2 2C2 9 2 12 2 12s0 3 .5 4.8a2.8 2.8 0 0 0 2 2c1.8.5 7.5.5 7.5.5s5.7 0 7.5-.5a2.8 2.8 0 0 0 2-2C22 15 22 12 22 12s0-3-.5-4.8Z"
+            />
+            <path d="m10 15 5-3-5-3v6Z" fill="currentColor" stroke="none" />
+        "#
+        }
+        Source::Kick => {
+            r#"
+            <path d="M5 3h14v12l-4 4h-4l-3 2v-2H5V3Z" />
+            <path d="M10 8v4M14 8v4" />
+        "#
+        }
+        Source::X => {
+            r#"
+            <path
+                d="M21.742 21.75l-7.563-11.179 7.056-8.321h-2.456l-5.691 6.714-4.54-6.714H2.359l7.29 10.776L2.25 21.75h2.456l6.035-7.118 4.818 7.118h6.191-.008zM7.739 3.818L18.81 20.182h-2.447L5.29 3.818h2.447z"
+            ></path>
+        "#
+        }
+    };
 
     Ok(view! {
-        <span class=(format!("mt-0.5 shrink-0 {color}")) title=(source.clone())>
+        <span class=(format!("mt-0.5 shrink-0 {color}")) title=(source.to_string())>
             <svg
                 aria-hidden="true"
                 width="18"
@@ -344,29 +378,7 @@ pub(crate) async fn chat_source_icon(source: String) -> Result<impl View> {
                 stroke-linecap="round"
                 stroke-linejoin="round"
             >
-                if source == "kick" {
-                    <path
-                        d="M4 3h5v7.2L16.2 3H22l-8.5 9 8.5 9h-5.8L9 13.7V21H4V3Z"
-                        fill="currentColor"
-                        stroke="none"
-                    />
-                } else if source == "youtube" {
-                    <path
-                        d="M21.5 7.2a2.8 2.8 0 0 0-2-2C17.7 4.7 12 4.7 12 4.7s-5.7 0-7.5.5a2.8 2.8 0 0 0-2 2C2 9 2 12 2 12s0 3 .5 4.8a2.8 2.8 0 0 0 2 2c1.8.5 7.5.5 7.5.5s5.7 0 7.5-.5a2.8 2.8 0 0 0 2-2C22 15 22 12 22 12s0-3-.5-4.8Z"
-                    />
-                    <path d="m10 15 5-3-5-3v6Z" fill="currentColor" stroke="none" />
-                } else if source == "twitch" {
-                    <path d="M5 3h14v12l-4 4h-4l-3 2v-2H5V3Z" />
-                    <path d="M10 8v4M14 8v4" />
-                } else if source == "x" {
-                    <path
-                        d="M21.742 21.75l-7.563-11.179 7.056-8.321h-2.456l-5.691 6.714-4.54-6.714H2.359l7.29 10.776L2.25 21.75h2.456l6.035-7.118 4.818 7.118h6.191-.008zM7.739 3.818L18.81 20.182h-2.447L5.29 3.818h2.447z"
-                    ></path>
-                } else {
-                    <path
-                        d="M20 11.5a7.5 7.5 0 0 1-8 7.5 8.6 8.6 0 0 1-3.5-.8L4 20l1.5-4A7.2 7.2 0 0 1 4 11.5 7.5 7.5 0 0 1 12 4a7.5 7.5 0 0 1 8 7.5Z"
-                    />
-                }
+                (svg)
             </svg>
         </span>
     })
@@ -379,7 +391,7 @@ pub async fn chat_message_card(message: ChatMessage, highlighted: bool) -> Resul
     } else {
         "grid grid-cols-[1.25rem_minmax(0,1fr)] gap-2 px-2 py-1.5"
     };
-    let author_color = source_color(&message.source);
+    let author_color = source_color(message.source);
 
     Ok(view! {
         <article class=(row_class)>

@@ -1,4 +1,4 @@
-use crate::chat::IncomingChatMessage;
+use crate::chat::{IncomingChatMessage, Source};
 use crate::config::ChatSettings;
 use crate::server::state::WebhookEvent;
 use anyhow::{Context, Result, bail};
@@ -75,7 +75,7 @@ pub fn parse_chat_event(body: &[u8]) -> Result<Option<IncomingChatMessage>> {
         bail!("X broadcast.chat event is missing an event UUID, message ID, or message");
     }
     Ok(Some(IncomingChatMessage {
-        source: "x".into(),
+        source: Source::X,
         external_id: event.data.payload.message_id,
         author: event.data.payload.author.data.username,
         text: event.data.payload.message,
@@ -141,7 +141,7 @@ mod tests {
     #[test]
     fn parses_broadcast_chat_event() {
         let message = parse_chat_event(BODY).unwrap().unwrap();
-        assert_eq!(message.source, "x");
+        assert_eq!(message.source, Source::X);
         assert_eq!(message.external_id, "2090000000000000004");
         assert_eq!(message.author, "ExampleUser");
         assert_eq!(message.text, "hello from chat");

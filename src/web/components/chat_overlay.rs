@@ -162,12 +162,12 @@ pub(crate) fn overlay_message_class(highlighted: bool) -> &'static str {
 #[component]
 pub async fn chat_overlay_message(message: ChatMessage, highlighted: bool) -> Result<impl View> {
     let row_class = overlay_message_class(highlighted);
-    let author_color = source_color(&message.source);
+    let author_color = source_color(message.source);
 
     Ok(view! {
         <article
             class=(row_class)
-            data-source=(message.source.clone())
+            data-source=(message.source.to_string())
             data-highlighted=(if highlighted { "true" } else { "false" })
         >
             chat_source_icon(source: message.source)

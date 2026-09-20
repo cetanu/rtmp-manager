@@ -1,4 +1,4 @@
-use crate::chat::{ChatHandle, IncomingChatMessage};
+use crate::chat::{ChatHandle, IncomingChatMessage, Source};
 use crate::util::now_unix_ms;
 use anyhow::{Context, Result};
 use std::time::Duration;
@@ -7,6 +7,8 @@ use tokio::net::TcpStream;
 
 const TWITCH_IRC_ADDRESS: &str = "irc.chat.twitch.tv:6667";
 const RECONNECT_DELAY: Duration = Duration::from_secs(5);
+const ANONYMOUS_NICK_MIN: u64 = 10_000;
+const ANONYMOUS_NICK_RANGE: u64 = 90_000;
 
 pub async fn run(chat: ChatHandle, channel: String) {
     loop {
@@ -24,7 +26,10 @@ async fn read_connection(chat: &ChatHandle, channel: &str) -> Result<()> {
     let mut stream = TcpStream::connect(TWITCH_IRC_ADDRESS)
         .await
         .context("failed to connect to Twitch IRC")?;
-    let nick = format!("justinfan{}", 10_000 + now_unix_ms() % 90_000);
+    let nick = format!(
+        "justinfan{}",
+        ANONYMOUS_NICK_MIN + now_unix_ms() % ANONYMOUS_NICK_RANGE
+    );
     let handshake = format!(
         "CAP REQ :twitch.tv/tags twitch.tv/commands\r\n\
          PASS SCHMOOPIIE\r\n\
@@ -70,7 +75,7 @@ async fn read_connection(chat: &ChatHandle, channel: &str) -> Result<()> {
         };
         fallback_message_id = fallback_message_id.wrapping_add(1);
         let message = IncomingChatMessage {
-            source: "twitch".into(),
+            source: Source::Twitch,
             external_id: parsed
                 .id
                 .unwrap_or_else(|| format!("irc-{}-{fallback_message_id}", now_unix_ms())),

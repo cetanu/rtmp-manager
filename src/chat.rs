@@ -5,6 +5,9 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_valid::Validate;
 use std::path::Path;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use toasty::Executor;
 use tokio::sync::{mpsc, oneshot, watch};
@@ -15,14 +18,56 @@ pub mod twitch;
 pub mod x;
 pub mod youtube;
 
-pub use youtube::{YouTubeChatConfig, YouTubeChatTarget, YouTubeIngestStatus};
+pub use youtube::{YouTubeChatConfig, YouTubeChatTarget, YouTubeIngestState, YouTubeIngestStatus};
+
+const INBOX_PREVIEW_LIMIT: usize = 10;
+const SEEN_ID_RETENTION_MULTIPLIER: usize = 4;
+const ACTOR_COMMAND_CAPACITY: usize = 64;
+const STATUS_DETAIL_LIMIT: usize = 240;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Source {
+    Twitch,
+    YouTube,
+    Kick,
+    X,
+}
+
+impl Source {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Twitch => "twitch",
+            Self::YouTube => "youtube",
+            Self::Kick => "kick",
+            Self::X => "x",
+        }
+    }
+}
+
+impl std::fmt::Display for Source {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl FromStr for Source {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "twitch" => Ok(Self::Twitch),
+            "youtube" => Ok(Self::YouTube),
+            "kick" => Ok(Self::Kick),
+            "x" => Ok(Self::X),
+            value => anyhow::bail!("Unsupported chat source '{value}'"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Deserialize, Validate)]
 pub struct IncomingChatMessage {
-    #[validate(min_length = 1)]
-    #[validate(max_length = 32)]
-    #[validate(pattern = r"^[A-Za-z0-9_-]+$")]
-    pub source: String,
+    pub source: Source,
     #[validate(min_length = 1)]
     #[validate(max_length = 256)]
     pub external_id: String,
@@ -41,7 +86,6 @@ pub struct IncomingChatMessage {
 }
 impl IncomingChatMessage {
     pub fn normalized(mut self) -> Result<Self> {
-        self.source = self.source.trim().to_ascii_lowercase();
         self.external_id = self.external_id.trim().to_string();
         self.author = self.author.trim().to_string();
         self.text = self.text.trim().to_string();
@@ -58,7 +102,7 @@ impl IncomingChatMessage {
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct TestChatMessageRequest {
     #[serde(default)]
-    pub source: Option<String>,
+    pub source: Option<Source>,
     #[serde(default)]
     pub author: Option<String>,
     #[serde(default)]
@@ -67,26 +111,24 @@ pub struct TestChatMessageRequest {
     pub avatar_url: Option<String>,
 }
 
-static TEST_MESSAGE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-
-const SAMPLE_TEST_MESSAGES: &[(&str, &str, &str)] = &[
+const SAMPLE_TEST_MESSAGES: &[(Source, &str, &str)] = &[
     (
-        "twitch",
+        Source::Twitch,
         "Gabriel",
         "Look up from the relentless noise of your daily life and listen to the quiet intuition guiding you, because the answers you seek have already been spoken.",
     ),
     (
-        "youtube",
+        Source::YouTube,
         "Michael",
         "Stand firm against the fear that seeks to paralyze this world, for you have the inherent strength and courage to protect what is right.",
     ),
     (
-        "kick",
+        Source::Kick,
         "Raphael",
         "Forgive yourself for the heavy burdens you were never meant to carry alone, and allow your exhausted mind and body the necessary grace to truly heal.",
     ),
     (
-        "x",
+        Source::X,
         "Uriel",
         "Seek the light of truth in times of manufactured chaos, remembering that real wisdom is found in calm discernment rather than the loudest voices.",
     ),
@@ -95,7 +137,7 @@ const SAMPLE_TEST_MESSAGES: &[(&str, &str, &str)] = &[
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub id: u64,
-    pub source: String,
+    pub source: Source,
     pub external_id: String,
     pub author: String,
     pub text: String,
@@ -159,7 +201,7 @@ pub struct ChatInbox {
 
 impl ChatInbox {
     pub async fn open(path: &Path, capacity: usize) -> Result<Self> {
-        assert!(capacity > 0, "chat queue capacity must be positive");
+        anyhow::ensure!(capacity > 0, "chat queue capacity must be positive");
         let database = toasty::Db::builder()
             .models(toasty::models!(
                 StoredChatMessage,
@@ -204,11 +246,14 @@ impl ChatInbox {
         let mut transaction = database.transaction().await?;
 
         let seen = StoredChatSeen::filter(
-            StoredChatSeen::fields().source().eq(&incoming.source).and(
-                StoredChatSeen::fields()
-                    .external_id()
-                    .eq(&incoming.external_id),
-            ),
+            StoredChatSeen::fields()
+                .source()
+                .eq(incoming.source.as_str())
+                .and(
+                    StoredChatSeen::fields()
+                        .external_id()
+                        .eq(&incoming.external_id),
+                ),
         )
         .first()
         .exec(&mut transaction)
@@ -217,12 +262,16 @@ impl ChatInbox {
             return Ok(EnqueueOutcome::Duplicate);
         }
         toasty::create!(StoredChatSeen {
-            source: incoming.source.clone(),
+            source: incoming.source.to_string(),
             external_id: incoming.external_id.clone(),
         })
         .exec(&mut transaction)
         .await?;
-        trim_seen(&mut transaction, self.capacity.saturating_mul(4)).await?;
+        trim_seen(
+            &mut transaction,
+            self.capacity.saturating_mul(SEEN_ID_RETENTION_MULTIPLIER),
+        )
+        .await?;
 
         let mut messages = ordered_messages(&mut transaction).await?;
         let message_count = messages.len();
@@ -232,11 +281,11 @@ impl ChatInbox {
                 transaction.commit().await?;
                 return Ok(EnqueueOutcome::Dropped);
             }
-            messages.remove(1).delete().exec(&mut transaction).await?;
+            remove_oldest_waiting(&mut messages, &mut transaction).await?;
         }
 
         toasty::create!(StoredChatMessage {
-            source: incoming.source,
+            source: incoming.source.to_string(),
             external_id: incoming.external_id,
             author: incoming.author,
             text: incoming.text,
@@ -268,7 +317,7 @@ impl ChatInbox {
         let queued = messages.len();
         let messages = messages
             .iter()
-            .take(10)
+            .take(INBOX_PREVIEW_LIMIT)
             .map(chat_message_from_model)
             .collect::<Result<_>>()?;
         let dropped = load_state(&mut database).await?.dropped;
@@ -281,7 +330,7 @@ impl ChatInbox {
     }
 
     pub async fn resize(&mut self, capacity: usize) -> Result<()> {
-        assert!(capacity > 0, "chat queue capacity must be positive");
+        anyhow::ensure!(capacity > 0, "chat queue capacity must be positive");
         self.capacity = capacity;
         self.trim_to_capacity().await
     }
@@ -292,12 +341,16 @@ impl ChatInbox {
         let mut messages = ordered_messages(&mut transaction).await?;
         let excess = messages.len().saturating_sub(self.capacity);
         for _ in 0..excess {
-            messages.remove(1).delete().exec(&mut transaction).await?;
+            remove_oldest_waiting(&mut messages, &mut transaction).await?;
         }
         if excess > 0 {
             increment_dropped(&mut transaction, excess).await?;
         }
-        trim_seen(&mut transaction, self.capacity.saturating_mul(4)).await?;
+        trim_seen(
+            &mut transaction,
+            self.capacity.saturating_mul(SEEN_ID_RETENTION_MULTIPLIER),
+        )
+        .await?;
         transaction.commit().await?;
         Ok(())
     }
@@ -306,7 +359,10 @@ impl ChatInbox {
 fn chat_message_from_model(message: &StoredChatMessage) -> Result<ChatMessage> {
     Ok(ChatMessage {
         id: message.id,
-        source: message.source.clone(),
+        source: message
+            .source
+            .parse()
+            .with_context(|| format!("Stored chat message {} has an invalid source", message.id))?,
         external_id: message.external_id.clone(),
         author: message.author.clone(),
         text: message.text.clone(),
@@ -314,6 +370,17 @@ fn chat_message_from_model(message: &StoredChatMessage) -> Result<ChatMessage> {
         sent_at: message.sent_at.clone(),
         received_at_unix_ms: message.received_at_unix_ms,
     })
+}
+
+/// The first message is currently on-air. Eviction therefore starts at the
+/// oldest waiting message and never removes the on-air item.
+async fn remove_oldest_waiting(
+    messages: &mut Vec<StoredChatMessage>,
+    executor: &mut dyn Executor,
+) -> Result<()> {
+    anyhow::ensure!(messages.len() > 1, "Cannot evict a waiting chat message");
+    messages.remove(1).delete().exec(executor).await?;
+    Ok(())
 }
 
 async fn ordered_messages(executor: &mut dyn Executor) -> Result<Vec<StoredChatMessage>> {
@@ -370,7 +437,7 @@ enum ChatCommand {
         respond_to: oneshot::Sender<()>,
     },
     UpdateYouTubeStatus {
-        state: String,
+        state: YouTubeIngestState,
         detail: String,
         last_success_at_unix_ms: Option<u64>,
         newly_received: Option<u64>,
@@ -423,7 +490,7 @@ impl ChatActor {
                     let _ = respond_to.send(res);
                 }
                 ChatCommand::SetYouTubePolling { config, respond_to } => {
-                    self.configure_youtube(&config, &handle);
+                    self.configure_youtube(&config, &handle).await;
                     let _ = respond_to.send(());
                 }
                 ChatCommand::UpdateYouTubeStatus {
@@ -439,7 +506,7 @@ impl ChatActor {
                         .youtube_status
                         .get_or_insert_with(YouTubeIngestStatus::default);
                     status.state = state;
-                    status.detail = detail.chars().take(240).collect();
+                    status.detail = detail.chars().take(STATUS_DETAIL_LIMIT).collect();
                     if let Some(last_success_at_unix_ms) = last_success_at_unix_ms {
                         status.last_success_at_unix_ms = Some(last_success_at_unix_ms);
                     }
@@ -468,6 +535,7 @@ impl ChatActor {
 
         if let Some(task) = self.twitch_task.take() {
             task.abort();
+            let _ = task.await;
         }
 
         if let Some(channel) = chat
@@ -482,13 +550,14 @@ impl ChatActor {
             tracing::info!(channel, "Twitch anonymous IRC ingest configured");
         }
 
-        self.configure_youtube(chat, handle);
+        self.configure_youtube(chat, handle).await;
         Ok(())
     }
 
-    fn configure_youtube(&mut self, chat: &ChatSettings, handle: &ChatHandle) {
+    async fn configure_youtube(&mut self, chat: &ChatSettings, handle: &ChatHandle) {
         if let Some(task) = self.youtube_task.take() {
             task.abort();
+            let _ = task.await;
         }
         self.youtube_status = None;
         self.youtube_status_tx.send_replace(None);
@@ -520,7 +589,7 @@ impl ChatActor {
 
         if !chat.youtube_polling_enabled {
             let status = YouTubeIngestStatus {
-                state: "off".into(),
+                state: YouTubeIngestState::Off,
                 detail: "Polling is off. Turn it on when the YouTube stream is live.".into(),
                 ..YouTubeIngestStatus::default()
             };
@@ -551,8 +620,8 @@ impl ChatActor {
 pub struct ChatHandle {
     sender: mpsc::Sender<ChatCommand>,
     revision_rx: watch::Receiver<u64>,
-    #[allow(dead_code)]
     youtube_status_rx: watch::Receiver<Option<YouTubeIngestStatus>>,
+    test_message_sequence: Arc<AtomicU64>,
 }
 
 impl ChatHandle {
@@ -560,12 +629,13 @@ impl ChatHandle {
         let inbox = ChatInbox::open(path, capacity).await?;
         let (revision_tx, revision_rx) = watch::channel(0);
         let (youtube_status_tx, youtube_status_rx) = watch::channel(None);
-        let (sender, receiver) = mpsc::channel(64);
+        let (sender, receiver) = mpsc::channel(ACTOR_COMMAND_CAPACITY);
 
         let handle = Self {
             sender,
             revision_rx,
             youtube_status_rx,
+            test_message_sequence: Arc::new(AtomicU64::new(1)),
         };
 
         let actor = ChatActor {
@@ -603,17 +673,11 @@ impl ChatHandle {
         &self,
         request: Option<TestChatMessageRequest>,
     ) -> Result<EnqueueOutcome> {
-        let seq = TEST_MESSAGE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let seq = self.test_message_sequence.fetch_add(1, Ordering::Relaxed);
         let sample = SAMPLE_TEST_MESSAGES[(seq as usize) % SAMPLE_TEST_MESSAGES.len()];
         let req = request.unwrap_or_default();
 
-        let source = req
-            .source
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .unwrap_or(sample.0)
-            .to_string();
+        let source = req.source.unwrap_or(sample.0);
 
         let author = req
             .author
@@ -693,13 +757,13 @@ impl ChatHandle {
 
     pub fn update_youtube_status(
         &self,
-        state: &str,
+        state: YouTubeIngestState,
         detail: impl Into<String>,
         last_success_at_unix_ms: Option<u64>,
         newly_received: Option<u64>,
     ) {
         let _ = self.sender.try_send(ChatCommand::UpdateYouTubeStatus {
-            state: state.to_string(),
+            state,
             detail: detail.into(),
             last_success_at_unix_ms,
             newly_received,
@@ -710,7 +774,6 @@ impl ChatHandle {
         self.revision_rx.clone()
     }
 
-    #[allow(dead_code)]
     pub fn youtube_status(&self) -> Option<YouTubeIngestStatus> {
         self.youtube_status_rx.borrow().clone()
     }
@@ -730,7 +793,7 @@ mod tests {
 
     fn message(source: &str, external_id: &str, text: &str) -> IncomingChatMessage {
         IncomingChatMessage {
-            source: source.into(),
+            source: source.parse().unwrap(),
             external_id: external_id.into(),
             author: "Viewer".into(),
             text: text.into(),
@@ -957,7 +1020,12 @@ mod tests {
         let snapshot2 = handle.snapshot().await.unwrap();
         assert_eq!(snapshot2.messages.len(), 0);
 
-        handle.update_youtube_status("polling", "stale update", Some(12345), Some(2));
+        handle.update_youtube_status(
+            YouTubeIngestState::Polling,
+            "stale update",
+            Some(12345),
+            Some(2),
+        );
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert!(handle.youtube_status().is_none());
 
@@ -969,7 +1037,7 @@ mod tests {
         };
         handle.set_youtube_polling(settings).await.unwrap();
         let status = handle.youtube_status().unwrap();
-        assert_eq!(status.state, "off");
+        assert_eq!(status.state, YouTubeIngestState::Off);
 
         std::fs::remove_file(path).unwrap();
     }
@@ -1001,7 +1069,9 @@ mod tests {
         let youtube_task = tokio::spawn(std::future::pending());
         let youtube_abort = youtube_task.abort_handle();
         actor.youtube_task = Some(youtube_task);
-        actor.configure_youtube(&ChatSettings::default(), &handle);
+        actor
+            .configure_youtube(&ChatSettings::default(), &handle)
+            .await;
         tokio::task::yield_now().await;
         assert!(!twitch_abort.is_finished());
         assert!(youtube_abort.is_finished());

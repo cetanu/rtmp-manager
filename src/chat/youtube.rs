@@ -1,11 +1,10 @@
-use crate::chat::{ChatHandle, IncomingChatMessage};
+use crate::chat::{ChatHandle, IncomingChatMessage, Source};
 use crate::util::now_unix_ms;
 use anyhow::{Context, Result, bail};
 use regex::Regex;
 use reqwest::Client;
 use reqwest::header::{ACCEPT_LANGUAGE, USER_AGENT};
 use serde::Serialize;
-use std::sync::LazyLock;
 use std::time::Duration;
 
 const DEFAULT_INNERTUBE_API_KEY: &str = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
@@ -13,20 +12,23 @@ const INNERTUBE_LIVE_CHAT_URL: &str = "https://www.youtube.com/youtubei/v1/live_
 const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const BROWSER_ACCEPT_LANGUAGE: &str = "en-US,en;q=0.9";
 
-static API_KEY_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#""INNERTUBE_API_KEY":"([^"]+)""#).unwrap());
-static YT_INITIAL_DATA_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?:window\["ytInitialData"\]|var ytInitialData)\s*=\s*(\{.+?\});</script>"#)
-        .unwrap()
-});
-static CANONICAL_URL_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"<link rel="canonical" href="([^"]+)""#).unwrap());
-static VIDEO_ID_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#""videoId":"([a-zA-Z0-9_-]{11})""#).unwrap());
-static WATCH_URL_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"[?&]v=([a-zA-Z0-9_-]{11})"#).unwrap());
-static SHORT_URL_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"youtu\.be/([a-zA-Z0-9_-]{11})"#).unwrap());
+const API_KEY_PATTERN: &str = r#""INNERTUBE_API_KEY":"([^"]+)""#;
+const INITIAL_DATA_PATTERN: &str =
+    r#"(?:window\["ytInitialData"\]|var ytInitialData)\s*=\s*(\{.+?\});</script>"#;
+const CANONICAL_URL_PATTERN: &str = r#"<link rel="canonical" href="([^"]+)""#;
+const VIDEO_ID_PATTERN: &str = r#""videoId":"([a-zA-Z0-9_-]{11})""#;
+const WATCH_URL_PATTERN: &str = r#"[?&]v=([a-zA-Z0-9_-]{11})"#;
+const SHORT_URL_PATTERN: &str = r#"youtu\.be/([a-zA-Z0-9_-]{11})"#;
+
+const CHANNEL_ID_LENGTH: usize = 24;
+const VIDEO_ID_LENGTH: usize = 11;
+const CHANNEL_RESOLUTION_INITIAL_DELAY: Duration = Duration::from_secs(30);
+const CHANNEL_RESOLUTION_MAX_DELAY: Duration = Duration::from_secs(300);
+const DIRECT_RESOLUTION_INITIAL_DELAY: Duration = Duration::from_secs(5);
+const DIRECT_RESOLUTION_MAX_DELAY: Duration = Duration::from_secs(60);
+const POLL_TIMEOUT_MIN_MS: u64 = 1_000;
+const POLL_TIMEOUT_MAX_MS: u64 = 60_000;
+const INNERTUBE_CLIENT_VERSION: &str = "2.20240101.00.00";
 
 #[derive(Debug, Clone)]
 pub struct YouTubeChatConfig {
@@ -42,9 +44,32 @@ pub enum YouTubeChatTarget {
     Channel(String),
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum YouTubeIngestState {
+    #[default]
+    Off,
+    Resolving,
+    Connected,
+    Polling,
+    Error,
+}
+
+impl YouTubeIngestState {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Resolving => "resolving",
+            Self::Connected => "connected",
+            Self::Polling => "polling",
+            Self::Error => "error",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct YouTubeIngestStatus {
-    pub state: String,
+    pub state: YouTubeIngestState,
     pub detail: String,
     pub last_success_at_unix_ms: Option<u64>,
     pub messages_received: u64,
@@ -58,24 +83,36 @@ struct LiveChatSession {
 }
 
 pub async fn run(client: Client, chat: ChatHandle, config: YouTubeChatConfig) {
-    let (mut resolution_delay, maximum_resolution_delay) = match &config.target {
-        YouTubeChatTarget::Channel(_) => (Duration::from_secs(30), Duration::from_secs(5 * 60)),
+    let mut session = resolve_session_with_retry(&client, &chat, &config.target).await;
+    poll_live_chat(&client, &chat, &config, &mut session).await;
+}
+
+async fn resolve_session_with_retry(
+    client: &Client,
+    chat: &ChatHandle,
+    target: &YouTubeChatTarget,
+) -> LiveChatSession {
+    let (mut resolution_delay, maximum_resolution_delay) = match target {
+        YouTubeChatTarget::Channel(_) => (
+            CHANNEL_RESOLUTION_INITIAL_DELAY,
+            CHANNEL_RESOLUTION_MAX_DELAY,
+        ),
         YouTubeChatTarget::LiveChat(_) | YouTubeChatTarget::Video(_) => {
-            (Duration::from_secs(5), Duration::from_secs(60))
+            (DIRECT_RESOLUTION_INITIAL_DELAY, DIRECT_RESOLUTION_MAX_DELAY)
         }
     };
 
-    let mut session = loop {
+    loop {
         chat.update_youtube_status(
-            "resolving",
+            YouTubeIngestState::Resolving,
             "Resolving the active YouTube live chat via web UI",
             None,
             None,
         );
-        match resolve_live_chat_session(&client, &config.target).await {
+        match resolve_live_chat_session(client, target).await {
             Ok(session) => {
                 chat.update_youtube_status(
-                    "connected",
+                    YouTubeIngestState::Connected,
                     format!(
                         "Connected to YouTube live chat for video {}",
                         session.video_id
@@ -83,7 +120,7 @@ pub async fn run(client: Client, chat: ChatHandle, config: YouTubeChatConfig) {
                     Some(now_unix_ms()),
                     None,
                 );
-                break session;
+                return session;
             }
             Err(error) => {
                 let detail = format!(
@@ -91,18 +128,25 @@ pub async fn run(client: Client, chat: ChatHandle, config: YouTubeChatConfig) {
                     resolution_delay.as_secs()
                 );
                 tracing::warn!("{detail}");
-                chat.update_youtube_status("error", detail, None, None);
+                chat.update_youtube_status(YouTubeIngestState::Error, detail, None, None);
                 tokio::time::sleep(resolution_delay).await;
                 resolution_delay = (resolution_delay * 2).min(maximum_resolution_delay);
             }
         }
-    };
+    }
+}
 
+async fn poll_live_chat(
+    client: &Client,
+    chat: &ChatHandle,
+    config: &YouTubeChatConfig,
+    session: &mut LiveChatSession,
+) {
     let mut retry_delay = Duration::from_secs(2);
     let mut idle_polls = 0_u32;
 
     loop {
-        match fetch_innertube_page(&client, &session).await {
+        match fetch_innertube_page(client, session).await {
             Ok(page) => {
                 retry_delay = Duration::from_secs(2);
                 session.continuation_token = page.next_continuation_token;
@@ -130,7 +174,10 @@ pub async fn run(client: Client, chat: ChatHandle, config: YouTubeChatConfig) {
                     0
                 };
 
-                let api_interval = Duration::from_millis(page.timeout_millis.clamp(1000, 60_000));
+                let api_interval = Duration::from_millis(
+                    page.timeout_millis
+                        .clamp(POLL_TIMEOUT_MIN_MS, POLL_TIMEOUT_MAX_MS),
+                );
                 let base_interval = api_interval.max(config.min_poll_interval);
                 let adaptive_delay = if config.adaptive_polling && idle_polls >= 3 {
                     Duration::from_secs(u64::from((idle_polls - 2).min(5)) * 2)
@@ -151,7 +198,12 @@ pub async fn run(client: Client, chat: ChatHandle, config: YouTubeChatConfig) {
                         poll_interval.as_secs_f32()
                     )
                 };
-                chat.update_youtube_status("polling", detail, Some(now_unix_ms()), Some(accepted));
+                chat.update_youtube_status(
+                    YouTubeIngestState::Polling,
+                    detail,
+                    Some(now_unix_ms()),
+                    Some(accepted),
+                );
                 tokio::time::sleep(poll_interval).await;
             }
             Err(PollFailure::SessionExpired(reason)) => {
@@ -159,18 +211,23 @@ pub async fn run(client: Client, chat: ChatHandle, config: YouTubeChatConfig) {
                     "YouTube live chat session ended or expired ({reason:#}). Re-resolving active stream..."
                 );
                 tracing::warn!("{detail}");
-                chat.update_youtube_status("resolving", detail, None, None);
+                chat.update_youtube_status(YouTubeIngestState::Resolving, detail, None, None);
                 tokio::time::sleep(Duration::from_secs(5)).await;
-                match resolve_live_chat_session(&client, &config.target).await {
+                match resolve_live_chat_session(client, &config.target).await {
                     Ok(new_session) => {
-                        session = new_session;
+                        *session = new_session;
                     }
                     Err(error) => {
                         let err_detail = format!(
                             "Failed to re-resolve YouTube stream: {error:#}. Retrying in 10s"
                         );
                         tracing::warn!("{err_detail}");
-                        chat.update_youtube_status("error", err_detail, None, None);
+                        chat.update_youtube_status(
+                            YouTubeIngestState::Error,
+                            err_detail,
+                            None,
+                            None,
+                        );
                         tokio::time::sleep(Duration::from_secs(10)).await;
                     }
                 }
@@ -181,7 +238,7 @@ pub async fn run(client: Client, chat: ChatHandle, config: YouTubeChatConfig) {
                     retry_delay.as_secs()
                 );
                 tracing::warn!("{detail}");
-                chat.update_youtube_status("error", detail, None, None);
+                chat.update_youtube_status(YouTubeIngestState::Error, detail, None, None);
                 tokio::time::sleep(retry_delay).await;
                 retry_delay = (retry_delay * 2).min(Duration::from_secs(60));
             }
@@ -227,7 +284,7 @@ pub fn normalize_channel_url(channel_input: &str) -> String {
         }
     } else if trimmed.starts_with('@') {
         format!("https://www.youtube.com/{trimmed}/live")
-    } else if trimmed.starts_with("UC") && trimmed.len() == 24 {
+    } else if trimmed.starts_with("UC") && trimmed.len() == CHANNEL_ID_LENGTH {
         format!("https://www.youtube.com/channel/{trimmed}/live")
     } else {
         format!("https://www.youtube.com/@{trimmed}/live")
@@ -236,13 +293,13 @@ pub fn normalize_channel_url(channel_input: &str) -> String {
 
 pub fn extract_video_id(input: &str) -> Option<String> {
     let trimmed = input.trim();
-    if let Some(captures) = WATCH_URL_REGEX.captures(trimmed) {
+    if let Some(captures) = Regex::new(WATCH_URL_PATTERN).ok()?.captures(trimmed) {
         return captures.get(1).map(|m| m.as_str().to_string());
     }
-    if let Some(captures) = SHORT_URL_REGEX.captures(trimmed) {
+    if let Some(captures) = Regex::new(SHORT_URL_PATTERN).ok()?.captures(trimmed) {
         return captures.get(1).map(|m| m.as_str().to_string());
     }
-    if trimmed.len() == 11
+    if trimmed.len() == VIDEO_ID_LENGTH
         && trimmed
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
@@ -268,18 +325,18 @@ async fn resolve_channel_live_video(client: &Client, channel_input: &str) -> Res
         .await
         .context("Failed to read YouTube channel response body")?;
 
-    if let Some(captures) = WATCH_URL_REGEX.captures(&final_url) {
+    if let Some(captures) = Regex::new(WATCH_URL_PATTERN)?.captures(&final_url) {
         return Ok(captures[1].to_string());
     }
 
-    if let Some(captures) = CANONICAL_URL_REGEX.captures(&body) {
+    if let Some(captures) = Regex::new(CANONICAL_URL_PATTERN)?.captures(&body) {
         let canonical = &captures[1];
-        if let Some(watch_match) = WATCH_URL_REGEX.captures(canonical) {
+        if let Some(watch_match) = Regex::new(WATCH_URL_PATTERN)?.captures(canonical) {
             return Ok(watch_match[1].to_string());
         }
     }
 
-    if let Some(captures) = VIDEO_ID_REGEX.captures(&body) {
+    if let Some(captures) = Regex::new(VIDEO_ID_PATTERN)?.captures(&body) {
         let video_id = &captures[1];
         let is_live = body.contains("\"isLive\":true")
             || body.contains("\"isLiveNow\":true")
@@ -309,13 +366,13 @@ async fn bootstrap_live_chat_session(client: &Client, video_id: &str) -> Result<
         .await
         .context("Failed to read YouTube live chat HTML response")?;
 
-    let api_key = API_KEY_REGEX
+    let api_key = Regex::new(API_KEY_PATTERN)?
         .captures(&body)
         .and_then(|c| c.get(1))
         .map(|m| m.as_str().to_string())
         .unwrap_or_else(|| DEFAULT_INNERTUBE_API_KEY.to_string());
 
-    let initial_data_raw = YT_INITIAL_DATA_REGEX
+    let initial_data_raw = Regex::new(INITIAL_DATA_PATTERN)?
         .captures(&body)
         .and_then(|c| c.get(1))
         .map(|m| m.as_str())
@@ -369,7 +426,7 @@ async fn fetch_innertube_page(
         "context": {
             "client": {
                 "clientName": "WEB",
-                "clientVersion": "2.20240101.00.00"
+                "clientVersion": INNERTUBE_CLIENT_VERSION
             }
         },
         "continuation": session.continuation_token
@@ -387,7 +444,11 @@ async fn fetch_innertube_page(
 
     let status = response.status();
     if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
+        let body = response
+            .text()
+            .await
+            .context("Failed to read YouTube InnerTube error response")
+            .map_err(PollFailure::Retry)?;
         let error = anyhow::anyhow!(
             "YouTube InnerTube endpoint returned {}: {}",
             status,
@@ -470,163 +531,95 @@ pub fn parse_action_item(action: &serde_json::Value) -> Option<IncomingChatMessa
         .or_else(|| action.pointer("/addLiveChatTickerItemAction/item"))
         .or_else(|| action.pointer("/replayChatItemAction/actions/0/addChatItemAction/item"))?;
 
-    if let Some(renderer) = item.get("liveChatTextMessageRenderer") {
-        let external_id = renderer
-            .get("id")
-            .and_then(|v| v.as_str())?
-            .trim()
-            .to_string();
-        let author = renderer
-            .get("authorName")
-            .map(extract_runs)
-            .filter(|a| !a.trim().is_empty())
-            .unwrap_or_else(|| "YouTube viewer".to_string());
-        let text = renderer
+    const RENDERERS: [(&str, MessageKind); 5] = [
+        ("liveChatTextMessageRenderer", MessageKind::Text),
+        ("liveChatPaidMessageRenderer", MessageKind::Paid),
+        ("liveChatMembershipItemRenderer", MessageKind::Membership),
+        ("liveChatPaidStickerRenderer", MessageKind::Sticker),
+        ("giftMessageViewModel", MessageKind::Gift),
+    ];
+    RENDERERS.into_iter().find_map(|(name, kind)| {
+        item.get(name)
+            .and_then(|renderer| parse_renderer(renderer, kind))
+    })
+}
+
+#[derive(Clone, Copy)]
+enum MessageKind {
+    Text,
+    Paid,
+    Membership,
+    Sticker,
+    Gift,
+}
+
+fn parse_renderer(renderer: &serde_json::Value, kind: MessageKind) -> Option<IncomingChatMessage> {
+    let external_id = renderer.get("id")?.as_str()?.trim().to_string();
+    let author = renderer
+        .get("authorName")
+        .map(extract_runs)
+        .filter(|author| !author.trim().is_empty())
+        .unwrap_or_else(|| "YouTube viewer".to_string());
+    let text = renderer_text(renderer, kind);
+    let avatar_field = match kind {
+        MessageKind::Gift => "authorAvatar",
+        _ => "authorPhoto",
+    };
+    let avatar_url = renderer.get(avatar_field).and_then(extract_avatar);
+    let sent_at = renderer
+        .get("timestampUsec")
+        .and_then(|value| value.as_str())
+        .and_then(format_timestamp_usec);
+    Some(IncomingChatMessage {
+        source: Source::YouTube,
+        external_id,
+        author,
+        text,
+        avatar_url,
+        sent_at,
+    })
+}
+
+fn renderer_text(renderer: &serde_json::Value, kind: MessageKind) -> String {
+    match kind {
+        MessageKind::Text => renderer
             .get("message")
             .map(extract_runs)
-            .unwrap_or_default();
-        let avatar_url = renderer.get("authorPhoto").and_then(extract_avatar);
-        let sent_at = renderer
-            .get("timestampUsec")
-            .and_then(|v| v.as_str())
-            .and_then(format_timestamp_usec);
-
-        return Some(IncomingChatMessage {
-            source: "youtube".into(),
-            external_id,
-            author,
-            text,
-            avatar_url,
-            sent_at,
-        });
+            .unwrap_or_default(),
+        MessageKind::Paid => {
+            let amount = purchase_amount(renderer, "Super Chat");
+            let body = renderer
+                .get("message")
+                .map(extract_runs)
+                .unwrap_or_default();
+            let suffix = if body.is_empty() {
+                String::new()
+            } else {
+                format!(" {body}")
+            };
+            format!("[Super Chat {amount}]{suffix}")
+        }
+        MessageKind::Membership => {
+            let header = renderer
+                .get("headerSubtext")
+                .map(extract_runs)
+                .or_else(|| renderer.get("headerPrimaryText").map(extract_runs))
+                .unwrap_or_else(|| "Joined membership".to_string());
+            format!("[Member] {header}")
+        }
+        MessageKind::Sticker => format!(
+            "[Super Sticker {}]",
+            purchase_amount(renderer, "Super Sticker")
+        ),
+        MessageKind::Gift => renderer.get("text").map(extract_runs).unwrap_or_default(),
     }
+}
 
-    if let Some(renderer) = item.get("liveChatPaidMessageRenderer") {
-        let external_id = renderer
-            .get("id")
-            .and_then(|v| v.as_str())?
-            .trim()
-            .to_string();
-        let author = renderer
-            .get("authorName")
-            .map(extract_runs)
-            .filter(|a| !a.trim().is_empty())
-            .unwrap_or_else(|| "YouTube viewer".to_string());
-        let amount = renderer
-            .pointer("/purchaseAmountText/simpleText")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Super Chat");
-        let body_text = renderer
-            .get("message")
-            .map(extract_runs)
-            .unwrap_or_default();
-        let text = if body_text.is_empty() {
-            format!("[Super Chat {amount}]")
-        } else {
-            format!("[Super Chat {amount}] {body_text}")
-        };
-        let avatar_url = renderer.get("authorPhoto").and_then(extract_avatar);
-        let sent_at = renderer
-            .get("timestampUsec")
-            .and_then(|v| v.as_str())
-            .and_then(format_timestamp_usec);
-
-        return Some(IncomingChatMessage {
-            source: "youtube".into(),
-            external_id,
-            author,
-            text,
-            avatar_url,
-            sent_at,
-        });
-    }
-
-    if let Some(renderer) = item.get("liveChatMembershipItemRenderer") {
-        let external_id = renderer
-            .get("id")
-            .and_then(|v| v.as_str())?
-            .trim()
-            .to_string();
-        let author = renderer
-            .get("authorName")
-            .map(extract_runs)
-            .filter(|a| !a.trim().is_empty())
-            .unwrap_or_else(|| "YouTube viewer".to_string());
-        let header = renderer
-            .get("headerSubtext")
-            .map(extract_runs)
-            .or_else(|| renderer.get("headerPrimaryText").map(extract_runs))
-            .unwrap_or_else(|| "Joined membership".to_string());
-        let text = format!("[Member] {header}");
-        let avatar_url = renderer.get("authorPhoto").and_then(extract_avatar);
-        let sent_at = renderer
-            .get("timestampUsec")
-            .and_then(|v| v.as_str())
-            .and_then(format_timestamp_usec);
-
-        return Some(IncomingChatMessage {
-            source: "youtube".into(),
-            external_id,
-            author,
-            text,
-            avatar_url,
-            sent_at,
-        });
-    }
-
-    if let Some(renderer) = item.get("liveChatPaidStickerRenderer") {
-        let external_id = renderer
-            .get("id")
-            .and_then(|v| v.as_str())?
-            .trim()
-            .to_string();
-        let author = renderer
-            .get("authorName")
-            .map(extract_runs)
-            .filter(|a| !a.trim().is_empty())
-            .unwrap_or_else(|| "YouTube viewer".to_string());
-        let amount = renderer
-            .pointer("/purchaseAmountText/simpleText")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Super Sticker");
-        let text = format!("[Super Sticker {amount}]");
-        let avatar_url = renderer.get("authorPhoto").and_then(extract_avatar);
-        let sent_at = renderer
-            .get("timestampUsec")
-            .and_then(|v| v.as_str())
-            .and_then(format_timestamp_usec);
-
-        return Some(IncomingChatMessage {
-            source: "youtube".into(),
-            external_id,
-            author,
-            text,
-            avatar_url,
-            sent_at,
-        });
-    }
-
-    if let Some(vm) = item.get("giftMessageViewModel") {
-        let external_id = vm.get("id").and_then(|v| v.as_str())?.trim().to_string();
-        let author = vm
-            .get("authorName")
-            .map(extract_runs)
-            .filter(|a| !a.trim().is_empty())
-            .unwrap_or_else(|| "YouTube viewer".to_string());
-        let text = vm.get("text").map(extract_runs).unwrap_or_default();
-        let avatar_url = vm.get("authorAvatar").and_then(extract_avatar);
-
-        return Some(IncomingChatMessage {
-            source: "youtube".into(),
-            external_id,
-            author,
-            text,
-            avatar_url,
-            sent_at: None,
-        });
-    }
-
-    None
+fn purchase_amount<'a>(renderer: &'a serde_json::Value, fallback: &'a str) -> &'a str {
+    renderer
+        .pointer("/purchaseAmountText/simpleText")
+        .and_then(|value| value.as_str())
+        .unwrap_or(fallback)
 }
 
 pub fn extract_runs(value: &serde_json::Value) -> String {
@@ -760,7 +753,7 @@ mod tests {
         });
 
         let parsed = parse_action_item(&action).expect("should parse message");
-        assert_eq!(parsed.source, "youtube");
+        assert_eq!(parsed.source, Source::YouTube);
         assert_eq!(parsed.external_id, "msg-123");
         assert_eq!(parsed.author, "@Alice");
         assert_eq!(parsed.text, "Hello world 😊");

@@ -1,4 +1,4 @@
-use crate::chat::IncomingChatMessage;
+use crate::chat::{IncomingChatMessage, Source};
 use crate::config::ChatSettings;
 use crate::server::state::WebhookEvent;
 use anyhow::{Context, Result, bail};
@@ -101,7 +101,7 @@ pub fn parse_chat_event(body: &[u8]) -> Result<IncomingChatMessage> {
         bail!("Kick chat event is missing a message ID or content");
     }
     Ok(IncomingChatMessage {
-        source: "kick".into(),
+        source: Source::Kick,
         external_id: event.message_id,
         author: event.sender.username,
         text: event.content,
@@ -327,7 +327,7 @@ mod tests {
             br#"{"message_id":"01ABC","content":"Hello Kick","sender":{"username":"viewer","profile_picture":"https://example.test/avatar.jpg"},"created_at":"2026-08-30T15:00:00Z"}"#,
         )
         .unwrap();
-        assert_eq!(message.source, "kick");
+        assert_eq!(message.source, Source::Kick);
         assert_eq!(message.external_id, "01ABC");
         assert_eq!(message.author, "viewer");
         assert_eq!(message.text, "Hello Kick");

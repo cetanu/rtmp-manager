@@ -640,7 +640,7 @@ mod tests {
         app_handle
             .chat
             .enqueue(crate::chat::IncomingChatMessage {
-                source: "twitch".into(),
+                source: crate::chat::Source::Twitch,
                 external_id: "test1".into(),
                 author: "TestViewer".into(),
                 text: "OBS overlay test message".into(),
