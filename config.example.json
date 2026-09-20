@@ -9,7 +9,8 @@
   },
   "web_auth": {
     "username": "",
-    "password": ""
+    "password": "",
+    "overlay_token": "CHANGE_ME_TO_A_PRIVATE_OVERLAY_TOKEN"
   },
   "chat": {
     "queue_capacity": 500,

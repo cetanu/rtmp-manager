@@ -30,15 +30,22 @@ use topcoat::{
 pub mod auth;
 pub mod components;
 use components::{
-    actions_panel::start_test_stream, app_navigation::app_navigation, chat_inbox::chat_inbox,
-    chat_overlay::chat_overlay_page, config_transfer::config_transfer,
-    configuration_form::configuration_form, log_viewer::log_viewer, metrics::metrics_page,
-    stream_preview::stream_preview, webhook_audit::webhook_audit,
+    actions_panel::start_test_stream,
+    app_navigation::app_navigation,
+    chat_inbox::chat_inbox,
+    chat_overlay::{chat_overlay_page, render_chat_overlay_messages},
+    config_transfer::config_transfer,
+    configuration_form::configuration_form,
+    log_viewer::log_viewer,
+    metrics::metrics_page,
+    stream_preview::stream_preview,
+    webhook_audit::webhook_audit,
 };
 
 pub(crate) const TAILWIND_STYLESHEET: Asset = stylesheet!();
 pub(crate) const FAVICON: Asset = asset!("rtmp.png");
 pub(crate) const CHAT_EVENTS_SCRIPT: Asset = asset!("static/chat-events.js");
+pub(crate) const OVERLAY_EVENTS_SCRIPT: Asset = asset!("static/overlay-events.js");
 pub(crate) const HLS_PLAYER_SCRIPT: Asset = asset!("static/hls.min.js");
 pub(crate) const STREAM_PREVIEW_SCRIPT: Asset = asset!("static/stream-preview.js");
 pub(crate) const APP_NAVIGATION_SCRIPT: Asset = asset!("static/app-navigation.js");
@@ -429,6 +436,7 @@ async fn server_events(
     let app: &AppHandle = app_context(cx);
     let status_rx = app.stream.subscribe_status();
     let chat_changes = app.chat.subscribe_changes();
+    let initial_chat_revision = chat_changes.borrow().revision;
     let metric_samples = app.metrics.subscribe();
 
     let initial_status = SseEvent::new()
@@ -443,44 +451,97 @@ async fn server_events(
     ]);
 
     let changes = futures_util::stream::unfold(
-        (status_rx, chat_changes, metric_samples),
-        |(mut status_rx, mut chat_changes, mut metric_samples)| async move {
-            tokio::select! {
-                changed = status_rx.changed() => {
-                    if changed.is_err() {
-                        return None;
+        (
+            status_rx,
+            chat_changes,
+            metric_samples,
+            initial_chat_revision,
+        ),
+        |(mut status_rx, mut chat_changes, mut metric_samples, mut last_chat_revision)| async move {
+            loop {
+                tokio::select! {
+                    changed = status_rx.changed() => {
+                        if changed.is_err() {
+                            return None;
+                        }
+                        let status = *status_rx.borrow();
+                        let event = SseEvent::new()
+                            .event("stream_status")
+                            .json_data(&status);
+                        return Some((event, (status_rx, chat_changes, metric_samples, last_chat_revision)));
                     }
-                    let status = *status_rx.borrow();
-                    let event = SseEvent::new()
-                        .event("stream_status")
-                        .json_data(&status);
-                    Some((event, (status_rx, chat_changes, metric_samples)))
-                }
-                changed = chat_changes.changed() => {
-                    if changed.is_err() {
-                        return None;
+                    changed = chat_changes.changed() => {
+                        if changed.is_err() {
+                            return None;
+                        }
+                        let revision = chat_changes.borrow().revision;
+                        if revision == last_chat_revision {
+                            continue;
+                        }
+                        last_chat_revision = revision;
+                        return Some((
+                            Ok(SseEvent::new().event("chat_changed").data("changed")),
+                            (status_rx, chat_changes, metric_samples, last_chat_revision),
+                        ));
                     }
-                    Some((
-                        Ok(SseEvent::new().event("chat_changed").data("changed")),
-                        (status_rx, chat_changes, metric_samples),
-                    ))
-                }
-                changed = metric_samples.changed() => {
-                    if changed.is_err() {
-                        return None;
+                    changed = metric_samples.changed() => {
+                        if changed.is_err() {
+                            return None;
+                        }
+                        let event = metric_samples
+                            .borrow()
+                            .as_ref()
+                            .map(|sample| SseEvent::new().event("metrics_sample").json_data(sample))
+                            .unwrap_or_else(|| Ok(SseEvent::new().event("metrics_sample").data("null")));
+                        return Some((event, (status_rx, chat_changes, metric_samples, last_chat_revision)));
                     }
-                    let event = metric_samples
-                        .borrow()
-                        .as_ref()
-                        .map(|sample| SseEvent::new().event("metrics_sample").json_data(sample))
-                        .unwrap_or_else(|| Ok(SseEvent::new().event("metrics_sample").data("null")));
-                    Some((event, (status_rx, chat_changes, metric_samples)))
                 }
             }
         },
     );
 
     Ok(Sse::new(initial_events.chain(changes)).keep_alive(KeepAlive::new()))
+}
+
+#[route(GET "/api/overlay/events")]
+async fn overlay_events(
+    cx: &Cx,
+) -> Result<Sse<impl futures_util::Stream<Item = Result<SseEvent>> + use<>>> {
+    let app: &AppHandle = app_context(cx);
+    let chat = app.chat.clone();
+    let chat_changes = app.chat.subscribe_changes();
+    let initial_revision = chat_changes.borrow().revision;
+    let changes = futures_util::stream::unfold(
+        (chat, chat_changes, initial_revision),
+        |(chat, mut chat_changes, mut last_revision)| async move {
+            loop {
+                if chat_changes.changed().await.is_err() {
+                    return None;
+                }
+                let revision = chat_changes.borrow().revision;
+                if revision == last_revision {
+                    continue;
+                }
+                last_revision = revision;
+                let event = match chat.snapshot().await {
+                    Ok(snapshot) => match render_chat_overlay_messages(snapshot.messages).await {
+                        Ok(html) => Ok(SseEvent::new().event("chat").data(html)),
+                        Err(error) => {
+                            tracing::warn!("Failed to render chat overlay update: {error:#}");
+                            Ok(SseEvent::new().event("chat_error").data("unavailable"))
+                        }
+                    },
+                    Err(error) => {
+                        tracing::warn!("Failed to snapshot chat for overlay update: {error:#}");
+                        Ok(SseEvent::new().event("chat_error").data("unavailable"))
+                    }
+                };
+                return Some((event, (chat, chat_changes, last_revision)));
+            }
+        },
+    );
+
+    Ok(Sse::new(changes).keep_alive(KeepAlive::new()))
 }
 
 #[route(GET "/api/logs")]
@@ -678,6 +739,14 @@ mod tests {
             let _ = topcoat::serve(listener, app).await;
         });
 
+        let mut overlay_config = app_handle.config.get().as_ref().clone();
+        overlay_config.web_auth.overlay_token = "overlay-token-for-tests".into();
+        app_handle
+            .config
+            .import(&serde_json::to_vec(&overlay_config).unwrap())
+            .await
+            .unwrap();
+
         app_handle
             .chat
             .enqueue(crate::chat::IncomingChatMessage {
@@ -692,7 +761,9 @@ mod tests {
             .unwrap();
 
         let resp1 = client
-            .get(format!("http://{local_addr}/overlay/chat"))
+            .get(format!(
+                "http://{local_addr}/overlay/chat?key=overlay-token-for-tests"
+            ))
             .send()
             .await
             .unwrap();
@@ -703,7 +774,18 @@ mod tests {
         assert!(body1.contains("OBS overlay test message"));
         assert!(body1.contains("data-source=\"twitch\""));
 
-        // Verify web auth with query token works
+        // A missing overlay key is rejected, even when dashboard auth is disabled.
+        let overlay_without_key = client
+            .get(format!("http://{local_addr}/overlay/chat"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            overlay_without_key.status(),
+            reqwest::StatusCode::UNAUTHORIZED
+        );
+
+        // Verify dashboard auth and the overlay's scoped token are independent.
         let mut authed_config = app_handle.config.get().as_ref().clone();
         authed_config.web_auth.username = "admin".into();
         authed_config.web_auth.password = "secretpassword123".into();
@@ -724,16 +806,52 @@ mod tests {
             reqwest::StatusCode::UNAUTHORIZED
         );
 
-        // Overlay (/overlay/chat) works WITHOUT authentication!
+        // Overlay requires its own token and does not accept the dashboard credentials.
         let overlay_no_auth = client
             .get(format!("http://{local_addr}/overlay/chat"))
             .send()
             .await
             .unwrap();
-        assert_eq!(overlay_no_auth.status(), reqwest::StatusCode::OK);
-        let overlay_body = overlay_no_auth.text().await.unwrap();
+        assert_eq!(overlay_no_auth.status(), reqwest::StatusCode::UNAUTHORIZED);
+        let overlay_body = client
+            .get(format!(
+                "http://{local_addr}/overlay/chat?key=overlay-token-for-tests"
+            ))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
         assert!(overlay_body.contains("RTMP-Manager Chat Overlay"));
         assert!(overlay_body.contains("TestViewer"));
+
+        let chat_api = client
+            .get(format!(
+                "http://{local_addr}/api/chat?key=overlay-token-for-tests"
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(chat_api.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+        let shared_events = client
+            .get(format!(
+                "http://{local_addr}/api/events?key=overlay-token-for-tests"
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(shared_events.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+        let overlay_events_response = client
+            .get(format!(
+                "http://{local_addr}/api/overlay/events?key=overlay-token-for-tests"
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(overlay_events_response.status(), reqwest::StatusCode::OK);
 
         server_task.abort();
         let _ = std::fs::remove_dir_all(temp_dir);

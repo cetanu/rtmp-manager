@@ -110,6 +110,8 @@ pub struct WebAuthSettings {
     pub username: String,
     #[serde(default)]
     pub password: String,
+    #[serde(default)]
+    pub overlay_token: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Validate)]
@@ -232,6 +234,20 @@ impl AppConfig {
         if username_set && self.web_auth.username.contains(':') {
             bail!("Web authentication username must not contain ':'");
         }
+        if !self.web_auth.overlay_token.is_empty() && self.web_auth.overlay_token.len() < 16 {
+            bail!("Overlay access token must be at least 16 characters");
+        }
+        if !self.web_auth.overlay_token.is_empty()
+            && !self
+                .web_auth
+                .overlay_token
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "_-".contains(character))
+        {
+            bail!(
+                "Overlay access token must contain only ASCII letters, numbers, hyphens, or underscores"
+            );
+        }
         if self.chat.twitch_channel.as_ref().is_some_and(|channel| {
             let channel = channel.trim().trim_start_matches('#');
             channel.is_empty()
@@ -348,6 +364,8 @@ impl AppConfig {
                     .trim()
                     .to_string(),
                 password: non_empty(auth_fields.password).unwrap_or(config.web_auth.password),
+                overlay_token: non_empty(auth_fields.overlay_token)
+                    .unwrap_or(config.web_auth.overlay_token),
             };
         }
         if let Some(chat) = form.chat {
@@ -527,6 +545,7 @@ pub struct NotificationsForm {
 pub struct WebAuthForm {
     pub username: Option<String>,
     pub password: Option<String>,
+    pub overlay_token: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -888,6 +907,7 @@ mod tests {
             web_auth: WebAuthSettings {
                 username: "operator".into(),
                 password: "correct horse battery staple".into(),
+                overlay_token: "overlay-token-for-tests".into(),
             },
             chat: ChatSettings {
                 twitch_channel: Some("streamer".into()),
@@ -949,6 +969,7 @@ mod tests {
         config.web_auth = WebAuthSettings {
             username: "operator".into(),
             password: "correct horse battery staple".into(),
+            overlay_token: "overlay-token-for-tests".into(),
         };
         config.chat.youtube_video_id = Some("video-id".into());
         config.chat.youtube_api_key = Some("api-key".into());
@@ -960,6 +981,7 @@ mod tests {
         assert_eq!(reloaded.notifications.live_message, "saved in sqlite");
         assert_eq!(reloaded.web_auth.username, "operator");
         assert_eq!(reloaded.web_auth.password, "correct horse battery staple");
+        assert_eq!(reloaded.web_auth.overlay_token, "overlay-token-for-tests");
         assert_eq!(reloaded.chat.youtube_video_id.as_deref(), Some("video-id"));
 
         fs::remove_dir_all(directory).unwrap();

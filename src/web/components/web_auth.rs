@@ -48,6 +48,23 @@ pub async fn web_auth(cx: &Cx) -> Result<impl View> {
                             "Changing this takes effect immediately and prompts the browser to sign in again."
                         )
                     )
+                    form_field(
+                        control_id: "web_auth_overlay_token",
+                        label_text: "OBS overlay access token",
+                        secret_input(
+                            control_id: "web_auth_overlay_token",
+                            attrs: attributes! {
+                                name="web_auth[overlay_token]"
+                                autocomplete="new-password"
+                                value=(auth.overlay_token)
+                                minlength="16"
+                                placeholder="At least 16 characters"
+                            }
+                        )
+                        field_description(
+                            "The OBS URL must include ?key=...; this token grants access only to the chat overlay and its chat SSE stream."
+                        )
+                    )
                 </div>
             )
         )

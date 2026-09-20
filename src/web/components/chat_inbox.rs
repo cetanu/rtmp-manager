@@ -104,6 +104,7 @@ fn first_message_id(snapshot: &crate::chat::ChatInboxSnapshot) -> String {
 #[component]
 pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
     let app: &AppHandle = app_context(cx);
+    let overlay_token = app.config.get().web_auth.overlay_token.clone();
     let initial_id = first_message_id(&app.chat.snapshot().await?);
     let chat = app.config.get().chat.clone();
     let youtube_configured = [
@@ -205,7 +206,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
         )
         <div class="mb-8 flex justify-end px-1">
             <a
-                href="/overlay/chat"
+                href=(format!("/overlay/chat?key={overlay_token}"))
                 target="_blank"
                 rel="noopener noreferrer"
                 class="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"

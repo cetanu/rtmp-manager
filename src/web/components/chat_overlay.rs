@@ -4,8 +4,7 @@ use crate::web::components::chat_message::chat_message_card;
 use topcoat::{
     Result,
     context::{Cx, app_context},
-    runtime::{shard, signal},
-    view::{View, component, view},
+    view::{View, ViewExt, component, view},
 };
 
 const OVERLAY_CSS: &str = r#"
@@ -98,8 +97,7 @@ pub async fn chat_overlay_page() -> Result<impl View> {
                     rel="stylesheet"
                 />
                 <link rel="stylesheet" href=(crate::web::TAILWIND_STYLESHEET) />
-                topcoat::runtime::script()
-                <script src=(crate::web::CHAT_EVENTS_SCRIPT) defer="defer"></script>
+                <script src=(crate::web::OVERLAY_EVENTS_SCRIPT) defer="defer"></script>
                 <style>(OVERLAY_CSS)</style>
             </head>
             <body
@@ -115,41 +113,36 @@ pub async fn chat_overlay_page() -> Result<impl View> {
 
 #[component]
 pub async fn chat_overlay(cx: &Cx) -> Result<impl View> {
-    let revision = signal(cx, || 0.0);
-
-    Ok(view! {
-        <div id="chat-overlay-wrapper" class="flex flex-col w-full">
-            chat_overlay_content(revision: $(revision.get()))
-            <button
-                id="chat-refresh-button"
-                type="button"
-                hidden="hidden"
-                aria-hidden="true"
-                tabindex="-1"
-                class="hidden"
-                @click=$(|_event: topcoat::runtime::Event| revision.increment())
-            ></button>
-        </div>
-    })
-}
-
-#[shard]
-pub async fn chat_overlay_content(cx: &Cx, revision: f64) -> Result<impl View> {
-    let _ = revision;
     let app: &AppHandle = app_context(cx);
     let snapshot = app.chat.snapshot().await?;
 
     Ok(view! {
+        <div id="chat-overlay-wrapper" class="flex flex-col w-full">
+            chat_overlay_messages(messages: snapshot.messages)
+        </div>
+    })
+}
+
+#[component]
+pub async fn chat_overlay_messages(messages: Vec<ChatMessage>) -> Result<impl View> {
+    Ok(view! {
         <div id="chat-overlay-messages" class="flex flex-col gap-2">
-            if snapshot.messages.is_empty() {
+            if messages.is_empty() {
                 <div class="hidden" aria-hidden="true"></div>
             } else {
-                for (index, message) in snapshot.messages.into_iter().enumerate() {
+                for (index, message) in messages.into_iter().enumerate() {
                     chat_overlay_message(message: message, highlighted: index == 0)
                 }
             }
         </div>
     })
+}
+
+pub async fn render_chat_overlay_messages(messages: Vec<ChatMessage>) -> Result<String> {
+    let cx = Cx::default();
+    let __cx = &cx;
+    let view = view! { chat_overlay_messages(messages: messages) };
+    Ok(view.single().await?.render(&cx))
 }
 
 pub(crate) fn overlay_message_class(highlighted: bool) -> &'static str {
@@ -189,5 +182,27 @@ mod tests {
         assert!(standard.contains("bg-black/60"));
         assert!(standard.contains("border-white/10"));
         assert!(standard.contains("chat-overlay-message"));
+    }
+
+    #[tokio::test]
+    async fn renders_overlay_messages_as_escaped_server_html() {
+        let html = render_chat_overlay_messages(vec![ChatMessage {
+            id: 1,
+            source: crate::chat::Source::Twitch,
+            external_id: "external-1".into(),
+            author: "<viewer>".into(),
+            text: "<script>alert(1)</script>".into(),
+            avatar_url: None,
+            sent_at: None,
+            received_at_unix_ms: 1,
+        }])
+        .await
+        .unwrap();
+
+        assert!(html.contains("id=\"chat-overlay-messages\""));
+        assert!(html.contains("data-source=\"twitch\""));
+        assert!(html.contains("&lt;viewer&gt;"));
+        assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(!html.contains("<script>alert(1)</script>"));
     }
 }
