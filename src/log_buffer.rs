@@ -32,11 +32,10 @@ pub fn init() -> (Arc<LogBuffer>, LogLayer) {
     (Arc::clone(&buffer), LogLayer { buffer })
 }
 
-pub fn global() -> Arc<LogBuffer> {
-    Arc::clone(
-        LOGS.get()
-            .expect("log buffer must be initialized before the web server"),
-    )
+pub fn global() -> anyhow::Result<Arc<LogBuffer>> {
+    LOGS.get()
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("log buffer is not initialized"))
 }
 
 impl LogBuffer {
@@ -113,10 +112,44 @@ impl FieldVisitor {
 }
 
 impl tracing::field::Visit for FieldVisitor {
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        self.record_display(field, value);
+    }
+
+    fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
+        self.record_display(field, value);
+    }
+
+    fn record_i64(&mut self, field: &tracing::field::Field, value: i64) {
+        self.record_display(field, value);
+    }
+
+    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+        self.record_display(field, value);
+    }
+
+    fn record_error(
+        &mut self,
+        field: &tracing::field::Field,
+        value: &(dyn std::error::Error + 'static),
+    ) {
+        self.record_display(field, value);
+    }
+
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn fmt::Debug) {
         let value = format!("{value:?}");
         if field.name() == "message" {
-            self.message = Some(value.trim_matches('"').to_string());
+            self.message = Some(value);
+        } else {
+            self.fields.push(format!("{}={value}", field.name()));
+        }
+    }
+}
+
+impl FieldVisitor {
+    fn record_display(&mut self, field: &tracing::field::Field, value: impl fmt::Display) {
+        if field.name() == "message" {
+            self.message = Some(value.to_string());
         } else {
             self.fields.push(format!("{}={value}", field.name()));
         }

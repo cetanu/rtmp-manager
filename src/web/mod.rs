@@ -465,7 +465,7 @@ async fn server_events(
 async fn service_logs(
     _cx: &Cx,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<SseEvent>> + use<>>> {
-    let logs = crate::log_buffer::global();
+    let logs = crate::log_buffer::global()?;
     let receiver = logs.subscribe();
     let initial = futures_util::stream::iter(
         logs.snapshot()
