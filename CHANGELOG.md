@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.19](https://github.com/cetanu/rtmp-manager/compare/v0.3.18...v0.3.19) - 2026-09-20
+
+### Fixed
+
+- *(runtime)* handle ingest and logging failures gracefully
+- *(relay)* bound test stream resources
+- *(config)* redact secrets from exports
+- *(web)* bound request body sizes
+- *(security)* block SSRF destinations
+- *(webhook)* reject oversized and replayed events
+- *(security)* scope OBS overlay access
+- *(metrics)* calculate bitrate over elapsed time
+
+### Other
+
+- *(chat)* decouple YouTube worker from ChatHandle
+- *(config)* split configuration merge and validation
+- *(kick)* cover future webhook timestamps
+- *(server)* back off idle stream polling
+- *(config)* cache exported JSON
+- *(server)* use async preview filesystem operations
+- *(concurrency)* use non-poisoning locks
+- *(chat)* bound inbox queries and batch deletes
+
 ## [0.3.18](https://github.com/cetanu/rtmp-manager/compare/v0.3.17...v0.3.18) - 2026-09-20
 
 ### Fixed
