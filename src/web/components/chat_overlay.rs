@@ -1,6 +1,6 @@
 use crate::chat::ChatMessage;
 use crate::server::state::AppHandle;
-use crate::web::components::chat_inbox::{chat_source_icon, source_color};
+use crate::web::components::chat_source::{chat_source_icon, source_color};
 use topcoat::{
     Result,
     context::{Cx, app_context},

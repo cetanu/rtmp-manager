@@ -3,6 +3,7 @@ pub mod app_navigation;
 pub mod chat_inbox;
 pub mod chat_overlay;
 pub mod chat_settings;
+pub mod chat_source;
 pub mod config_transfer;
 pub mod configuration_form;
 pub mod log_viewer;
