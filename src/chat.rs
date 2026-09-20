@@ -5,7 +5,6 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_valid::Validate;
 use std::path::Path;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -21,7 +20,8 @@ pub mod x;
 pub mod youtube;
 
 pub use types::{
-    ChatState, YouTubeChatConfig, YouTubeChatTarget, YouTubeIngestState, YouTubeIngestStatus,
+    ChatState, EnqueueOutcome, IncomingChatMessage, Source, YouTubeChatConfig, YouTubeChatSink,
+    YouTubeChatTarget, YouTubeIngestState, YouTubeIngestStatus,
 };
 
 const INBOX_PREVIEW_LIMIT: usize = 10;
@@ -29,65 +29,6 @@ const SEEN_ID_RETENTION_MULTIPLIER: usize = 4;
 const ACTOR_COMMAND_CAPACITY: usize = 64;
 const STATUS_DETAIL_LIMIT: usize = 240;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Source {
-    Twitch,
-    YouTube,
-    Kick,
-    X,
-}
-
-impl Source {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Twitch => "twitch",
-            Self::YouTube => "youtube",
-            Self::Kick => "kick",
-            Self::X => "x",
-        }
-    }
-}
-
-impl std::fmt::Display for Source {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
-impl FromStr for Source {
-    type Err = anyhow::Error;
-
-    fn from_str(value: &str) -> Result<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "twitch" => Ok(Self::Twitch),
-            "youtube" => Ok(Self::YouTube),
-            "kick" => Ok(Self::Kick),
-            "x" => Ok(Self::X),
-            value => anyhow::bail!("Unsupported chat source '{value}'"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Validate)]
-pub struct IncomingChatMessage {
-    pub source: Source,
-    #[validate(min_length = 1)]
-    #[validate(max_length = 256)]
-    pub external_id: String,
-    #[validate(min_length = 1)]
-    #[validate(max_length = 200)]
-    pub author: String,
-    #[validate(min_length = 1)]
-    #[validate(max_length = 5000)]
-    pub text: String,
-    #[serde(default)]
-    #[validate(max_length = 2048)]
-    pub avatar_url: Option<String>,
-    #[serde(default)]
-    #[validate(max_length = 100)]
-    pub sent_at: Option<String>,
-}
 impl IncomingChatMessage {
     pub fn normalized(mut self) -> Result<Self> {
         self.external_id = self.external_id.trim().to_string();
@@ -189,13 +130,6 @@ pub struct ChatInboxSnapshot {
     pub messages: Vec<ChatMessage>,
     pub queued: usize,
     pub dropped: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EnqueueOutcome {
-    Accepted,
-    Duplicate,
-    Dropped,
 }
 
 /// SQLite-backed persistent chat inbox with bounded queue capacity and deduplication.
@@ -814,6 +748,26 @@ impl ChatHandle {
 
     pub fn subscribe_changes(&self) -> watch::Receiver<ChatState> {
         self.state_rx.clone()
+    }
+}
+
+impl YouTubeChatSink for ChatHandle {
+    fn enqueue(
+        &self,
+        message: IncomingChatMessage,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<EnqueueOutcome>> + Send + '_>>
+    {
+        Box::pin(self.enqueue(message))
+    }
+
+    fn update_youtube_status(
+        &self,
+        state: YouTubeIngestState,
+        detail: String,
+        last_success_at_unix_ms: Option<u64>,
+        newly_received: Option<u64>,
+    ) {
+        self.update_youtube_status(state, detail, last_success_at_unix_ms, newly_received);
     }
 }
 

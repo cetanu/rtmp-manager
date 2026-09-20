@@ -1,5 +1,7 @@
-use crate::chat::types::{YouTubeChatConfig, YouTubeChatTarget, YouTubeIngestState};
-use crate::chat::{ChatHandle, IncomingChatMessage, Source};
+use crate::chat::types::{
+    EnqueueOutcome, IncomingChatMessage, Source, YouTubeChatConfig, YouTubeChatSink,
+    YouTubeChatTarget, YouTubeIngestState,
+};
 use crate::config::validate_outbound_url;
 use crate::util::now_unix_ms;
 use anyhow::{Context, Result, bail};
@@ -38,14 +40,14 @@ struct LiveChatSession {
     video_id: String,
 }
 
-pub async fn run(client: Client, chat: ChatHandle, config: YouTubeChatConfig) {
+pub async fn run<S: YouTubeChatSink>(client: Client, chat: S, config: YouTubeChatConfig) {
     let mut session = resolve_session_with_retry(&client, &chat, &config.target).await;
     poll_live_chat(&client, &chat, &config, &mut session).await;
 }
 
 async fn resolve_session_with_retry(
     client: &Client,
-    chat: &ChatHandle,
+    chat: &impl YouTubeChatSink,
     target: &YouTubeChatTarget,
 ) -> LiveChatSession {
     let (mut resolution_delay, maximum_resolution_delay) = match target {
@@ -61,7 +63,7 @@ async fn resolve_session_with_retry(
     loop {
         chat.update_youtube_status(
             YouTubeIngestState::Resolving,
-            "Resolving the active YouTube live chat via web UI",
+            "Resolving the active YouTube live chat via web UI".to_string(),
             None,
             None,
         );
@@ -94,7 +96,7 @@ async fn resolve_session_with_retry(
 
 async fn poll_live_chat(
     client: &Client,
-    chat: &ChatHandle,
+    chat: &impl YouTubeChatSink,
     config: &YouTubeChatConfig,
     session: &mut LiveChatSession,
 ) {
@@ -113,11 +115,8 @@ async fn poll_live_chat(
                         continue;
                     }
                     match chat.enqueue(item).await {
-                        Ok(crate::chat::EnqueueOutcome::Accepted) => accepted += 1,
-                        Ok(
-                            crate::chat::EnqueueOutcome::Duplicate
-                            | crate::chat::EnqueueOutcome::Dropped,
-                        ) => {}
+                        Ok(EnqueueOutcome::Accepted) => accepted += 1,
+                        Ok(EnqueueOutcome::Duplicate | EnqueueOutcome::Dropped) => {}
                         Err(error) => {
                             tracing::warn!("Discarding invalid YouTube chat message: {error}");
                         }
