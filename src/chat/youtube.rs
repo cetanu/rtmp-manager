@@ -577,7 +577,7 @@ fn purchase_amount<'a>(renderer: &'a serde_json::Value, fallback: &'a str) -> &'
         .unwrap_or(fallback)
 }
 
-pub fn extract_runs(value: &serde_json::Value) -> String {
+fn extract_runs(value: &serde_json::Value) -> String {
     if let Some(s) = value.as_str() {
         return s.to_string();
     }
@@ -607,7 +607,7 @@ pub fn extract_runs(value: &serde_json::Value) -> String {
     String::new()
 }
 
-pub fn extract_avatar(value: &serde_json::Value) -> Option<String> {
+fn extract_avatar(value: &serde_json::Value) -> Option<String> {
     if let Some(thumbnails) = value.get("thumbnails").and_then(|v| v.as_array()) {
         return thumbnails
             .last()
