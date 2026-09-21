@@ -1,18 +1,8 @@
-mod chat;
-mod config;
-mod log_buffer;
-mod metrics;
-mod notifications;
-mod server;
-mod util;
-mod web;
-mod webhook_audit;
-
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use config::ConfigHandle;
-use metrics::Metrics;
-use server::{run_rtmp_server, state::AppHandle};
+use rtmp_proxy::config::ConfigHandle;
+use rtmp_proxy::metrics::Metrics;
+use rtmp_proxy::server::{run_rtmp_server, state::AppHandle};
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -90,7 +80,7 @@ fn install_systemd(work_dir: &Path, config_path: &Path) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let (_, log_layer) = log_buffer::init();
+    let (_, log_layer) = rtmp_proxy::log_buffer::init();
     let mut log_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| "rtmp_proxy=info,rtmp_rs=off".into());
     if let Ok(directive) = "rtmp_rs=off".parse() {
@@ -151,7 +141,7 @@ async fn main() -> Result<()> {
     // Spawn Web Server
     let web_app = app.clone();
     tokio::spawn(async move {
-        if let Err(e) = crate::web::run_web_server(web_app, web_addr).await {
+        if let Err(e) = rtmp_proxy::web::run_web_server(web_app, web_addr).await {
             warn!("Web interface server error: {:#}", e);
         }
     });
@@ -161,7 +151,7 @@ async fn main() -> Result<()> {
         let srt_app = app.clone();
         tokio::spawn(async move {
             if let Err(e) =
-                crate::server::run_srt_server(srt_listen, internal_rtmp_addr, srt_app).await
+                rtmp_proxy::server::run_srt_server(srt_listen, internal_rtmp_addr, srt_app).await
             {
                 warn!("SRT ingest server error: {:#}", e);
             }
