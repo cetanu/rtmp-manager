@@ -1,5 +1,6 @@
 use crate::chat::ChatMessage;
 use crate::server::state::AppHandle;
+use crate::util::now_unix_ms;
 use crate::web::components::chat_message::chat_message_card as shared_chat_message_card;
 use crate::web::components::ui::button::{ButtonSize, ButtonVariant, button_variants};
 use crate::web::components::ui::card::{card, card_content, card_footer};
@@ -93,6 +94,35 @@ async fn set_chat_toggle(cx: &Cx, platform: String, enabled: bool) -> Result<Str
     Ok(String::new())
 }
 
+#[procedure]
+async fn start_pomodoro(cx: &Cx) -> Result<String> {
+    let app: &AppHandle = app_context(cx);
+    let chat = app.config.get().chat.clone();
+    match app
+        .chat
+        .start_pomodoro(
+            chat.pomodoro_message.clone(),
+            chat.pomodoro_minutes.saturating_mul(60),
+        )
+        .await
+    {
+        Ok(_) => Ok(String::new()),
+        Err(error) => Ok(error.to_string()),
+    }
+}
+
+#[procedure]
+async fn stop_pomodoro(cx: &Cx) -> Result<String> {
+    let app: &AppHandle = app_context(cx);
+    Ok(first_message_id(&app.chat.stop_pomodoro().await?))
+}
+
+#[procedure]
+async fn pomodoro_active(cx: &Cx) -> Result<bool> {
+    let app: &AppHandle = app_context(cx);
+    Ok(app.chat.snapshot().await?.pomodoro.is_some())
+}
+
 fn first_message_id(snapshot: &crate::chat::ChatInboxSnapshot) -> String {
     snapshot
         .messages
@@ -105,7 +135,9 @@ fn first_message_id(snapshot: &crate::chat::ChatInboxSnapshot) -> String {
 pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
     let app: &AppHandle = app_context(cx);
     let overlay_token = app.config.get().web_auth.overlay_token.clone();
-    let initial_id = first_message_id(&app.chat.snapshot().await?);
+    let initial_snapshot = app.chat.snapshot().await?;
+    let initial_id = first_message_id(&initial_snapshot);
+    let initial_pomodoro_active = initial_snapshot.pomodoro.is_some();
     let chat = app.config.get().chat.clone();
     let youtube_configured = [
         &chat.youtube_live_chat_id,
@@ -126,6 +158,10 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
     let kick_webhook_enabled = signal(cx, || chat.kick_webhook_enabled);
     let kick_toggle_pending = signal(cx, || false);
     let polling_error = signal(cx, String::new);
+    let pomo_active = signal(cx, || initial_pomodoro_active);
+    let pomo_error = signal(cx, String::new);
+    let pomo_pending = signal(cx, || false);
+    let destructive_button = button_variants(ButtonVariant::Destructive, ButtonSize::Md);
 
     Ok(view! {
         card(
@@ -163,8 +199,50 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                     >
                         $(polling_error.get())
                     </p>
+                    <p
+                        :hidden=$(pomo_error.get().is_empty())
+                        class="text-xs text-destructive"
+                    >
+                        $(pomo_error.get())
+                    </p>
                 </div>
                 <div class="ml-auto flex items-center gap-2">
+                    <button
+                        id="chat-pomodoro-focus"
+                        type="button"
+                        class=(outline_button.clone())
+                        :hidden=$(if pomo_active.get() { true } else { false })
+                        :disabled=$(pomo_pending.get())
+                        @click=$(async |_event| {
+                            pomo_pending.set(true);
+                            let error = start_pomodoro().await;
+                            pomo_error.set(error);
+                            if pomo_error.get().is_empty() {
+                                pomo_active.set(true);
+                            }
+                            pomo_pending.set(false);
+                            revision.set(revision.get() + 1.0);
+                        })
+                    >
+                        "Focus"
+                    </button>
+                    <button
+                        id="chat-pomodoro-stop"
+                        type="button"
+                        class=(destructive_button)
+                        :hidden=$(if pomo_active.get() { false } else { true })
+                        :disabled=$(pomo_pending.get())
+                        @click=$(async |_event| {
+                            pomo_pending.set(true);
+                            let next_id = stop_pomodoro().await;
+                            current_id.set(next_id);
+                            pomo_active.set(false);
+                            pomo_pending.set(false);
+                            revision.set(revision.get() + 1.0);
+                        })
+                    >
+                        "Stop"
+                    </button>
                     <button
                         id="chat-test-button"
                         type="button"
@@ -184,6 +262,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                         @click=$(async |_event| {
                             let refreshed_id = refresh_chat().await;
                             current_id.set(refreshed_id);
+                            pomo_active.set(pomodoro_active().await);
                             revision.set(revision.get() + 1.0);
                         })
                     >
@@ -240,31 +319,68 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
     let _ = revision;
     let app: &AppHandle = app_context(cx);
     let snapshot = app.chat.snapshot().await?;
+    let now = now_unix_ms();
+    let pomodoro = snapshot
+        .pomodoro
+        .as_ref()
+        .filter(|state| !state.is_expired(now))
+        .map(|state| {
+            (
+                state.message.clone(),
+                state.ends_at_unix_ms.to_string(),
+                state.remaining_mm_ss(now),
+            )
+        });
+    let show_chat = pomodoro.is_none();
 
     Ok(view! {
         card_content(
-            <div class="h-[min(22rem,calc(100dvh-10rem))] overflow-y-auto pr-1">
-                <div class="flex flex-col gap-2">
-                    if snapshot.messages.is_empty() {
-                        "No chat messages waiting."
-                    } else {
-                        for (index, message) in snapshot
-                            .messages
-                            .into_iter()
-                            .enumerate() {
-                            chat_message_card(message: message, highlighted: index == 0)
-                        }
-                    }
+            if let Some((message, ends_at, remaining)) = pomodoro {
+                <div
+                    id="chat-pomodoro-status"
+                    data-ends-at=(ends_at.clone())
+                    class="flex h-[min(22rem,calc(100dvh-10rem))] flex-col items-center justify-center gap-1 px-3 text-center"
+                >
+                    <div class="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                        "Focus mode"
+                    </div>
+                    <div class="text-lg font-semibold">
+                        (message)
+                    </div>
+                    <div
+                        data-pomodoro-countdown="true"
+                        data-ends-at=(ends_at)
+                        class="mt-1 text-4xl font-bold tabular-nums"
+                    >
+                        (remaining)
+                    </div>
                 </div>
-            </div>
-            <div class="mb-4 flex justify-end gap-4 text-right">
-                <span class="text-sm font-medium">
-                    (format!("{} queued", snapshot.queued))
-                </span>
-                <span class="text-sm text-muted-foreground">
-                    (format!("{} dropped", snapshot.dropped))
-                </span>
-            </div>
+            } else {
+                <div class="h-[min(22rem,calc(100dvh-10rem))] overflow-y-auto pr-1">
+                    <div class="flex flex-col gap-2">
+                        if snapshot.messages.is_empty() {
+                            "No chat messages waiting."
+                        } else {
+                            for (index, message) in snapshot
+                                .messages
+                                .into_iter()
+                                .enumerate() {
+                                chat_message_card(message: message, highlighted: index == 0)
+                            }
+                        }
+                    </div>
+                </div>
+            }
+            if show_chat {
+                <div class="mb-4 flex justify-end gap-4 text-right">
+                    <span class="text-sm font-medium">
+                        (format!("{} queued", snapshot.queued))
+                    </span>
+                    <span class="text-sm text-muted-foreground">
+                        (format!("{} dropped", snapshot.dropped))
+                    </span>
+                </div>
+            }
         )
     })
 }

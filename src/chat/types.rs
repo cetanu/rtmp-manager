@@ -135,4 +135,48 @@ pub struct YouTubeIngestStatus {
 pub struct ChatState {
     pub revision: u64,
     pub youtube_status: Option<YouTubeIngestStatus>,
+    pub pomodoro: Option<PomodoroState>,
+}
+
+/// Focus timer shown on the OBS overlay instead of chat messages.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PomodoroState {
+    pub message: String,
+    pub started_at_unix_ms: u64,
+    pub ends_at_unix_ms: u64,
+}
+
+impl PomodoroState {
+    pub fn remaining_secs(&self, now_unix_ms: u64) -> u64 {
+        self.ends_at_unix_ms.saturating_sub(now_unix_ms) / 1000
+    }
+
+    pub fn is_expired(&self, now_unix_ms: u64) -> bool {
+        now_unix_ms >= self.ends_at_unix_ms
+    }
+
+    /// Remaining time as `MM:SS` for countdown displays.
+    pub fn remaining_mm_ss(&self, now_unix_ms: u64) -> String {
+        let secs = self.remaining_secs(now_unix_ms);
+        format!("{:02}:{:02}", secs / 60, secs % 60)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pomodoro_countdown_formats_mm_ss_and_clamps_at_zero() {
+        let state = PomodoroState {
+            message: "focus".into(),
+            started_at_unix_ms: 1_000,
+            ends_at_unix_ms: 1_000 + (25 * 60 + 7) * 1000,
+        };
+        assert_eq!(state.remaining_mm_ss(1_000), "25:07");
+        assert_eq!(state.remaining_mm_ss(1_000 + 7 * 1000), "25:00");
+        assert_eq!(state.remaining_mm_ss(1_000 + (24 * 60 + 7) * 1000), "01:00");
+        assert_eq!(state.remaining_mm_ss(state.ends_at_unix_ms), "00:00");
+        assert_eq!(state.remaining_mm_ss(state.ends_at_unix_ms + 60_000), "00:00");
+    }
 }

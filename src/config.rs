@@ -157,6 +157,13 @@ pub struct ChatSettings {
     pub kick_channel: Option<String>,
     #[serde(default)]
     pub kick_webhook_enabled: bool,
+    #[serde(default = "default_pomodoro_minutes")]
+    #[validate(minimum = 1)]
+    #[validate(maximum = 45)]
+    pub pomodoro_minutes: u64,
+    #[serde(default = "default_pomodoro_message")]
+    #[validate(max_length = 280)]
+    pub pomodoro_message: String,
 }
 
 fn default_chat_queue_capacity() -> usize {
@@ -169,6 +176,14 @@ fn default_youtube_min_poll_interval_secs() -> u64 {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_pomodoro_minutes() -> u64 {
+    25
+}
+
+fn default_pomodoro_message() -> String {
+    crate::chat::POMODORO_DEFAULT_MESSAGE.to_string()
 }
 
 impl Default for ChatSettings {
@@ -192,6 +207,8 @@ impl Default for ChatSettings {
             kick_client_secret: None,
             kick_channel: None,
             kick_webhook_enabled: false,
+            pomodoro_minutes: default_pomodoro_minutes(),
+            pomodoro_message: default_pomodoro_message(),
         }
     }
 }
@@ -404,6 +421,11 @@ fn merge_chat(config: &mut AppConfig, form: ChatForm) {
         kick_webhook_enabled: form
             .kick_webhook_enabled
             .unwrap_or(config.chat.kick_webhook_enabled),
+        pomodoro_minutes: form
+            .pomodoro_minutes
+            .unwrap_or(config.chat.pomodoro_minutes),
+        pomodoro_message: non_empty(form.pomodoro_message)
+            .unwrap_or_else(|| config.chat.pomodoro_message.clone()),
     };
 }
 
@@ -733,6 +755,8 @@ pub struct ChatForm {
     pub clear_kick_client_secret: bool,
     pub kick_channel: Option<String>,
     pub kick_webhook_enabled: Option<bool>,
+    pub pomodoro_minutes: Option<u64>,
+    pub pomodoro_message: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1527,8 +1551,35 @@ mod tests {
         assert_eq!(updated.chat.queue_capacity, 250);
     }
 
+        #[test]
+    fn pomodoro_settings_are_configurable_and_capped_at_45_minutes() {
+        let form: ConfigForm = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str(
+                "chat%5Bpomodoro_minutes%5D=30&chat%5Bpomodoro_message%5D=Deep+work&action=save",
+            )
+            .unwrap();
+        let updated = populated_config().merge_form(form).unwrap();
+        assert_eq!(updated.chat.pomodoro_minutes, 30);
+        assert_eq!(updated.chat.pomodoro_message, "Deep work");
+        updated.validate().unwrap();
+
+        let mut too_long = populated_config();
+        too_long.chat.pomodoro_minutes = 46;
+        assert!(too_long.validate().is_err());
+
+        let form: ConfigForm = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str("server%5Blisten%5D=127.0.0.1%3A1936&action=save")
+            .unwrap();
+        let preserved = populated_config().merge_form(form).unwrap();
+        assert_eq!(preserved.chat.pomodoro_minutes, 25);
+        assert!(!preserved.chat.pomodoro_message.is_empty());
+    }
+
     #[test]
     fn query_mode_does_not_decode_browser_form_keys() {
+
         let form: ConfigForm =
             serde_qs::from_str("server%5Blisten%5D=127.0.0.1%3A1936&action=save").unwrap();
 

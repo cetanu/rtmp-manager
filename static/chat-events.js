@@ -1,4 +1,22 @@
 (() => {
+  // Live ticking for pomodoro countdowns rendered as [data-pomodoro-countdown].
+  // Server HTML carries the initial MM:SS text plus data-ends-at (unix ms);
+  // this keeps every countdown current without waiting for the next SSE refresh.
+  const pad = (value) => String(value).padStart(2, "0");
+  const tickCountdowns = () => {
+    document.querySelectorAll("[data-pomodoro-countdown]").forEach((el) => {
+      const endsAt = Number(el.dataset.endsAt || 0);
+      if (!Number.isFinite(endsAt) || endsAt <= 0) return;
+      const secs = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
+      const text = `${pad(Math.floor(secs / 60))}:${pad(secs % 60)}`;
+      if (el.textContent !== text) el.textContent = text;
+    });
+  };
+  tickCountdowns();
+  window.setInterval(tickCountdowns, 1000);
+})();
+
+(() => {
   // Topcoat serves the SSE stream; its browser runtime has no EventSource binding yet.
   if (!window.EventSource) return;
 

@@ -21,14 +21,18 @@ pub mod x;
 pub mod youtube;
 
 pub use types::{
-    ChatMessagePart, ChatState, EnqueueOutcome, IncomingChatMessage, Source, YouTubeChatConfig,
-    YouTubeChatSink, YouTubeChatTarget, YouTubeIngestState, YouTubeIngestStatus,
+    ChatMessagePart, ChatState, EnqueueOutcome, IncomingChatMessage, PomodoroState, Source,
+    YouTubeChatConfig, YouTubeChatSink, YouTubeChatTarget, YouTubeIngestState, YouTubeIngestStatus,
 };
 
 const INBOX_PREVIEW_LIMIT: usize = 10;
 const SEEN_ID_RETENTION_MULTIPLIER: usize = 4;
 const ACTOR_COMMAND_CAPACITY: usize = 64;
 const STATUS_DETAIL_LIMIT: usize = 240;
+pub const POMODORO_MIN_DURATION_SECS: u64 = 60;
+pub const POMODORO_MAX_DURATION_SECS: u64 = 45 * 60;
+pub const POMODORO_DEFAULT_MESSAGE: &str = "Focus mode — chat paused";
+pub const POMODORO_MAX_MESSAGE_CHARS: usize = 280;
 
 impl IncomingChatMessage {
     pub fn normalized(mut self) -> Result<Self> {
@@ -132,11 +136,45 @@ struct StoredChatState {
     dropped: u64,
 }
 
+/// Durable focus-timer row so an active pomodoro survives process restarts.
+/// Single-row table (`id = 1`); absent when no pomodoro is active.
+#[derive(Debug, toasty::Model)]
+#[table = "chat_pomodoro"]
+struct StoredPomodoro {
+    #[key]
+    id: u64,
+    message: String,
+    started_at_unix_ms: u64,
+    ends_at_unix_ms: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatInboxSnapshot {
     pub messages: Vec<ChatMessage>,
     pub queued: usize,
     pub dropped: u64,
+    #[serde(default)]
+    pub pomodoro: Option<PomodoroState>,
+}
+
+pub fn validate_pomodoro(message: &str, duration_secs: u64) -> Result<(String, u64)> {
+    anyhow::ensure!(
+        (POMODORO_MIN_DURATION_SECS..=POMODORO_MAX_DURATION_SECS).contains(&duration_secs),
+        "Pomodoro duration must be between {} and {} minutes",
+        POMODORO_MIN_DURATION_SECS / 60,
+        POMODORO_MAX_DURATION_SECS / 60,
+    );
+    let trimmed = message.trim();
+    let message = if trimmed.is_empty() {
+        POMODORO_DEFAULT_MESSAGE.to_string()
+    } else {
+        trimmed.to_string()
+    };
+    anyhow::ensure!(
+        message.chars().count() <= POMODORO_MAX_MESSAGE_CHARS,
+        "Pomodoro message must be at most {POMODORO_MAX_MESSAGE_CHARS} characters",
+    );
+    Ok((message, duration_secs))
 }
 
 /// SQLite-backed persistent chat inbox with bounded queue capacity and deduplication.
@@ -266,6 +304,7 @@ impl ChatInbox {
             messages,
             queued,
             dropped,
+            pomodoro: None,
         })
     }
 
@@ -273,6 +312,67 @@ impl ChatInbox {
         anyhow::ensure!(capacity > 0, "chat queue capacity must be positive");
         self.capacity = capacity;
         self.trim_to_capacity().await
+    }
+
+    /// Loads the persisted pomodoro, deleting it if already expired.
+    /// Used once at startup to rehydrate focus mode after a restart.
+    pub async fn load_persisted_pomodoro(&self) -> Result<Option<PomodoroState>> {
+        let mut database = self.database.clone();
+        let Some(row) = StoredPomodoro::filter(StoredPomodoro::fields().id().eq(1_u64))
+            .first()
+            .exec(&mut database)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let pomodoro = PomodoroState {
+            message: row.message.clone(),
+            started_at_unix_ms: row.started_at_unix_ms,
+            ends_at_unix_ms: row.ends_at_unix_ms,
+        };
+        if pomodoro.is_expired(now_unix_ms()) {
+            row.delete().exec(&mut database).await?;
+            return Ok(None);
+        }
+        Ok(Some(pomodoro))
+    }
+
+    pub async fn save_persisted_pomodoro(&self, pomodoro: &PomodoroState) -> Result<()> {
+        let mut database = self.database.clone();
+        if let Some(mut row) = StoredPomodoro::filter(StoredPomodoro::fields().id().eq(1_u64))
+            .first()
+            .exec(&mut database)
+            .await?
+        {
+            row.update()
+                .message(pomodoro.message.clone())
+                .started_at_unix_ms(pomodoro.started_at_unix_ms)
+                .ends_at_unix_ms(pomodoro.ends_at_unix_ms)
+                .exec(&mut database)
+                .await?;
+        } else {
+            toasty::create!(StoredPomodoro {
+                id: 1,
+                message: pomodoro.message.clone(),
+                started_at_unix_ms: pomodoro.started_at_unix_ms,
+                ends_at_unix_ms: pomodoro.ends_at_unix_ms,
+            })
+            .exec(&mut database)
+            .await?;
+        }
+        Ok(())
+    }
+
+    pub async fn clear_persisted_pomodoro(&self) -> Result<()> {
+        let mut database = self.database.clone();
+        if let Some(row) = StoredPomodoro::filter(StoredPomodoro::fields().id().eq(1_u64))
+            .first()
+            .exec(&mut database)
+            .await?
+        {
+            row.delete().exec(&mut database).await?;
+        }
+        Ok(())
     }
 
     async fn trim_to_capacity(&mut self) -> Result<()> {
@@ -434,6 +534,15 @@ enum ChatCommand {
         last_success_at_unix_ms: Option<u64>,
         newly_received: Option<u64>,
     },
+    StartPomodoro {
+        message: String,
+        duration_secs: u64,
+        respond_to: oneshot::Sender<Result<ChatInboxSnapshot>>,
+    },
+    StopPomodoro {
+        respond_to: oneshot::Sender<Result<ChatInboxSnapshot>>,
+    },
+    ExpirePomodoro,
 }
 
 /// Actor owning chat queue storage and background platform workers exclusively without mutexes.
@@ -441,6 +550,7 @@ struct ChatActor {
     inbox: ChatInbox,
     twitch_task: Option<JoinHandle<()>>,
     youtube_task: Option<JoinHandle<()>>,
+    pomodoro_timer: Option<JoinHandle<()>>,
     state: ChatState,
     state_tx: watch::Sender<ChatState>,
     http_client: Client,
@@ -474,7 +584,11 @@ impl ChatActor {
                     let _ = respond_to.send(acknowledged);
                 }
                 ChatCommand::Snapshot { respond_to } => {
-                    let _ = respond_to.send(self.inbox.snapshot().await);
+                    let response = self.inbox.snapshot().await.map(|mut snapshot| {
+                        snapshot.pomodoro = self.active_pomodoro();
+                        snapshot
+                    });
+                    let _ = respond_to.send(response);
                 }
                 ChatCommand::ApplyConfig { config, respond_to } => {
                     let res = self.handle_apply_config(&config, &handle).await;
@@ -508,6 +622,27 @@ impl ChatActor {
                     }
                     self.state_tx.send_replace(self.state.clone());
                 }
+                ChatCommand::StartPomodoro {
+                    message,
+                    duration_secs,
+                    respond_to,
+                } => {
+                    let response = self
+                        .start_pomodoro(&handle, message, duration_secs)
+                        .await;
+                    let _ = respond_to.send(response);
+                }
+                ChatCommand::StopPomodoro { respond_to } => {
+                    let response = self.stop_pomodoro().await;
+                    let _ = respond_to.send(response);
+                }
+                ChatCommand::ExpirePomodoro => {
+                    if self.active_pomodoro().is_some()
+                        && let Err(error) = self.clear_pomodoro().await
+                    {
+                        tracing::warn!("Failed to clear expired pomodoro: {error:#}");
+                    }
+                }
             }
         }
     }
@@ -515,6 +650,69 @@ impl ChatActor {
     fn notify_changed(&mut self) {
         self.state.revision = self.state.revision.wrapping_add(1);
         self.state_tx.send_replace(self.state.clone());
+    }
+
+    fn active_pomodoro(&self) -> Option<PomodoroState> {
+        let pomodoro = self.state.pomodoro.clone()?;
+        if pomodoro.is_expired(now_unix_ms()) {
+            None
+        } else {
+            Some(pomodoro)
+        }
+    }
+
+    async fn clear_pomodoro(&mut self) -> Result<()> {
+        if let Some(timer) = self.pomodoro_timer.take() {
+            timer.abort();
+        }
+        self.inbox.clear_persisted_pomodoro().await?;
+        if self.state.pomodoro.take().is_some() {
+            self.notify_changed();
+        }
+        Ok(())
+    }
+
+    async fn snapshot_with_pomodoro(&self) -> Result<ChatInboxSnapshot> {
+        let mut snapshot = self.inbox.snapshot().await?;
+        snapshot.pomodoro = self.active_pomodoro();
+        Ok(snapshot)
+    }
+
+    async fn start_pomodoro(
+        &mut self,
+        handle: &ChatHandle,
+        message: String,
+        duration_secs: u64,
+    ) -> Result<ChatInboxSnapshot> {
+        let (message, duration_secs) = validate_pomodoro(&message, duration_secs)?;
+        let now = now_unix_ms();
+        let pomodoro = PomodoroState {
+            message,
+            started_at_unix_ms: now,
+            ends_at_unix_ms: now.saturating_add(duration_secs.saturating_mul(1000)),
+        };
+        // Durable before visible: a restart between state-set and save would
+        // otherwise silently drop focus mode.
+        self.inbox.save_persisted_pomodoro(&pomodoro).await?;
+        if let Some(timer) = self.pomodoro_timer.take() {
+            timer.abort();
+        }
+        self.state.pomodoro = Some(pomodoro);
+        self.notify_changed();
+
+        let sender = handle.sender.clone();
+        let timer = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(duration_secs)).await;
+            let _ = sender.send(ChatCommand::ExpirePomodoro).await;
+        });
+        self.pomodoro_timer = Some(timer);
+
+        self.snapshot_with_pomodoro().await
+    }
+
+    async fn stop_pomodoro(&mut self) -> Result<ChatInboxSnapshot> {
+        self.clear_pomodoro().await?;
+        self.snapshot_with_pomodoro().await
     }
 
     async fn handle_apply_config(
@@ -635,11 +833,30 @@ impl ChatHandle {
             test_message_sequence: Arc::new(AtomicU64::new(1)),
         };
 
+        // Rehydrate focus mode persisted before a restart, if it has not
+        // expired while the process was down, and re-arm its expiry timer.
+        let mut state = ChatState::default();
+        let mut pomodoro_timer = None;
+        if let Some(pomodoro) = inbox.load_persisted_pomodoro().await? {
+            let remaining_ms = pomodoro.ends_at_unix_ms.saturating_sub(now_unix_ms());
+            if remaining_ms > 0 {
+                state.pomodoro = Some(pomodoro);
+                let timer_sender = handle.sender.clone();
+                pomodoro_timer = Some(tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(remaining_ms)).await;
+                    let _ = timer_sender.send(ChatCommand::ExpirePomodoro).await;
+                }));
+                tracing::info!("Restored active pomodoro focus mode after restart");
+            }
+        }
+        state_tx.send_replace(state.clone());
+
         let actor = ChatActor {
             inbox,
             twitch_task: None,
             youtube_task: None,
-            state: ChatState::default(),
+            pomodoro_timer,
+            state,
             state_tx,
             http_client,
         };
@@ -733,6 +950,30 @@ impl ChatHandle {
         self.call(
             |respond_to| ChatCommand::SetYouTubePolling { config, respond_to },
             "Chat actor dropped set_youtube_polling response",
+        )
+        .await
+    }
+
+    pub async fn start_pomodoro(
+        &self,
+        message: String,
+        duration_secs: u64,
+    ) -> Result<ChatInboxSnapshot> {
+        self.call(
+            |respond_to| ChatCommand::StartPomodoro {
+                message,
+                duration_secs,
+                respond_to,
+            },
+            "Chat actor dropped start_pomodoro response",
+        )
+        .await
+    }
+
+    pub async fn stop_pomodoro(&self) -> Result<ChatInboxSnapshot> {
+        self.call(
+            |respond_to| ChatCommand::StopPomodoro { respond_to },
+            "Chat actor dropped stop_pomodoro response",
         )
         .await
     }
@@ -1101,6 +1342,7 @@ mod tests {
             inbox,
             twitch_task: None,
             youtube_task: None,
+            pomodoro_timer: None,
             state: ChatState::default(),
             state_tx,
             http_client: Client::new(),
@@ -1141,6 +1383,100 @@ mod tests {
 
         let snapshot_after = handle.snapshot().await.unwrap();
         assert_eq!(snapshot_after.messages.len(), 0);
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn pomodoro_validation_rejects_bad_durations_and_long_messages() {
+        assert!(validate_pomodoro("focus", 30).is_err());
+        assert!(validate_pomodoro("focus", POMODORO_MAX_DURATION_SECS + 1).is_err());
+        assert!(validate_pomodoro("x".repeat(POMODORO_MAX_MESSAGE_CHARS + 1).as_str(), 600).is_err());
+        let (message, secs) = validate_pomodoro("  deep work  ", 25 * 60).unwrap();
+        assert_eq!((message.as_str(), secs), ("deep work", 1500));
+        let (defaulted, _) = validate_pomodoro("   ", 25 * 60).unwrap();
+        assert_eq!(defaulted, POMODORO_DEFAULT_MESSAGE);
+    }
+
+    #[tokio::test]
+    async fn pomodoro_start_and_stop_flow_through_handle() {
+        let path = database_path();
+        let handle = ChatHandle::spawn(&path, 5, Client::new(), Arc::new(Metrics::default()))
+            .await
+            .unwrap();
+
+        assert!(handle.snapshot().await.unwrap().pomodoro.is_none());
+        let snapshot = handle
+            .start_pomodoro("deep work".into(), 25 * 60)
+            .await
+            .unwrap();
+        let pomodoro = snapshot.pomodoro.clone().unwrap();
+        assert_eq!(pomodoro.message, "deep work");
+        assert!(pomodoro.ends_at_unix_ms > pomodoro.started_at_unix_ms);
+
+        let via_snapshot = handle.snapshot().await.unwrap();
+        assert_eq!(via_snapshot.pomodoro, snapshot.pomodoro);
+
+        let stopped = handle.stop_pomodoro().await.unwrap();
+        assert!(stopped.pomodoro.is_none());
+        assert!(handle.snapshot().await.unwrap().pomodoro.is_none());
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn pomodoro_survives_respawn_until_stopped() {
+        let path = database_path();
+        let handle = ChatHandle::spawn(&path, 5, Client::new(), Arc::new(Metrics::default()))
+            .await
+            .unwrap();
+        let started = handle
+            .start_pomodoro("restart-proof".into(), 25 * 60)
+            .await
+            .unwrap();
+        assert!(started.pomodoro.is_some());
+
+        // Simulate a process restart: a fresh handle on the same database
+        // rehydrates the still-active pomodoro.
+        let restarted = ChatHandle::spawn(&path, 5, Client::new(), Arc::new(Metrics::default()))
+            .await
+            .unwrap();
+        let pomodoro = restarted.snapshot().await.unwrap().pomodoro.unwrap();
+        assert_eq!(pomodoro.message, "restart-proof");
+        assert_eq!(
+            pomodoro.ends_at_unix_ms,
+            started.pomodoro.as_ref().unwrap().ends_at_unix_ms
+        );
+
+        restarted.stop_pomodoro().await.unwrap();
+        let after_stop = ChatHandle::spawn(&path, 5, Client::new(), Arc::new(Metrics::default()))
+            .await
+            .unwrap();
+        assert!(after_stop.snapshot().await.unwrap().pomodoro.is_none());
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn expired_pomodoro_is_purged_on_startup() {
+        let path = database_path();
+        let inbox = ChatInbox::open(&path, 5).await.unwrap();
+        inbox
+            .save_persisted_pomodoro(&PomodoroState {
+                message: "stale".into(),
+                started_at_unix_ms: 1,
+                ends_at_unix_ms: 2,
+            })
+            .await
+            .unwrap();
+        drop(inbox);
+
+        let handle = ChatHandle::spawn(&path, 5, Client::new(), Arc::new(Metrics::default()))
+            .await
+            .unwrap();
+        assert!(handle.snapshot().await.unwrap().pomodoro.is_none());
+        let reopened = ChatInbox::open(&path, 5).await.unwrap();
+        assert!(reopened.load_persisted_pomodoro().await.unwrap().is_none());
 
         std::fs::remove_file(path).unwrap();
     }

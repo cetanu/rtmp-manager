@@ -4,3 +4,8 @@ version = 1
 id = 8552113020344024533
 name = "0000_initial.sql"
 snapshot_name = "0000_snapshot.toml"
+
+[[migrations]]
+id = 5246521682966825511
+name = "0001_add_chat_pomodoro.sql"
+snapshot_name = "0001_snapshot.toml"

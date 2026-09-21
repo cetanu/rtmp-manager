@@ -151,6 +151,15 @@ const LEGACY_TABLE_DDL: &[&str] = &[
         "dropped" INTEGER NOT NULL,
         PRIMARY KEY ("id")
     )"#,
+    // Incremental migrations are stamped as applied by the legacy bridge
+    // without running, so every table they create needs a safety-net DDL here.
+    r#"CREATE TABLE IF NOT EXISTS "chat_pomodoro" (
+        "id" INTEGER NOT NULL,
+        "message" TEXT NOT NULL,
+        "started_at_unix_ms" INTEGER NOT NULL,
+        "ends_at_unix_ms" INTEGER NOT NULL,
+        PRIMARY KEY ("id")
+    )"#,
     r#"CREATE INDEX IF NOT EXISTS "index_chat_seen_by_source_and_external_id" ON "chat_seen" ("source", "external_id")"#,
 ];
 
@@ -228,6 +237,7 @@ mod tests {
             "chat_messages",
             "chat_seen",
             "chat_state",
+            "chat_pomodoro",
             "__toasty_migrations",
         ] {
             assert!(

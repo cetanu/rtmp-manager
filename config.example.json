@@ -30,7 +30,9 @@
     "kick_client_id": "",
     "kick_client_secret": "",
     "kick_channel": "",
-    "kick_webhook_enabled": false
+    "kick_webhook_enabled": false,
+    "pomodoro_minutes": 25,
+    "pomodoro_message": "Focus mode — chat paused"
   },
   "notifications": {
     "discord_webhook": "https://discord.com/api/webhooks/YOUR_DISCORD_WEBHOOK_URL",

@@ -55,6 +55,7 @@ pub(crate) const SECRET_FIELDS_SCRIPT: Asset = asset!("static/secret-fields.js")
 const MAX_WEBHOOK_SIZE: usize = 128 * 1024;
 const MAX_CONFIG_BODY_SIZE: usize = 1024 * 1024;
 const MAX_CHAT_TEST_BODY_SIZE: usize = 64 * 1024;
+const MAX_POMODORO_BODY_SIZE: usize = 16 * 1024;
 
 pub async fn run_web_server(
     app_handle: AppHandle,
@@ -71,6 +72,7 @@ pub async fn run_web_server(
         .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import"))
         .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import-file"))
         .layer(topcoat::router::BodyLimit::max(MAX_CHAT_TEST_BODY_SIZE).at("/api/chat/test"))
+        .layer(topcoat::router::BodyLimit::max(MAX_POMODORO_BODY_SIZE).at("/api/chat/pomodoro"))
         .app_context(app_handle)
         .build();
 
@@ -432,6 +434,52 @@ async fn send_test_chat_message(cx: &Cx, body: Bytes) -> Result<Response> {
     Json(app.chat.snapshot().await?).into_response(cx)
 }
 
+#[derive(Debug, Deserialize)]
+struct StartPomodoroRequest {
+    #[serde(default)]
+    duration_minutes: Option<u64>,
+    #[serde(default)]
+    duration_secs: Option<u64>,
+    #[serde(default)]
+    message: Option<String>,
+}
+
+#[route(POST "/api/chat/pomodoro")]
+async fn start_chat_pomodoro(cx: &Cx, body: Bytes) -> Result<Response> {
+    let app: &AppHandle = app_context(cx);
+    let request: StartPomodoroRequest = if body.is_empty() {
+        StartPomodoroRequest {
+            duration_minutes: None,
+            duration_secs: None,
+            message: None,
+        }
+    } else {
+        match serde_json::from_slice(&body) {
+            Ok(req) => req,
+            Err(error) => return Err(bad_request(format!("Invalid JSON payload: {error}")).into()),
+        }
+    };
+    let duration_secs = request.duration_secs.unwrap_or_else(|| {
+        request
+            .duration_minutes
+            .unwrap_or(crate::chat::POMODORO_MIN_DURATION_SECS / 60)
+            .saturating_mul(60)
+    });
+    let message = request.message.unwrap_or_default();
+    let snapshot = app
+        .chat
+        .start_pomodoro(message, duration_secs)
+        .await
+        .map_err(|error| bad_request(error.to_string()))?;
+    Json(snapshot).into_response(cx)
+}
+
+#[route(DELETE "/api/chat/pomodoro")]
+async fn stop_chat_pomodoro(cx: &Cx) -> Result<Response> {
+    let app: &AppHandle = app_context(cx);
+    Json(app.chat.stop_pomodoro().await?).into_response(cx)
+}
+
 #[route(GET "/api/events")]
 async fn server_events(
     cx: &Cx,
@@ -527,13 +575,17 @@ async fn overlay_events(
                 }
                 last_revision = revision;
                 let event = match chat.snapshot().await {
-                    Ok(snapshot) => match render_chat_overlay_messages(snapshot.messages).await {
-                        Ok(html) => Ok(SseEvent::new().event("chat").data(html)),
-                        Err(error) => {
-                            tracing::warn!("Failed to render chat overlay update: {error:#}");
-                            Ok(SseEvent::new().event("chat_error").data("unavailable"))
+                    Ok(snapshot) => {
+                        match render_chat_overlay_messages(snapshot.messages, snapshot.pomodoro)
+                            .await
+                        {
+                            Ok(html) => Ok(SseEvent::new().event("chat").data(html)),
+                            Err(error) => {
+                                tracing::warn!("Failed to render chat overlay update: {error:#}");
+                                Ok(SseEvent::new().event("chat_error").data("unavailable"))
+                            }
                         }
-                    },
+                    }
                     Err(error) => {
                         tracing::warn!("Failed to snapshot chat for overlay update: {error:#}");
                         Ok(SseEvent::new().event("chat_error").data("unavailable"))
@@ -754,6 +806,7 @@ mod tests {
                 topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import-file"),
             )
             .layer(topcoat::router::BodyLimit::max(MAX_CHAT_TEST_BODY_SIZE).at("/api/chat/test"))
+            .layer(topcoat::router::BodyLimit::max(MAX_POMODORO_BODY_SIZE).at("/api/chat/pomodoro"))
             .app_context(app_handle.clone())
             .build();
 
@@ -883,6 +936,87 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pomodoro_focus_survives_page_refresh() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rtmp-pomodoro-refresh-{}-{}",
+            std::process::id(),
+            TEST_PORT_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let config_path = temp_dir.join("config.sqlite3");
+        let client = reqwest::Client::new();
+        let (config_handle, _config) = crate::config::ConfigHandle::open(&config_path)
+            .await
+            .unwrap();
+        let metrics = Arc::new(crate::metrics::Metrics::default());
+        let app_handle = AppHandle::new(metrics, config_handle, client.clone(), 1935)
+            .await
+            .unwrap();
+
+        let app = Router::builder()
+            .discover()
+            .runtime()
+            .assets(test_asset_bundle())
+            .layer(topcoat::router::BodyLimit::max(MAX_WEBHOOK_SIZE).at("/api/webhook"))
+            .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config"))
+            .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import"))
+            .layer(
+                topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import-file"),
+            )
+            .layer(topcoat::router::BodyLimit::max(MAX_CHAT_TEST_BODY_SIZE).at("/api/chat/test"))
+            .layer(topcoat::router::BodyLimit::max(MAX_POMODORO_BODY_SIZE).at("/api/chat/pomodoro"))
+            .app_context(app_handle.clone())
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let server_task = tokio::spawn(async move {
+            let _ = topcoat::serve(listener, app).await;
+        });
+
+        // Start focus mode via the API.
+        let start = client
+            .post(format!("http://{local_addr}/api/chat/pomodoro"))
+            .header("Content-Type", "application/json")
+            .body(r#"{"duration_minutes":25,"message":"Deep work"}"#)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(start.status(), reqwest::StatusCode::OK);
+
+        // First page load shows the focus panel.
+        let first_load = client
+            .get(format!("http://{local_addr}/chat"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert!(
+            first_load.contains("chat-pomodoro-status"),
+            "first load should render the focus panel"
+        );
+
+        // Simulated refresh: full page load again — focus must survive.
+        let second_load = client
+            .get(format!("http://{local_addr}/chat"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert!(
+            second_load.contains("chat-pomodoro-status"),
+            "refresh must preserve focus mode"
+        );
+
+        server_task.abort();
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
     async fn test_chat_endpoint_and_acknowledge_flow() {
         let temp_dir = std::env::temp_dir().join(format!(
             "rtmp-chat-test-{}-{}",
@@ -911,6 +1045,7 @@ mod tests {
                 topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import-file"),
             )
             .layer(topcoat::router::BodyLimit::max(MAX_CHAT_TEST_BODY_SIZE).at("/api/chat/test"))
+            .layer(topcoat::router::BodyLimit::max(MAX_POMODORO_BODY_SIZE).at("/api/chat/pomodoro"))
             .app_context(app_handle.clone())
             .build();
 

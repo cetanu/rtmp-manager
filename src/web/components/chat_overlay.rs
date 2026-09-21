@@ -1,6 +1,7 @@
-use crate::chat::ChatMessage;
+use crate::chat::{ChatMessage, PomodoroState};
 use crate::server::state::AppHandle;
 use crate::web::components::chat_message::chat_message_card;
+use crate::util::now_unix_ms;
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -118,16 +119,41 @@ pub async fn chat_overlay(cx: &Cx) -> Result<impl View> {
 
     Ok(view! {
         <div id="chat-overlay-wrapper" class="flex flex-col w-full">
-            chat_overlay_messages(messages: snapshot.messages)
+            chat_overlay_messages(messages: snapshot.messages, pomodoro: snapshot.pomodoro)
         </div>
     })
 }
 
 #[component]
-pub async fn chat_overlay_messages(messages: Vec<ChatMessage>) -> Result<impl View> {
+pub async fn chat_overlay_messages(
+    messages: Vec<ChatMessage>,
+    pomodoro: Option<PomodoroState>,
+) -> Result<impl View> {
+    let now = now_unix_ms();
+    let pomodoro = pomodoro.filter(|state| !state.is_expired(now));
     Ok(view! {
         <div id="chat-overlay-messages" class="flex flex-col gap-2">
-            if messages.is_empty() {
+            if let Some(state) = pomodoro {
+                <div
+                    id="chat-overlay-pomodoro"
+                    data-ends-at=(state.ends_at_unix_ms.to_string())
+                    class="rounded-xl border border-white/10 bg-black/60 px-5 py-4 text-center shadow-xs backdrop-blur-xs"
+                >
+                    <div class="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400">
+                        "Focus mode"
+                    </div>
+                    <div class="mt-1 text-xl font-bold leading-snug text-zinc-100">
+                        (state.message.clone())
+                    </div>
+                    <div
+                        data-pomodoro-countdown="true"
+                        data-ends-at=(state.ends_at_unix_ms.to_string())
+                        class="mt-2 text-3xl font-bold tabular-nums text-zinc-100"
+                    >
+                        (state.remaining_mm_ss(now))
+                    </div>
+                </div>
+            } else if messages.is_empty() {
                 <div class="hidden" aria-hidden="true"></div>
             } else {
                 for (index, message) in messages.into_iter().enumerate() {
@@ -138,10 +164,13 @@ pub async fn chat_overlay_messages(messages: Vec<ChatMessage>) -> Result<impl Vi
     })
 }
 
-pub async fn render_chat_overlay_messages(messages: Vec<ChatMessage>) -> Result<String> {
+pub async fn render_chat_overlay_messages(
+    messages: Vec<ChatMessage>,
+    pomodoro: Option<PomodoroState>,
+) -> Result<String> {
     let cx = Cx::default();
     let __cx = &cx;
-    let view = view! { chat_overlay_messages(messages: messages) };
+    let view = view! { chat_overlay_messages(messages: messages, pomodoro: pomodoro) };
     Ok(view.single().await?.render(&cx))
 }
 
@@ -198,7 +227,7 @@ mod tests {
             avatar_url: None,
             sent_at: None,
             received_at_unix_ms: 1,
-        }])
+        }], None)
         .await
         .unwrap();
 
@@ -227,12 +256,43 @@ mod tests {
             avatar_url: None,
             sent_at: None,
             received_at_unix_ms: 2,
-        }])
+        }], None)
         .await
         .unwrap();
 
         assert!(html.contains("src=\"https://example.com/custom-emoji.png\""));
         assert!(html.contains("alt=\"customEmoji\""));
         assert!(html.contains("Hello "));
+    }
+
+    #[tokio::test]
+    async fn pomodoro_banner_hides_chat_messages() {
+        let now = now_unix_ms();
+        let html = render_chat_overlay_messages(
+            vec![ChatMessage {
+                id: 3,
+                source: crate::chat::Source::Twitch,
+                external_id: "external-3".into(),
+                author: "Viewer".into(),
+                text: "should be hidden".into(),
+                parts: vec![],
+                avatar_url: None,
+                sent_at: None,
+                received_at_unix_ms: now,
+            }],
+            Some(PomodoroState {
+                message: "Deep work <focus>".into(),
+                started_at_unix_ms: now,
+                ends_at_unix_ms: now + 25 * 60 * 1000,
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert!(html.contains("id=\"chat-overlay-pomodoro\""));
+        assert!(html.contains("Deep work &lt;focus&gt;"));
+        assert!(!html.contains("should be hidden"));
+        assert!(html.contains("data-pomodoro-countdown"));
+        assert!(html.contains("25:00"));
     }
 }

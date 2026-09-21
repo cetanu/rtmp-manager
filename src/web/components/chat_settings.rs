@@ -74,10 +74,10 @@ pub async fn chat_settings(cx: &Cx) -> Result<impl View> {
                                     attrs: attributes! {
                                         id="youtube_channel_id"
                                         name="chat[youtube_channel_id]"
-                                        value=(chat.youtube_channel_id.clone().unwrap_or_default())
-                                    }
-                                )
+                                    value=(chat.youtube_channel_id.clone().unwrap_or_default())
+                                }
                             )
+                        )
                         </div>
                     </div>
                     <div class="grid gap-6 md:grid-cols-2">
@@ -139,6 +139,35 @@ pub async fn chat_settings(cx: &Cx) -> Result<impl View> {
                                     name="chat[kick_channel]"
                                     placeholder="Channel name from kick.com/channel-name"
                                     value=(chat.kick_channel.clone().unwrap_or_default())
+                                }
+                            )
+                        )
+                    </div>
+                    <div class="grid gap-6 md:grid-cols-2">
+                        form_field(
+                            control_id: "pomodoro_minutes",
+                            label_text: "Focus timer (minutes, 1–45)",
+                            input(
+                                attrs: attributes! {
+                                    id="pomodoro_minutes"
+                                    name="chat[pomodoro_minutes]"
+                                    type="number"
+                                    min="1"
+                                    max="45"
+                                    value=(chat.pomodoro_minutes.to_string())
+                                }
+                            )
+                        )
+                        form_field(
+                            control_id: "pomodoro_message",
+                            label_text: "Focus overlay message",
+                            input(
+                                attrs: attributes! {
+                                    id="pomodoro_message"
+                                    name="chat[pomodoro_message]"
+                                    maxlength="280"
+                                    placeholder="Message shown on the overlay while focusing"
+                                    value=(chat.pomodoro_message.clone())
                                 }
                             )
                         )
