@@ -165,48 +165,11 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
 
     Ok(view! {
         card(
-            attrs: attributes! { class="mb-2" },
+            attrs: attributes! { class="mb-1 h-[calc(100dvh-3.5rem)] max-h-[calc(100dvh-3.5rem)] min-h-[18rem] !gap-2 !py-3" },
             chat_inbox_content(revision: $(revision.get()))
             card_footer(
-                attrs: attributes! { class="justify-between" },
-                <div class="flex items-center gap-4">
-                    if youtube_configured {
-                        chat_toggle(
-                            label: "YouTube polling",
-                            platform: "youtube".to_string(),
-                            enabled: &youtube_polling_enabled,
-                            pending: &youtube_toggle_pending,
-                            error: &polling_error,
-                        )
-                    }
-                    chat_toggle(
-                        label: "X chat",
-                        platform: "x".to_string(),
-                        enabled: &x_webhook_enabled,
-                        pending: &x_toggle_pending,
-                        error: &polling_error,
-                    )
-                    chat_toggle(
-                        label: "Kick chat",
-                        platform: "kick".to_string(),
-                        enabled: &kick_webhook_enabled,
-                        pending: &kick_toggle_pending,
-                        error: &polling_error,
-                    )
-                    <p
-                        :hidden=$(polling_error.get().is_empty())
-                        class="text-xs text-destructive"
-                    >
-                        $(polling_error.get())
-                    </p>
-                    <p
-                        :hidden=$(pomo_error.get().is_empty())
-                        class="text-xs text-destructive"
-                    >
-                        $(pomo_error.get())
-                    </p>
-                </div>
-                <div class="ml-auto flex items-center gap-2">
+                attrs: attributes! { class="!px-3 justify-between flex-wrap gap-y-2" },
+                <div class="flex items-center gap-2">
                     <button
                         id="chat-pomodoro-focus"
                         type="button"
@@ -243,6 +206,17 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                     >
                         "Stop"
                     </button>
+                    <p
+                        :hidden=$(pomo_error.get().is_empty())
+                        class="text-xs text-destructive"
+                    >
+                        $(pomo_error.get())
+                    </p>
+                </div>
+                <div
+                    class="ml-auto flex items-center gap-2"
+                    :hidden=$(if pomo_active.get() { true } else { false })
+                >
                     <button
                         id="chat-test-button"
                         type="button"
@@ -283,7 +257,41 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                 </div>
             )
         )
-        <div class="mb-8 flex justify-end px-1">
+        card(
+            attrs: attributes! { class="mb-2 !gap-0 !py-2" },
+            card_content(
+                attrs: attributes! { class="!px-3 flex items-center justify-between gap-3 flex-wrap" },
+            <div class="flex items-center gap-4">
+                if youtube_configured {
+                    chat_toggle(
+                        label: "YouTube polling",
+                        platform: "youtube".to_string(),
+                        enabled: &youtube_polling_enabled,
+                        pending: &youtube_toggle_pending,
+                        error: &polling_error,
+                    )
+                }
+                chat_toggle(
+                    label: "X chat",
+                    platform: "x".to_string(),
+                    enabled: &x_webhook_enabled,
+                    pending: &x_toggle_pending,
+                    error: &polling_error,
+                )
+                chat_toggle(
+                    label: "Kick chat",
+                    platform: "kick".to_string(),
+                    enabled: &kick_webhook_enabled,
+                    pending: &kick_toggle_pending,
+                    error: &polling_error,
+                )
+                <p
+                    :hidden=$(polling_error.get().is_empty())
+                    class="text-xs text-destructive"
+                >
+                    $(polling_error.get())
+                </p>
+            </div>
             <a
                 href=(format!("/overlay/chat?key={overlay_token}"))
                 target="_blank"
@@ -310,7 +318,8 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                 </svg>
                 <span>"OBS Overlay"</span>
             </a>
-        </div>
+            )
+        )
     })
 }
 
@@ -335,11 +344,12 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
 
     Ok(view! {
         card_content(
+            attrs: attributes! { class="!px-3 flex min-h-0 flex-1 flex-col gap-1" },
             if let Some((message, ends_at, remaining)) = pomodoro {
                 <div
                     id="chat-pomodoro-status"
                     data-ends-at=(ends_at.clone())
-                    class="flex h-[min(22rem,calc(100dvh-10rem))] flex-col items-center justify-center gap-1 px-3 text-center"
+                    class="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-2 text-center"
                 >
                     <div class="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                         "Focus mode"
@@ -356,7 +366,7 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
                     </div>
                 </div>
             } else {
-                <div class="h-[min(22rem,calc(100dvh-10rem))] overflow-y-auto pr-1">
+                <div class="min-h-0 flex-1 overflow-y-auto pr-1">
                     <div class="flex flex-col gap-2">
                         if snapshot.messages.is_empty() {
                             "No chat messages waiting."
@@ -372,7 +382,7 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
                 </div>
             }
             if show_chat {
-                <div class="mb-4 flex justify-end gap-4 text-right">
+                <div class="mt-1 mb-1 flex justify-end gap-4 text-right">
                     <span class="text-sm font-medium">
                         (format!("{} queued", snapshot.queued))
                     </span>
