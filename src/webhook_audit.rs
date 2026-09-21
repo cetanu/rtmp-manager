@@ -20,6 +20,12 @@ pub struct WebhookAudit {
     next_id: AtomicU64,
 }
 
+impl Default for WebhookAudit {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WebhookAudit {
     pub fn new() -> Self {
         Self {
