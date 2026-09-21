@@ -7,8 +7,14 @@
   let player = null;
   let previewAttached = false;
   let lastStatusSignature = null;
+  let previewReady = false;
+  let retryTimer = null;
 
   function detachPreview() {
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
     if (player) {
       player.destroy();
       player = null;
@@ -16,6 +22,14 @@
     video.removeAttribute("src");
     video.load();
     previewAttached = false;
+  }
+
+  function retryPreview() {
+    if (retryTimer || !previewReady) return;
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      if (previewReady) attachPreview();
+    }, 1000);
   }
 
   function attachPreview() {
@@ -30,8 +44,8 @@
         liveSyncDurationCount: 2,
         liveMaxLatencyDurationCount: 5,
       });
-      player.loadSource(source);
       player.attachMedia(video);
+      player.loadSource(source);
       player.on(window.Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
       player.on(window.Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return;
@@ -41,6 +55,7 @@
           player.recoverMediaError();
         } else {
           detachPreview();
+          retryPreview();
         }
       });
       previewAttached = true;
@@ -56,7 +71,7 @@
       statusRefresh?.click();
     }
 
-    const previewReady = status.state === "preview_ready" || status.state === "live";
+    previewReady = status.state === "preview_ready" || status.state === "live";
     const previewFailed = status.state === "preview_failed";
     if (!previewReady || previewFailed) {
       if (previewAttached) detachPreview();
@@ -64,6 +79,12 @@
 
     if (previewReady) attachPreview();
   }
+
+  video.addEventListener("error", () => {
+    if (!previewReady) return;
+    detachPreview();
+    retryPreview();
+  });
 
   async function refresh() {
     try {

@@ -5,14 +5,16 @@ use crate::server::preview::{
     StreamState, StreamStatus, create_preview_dir, valid_preview_file_name,
 };
 use crate::server::relay::{RelayProcess, cancel_relays, run_direct_test, spawn_relay};
+use crate::util::redact_secrets;
 use anyhow::{Context, Result, bail};
 use reqwest::Client;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -59,7 +61,7 @@ impl StreamActor {
         loop {
             tokio::select! {
                 _ = &mut status_check => {
-                    self.check_preview_process_health();
+                    self.check_preview_process_health().await;
                     status_check.as_mut().reset(
                         tokio::time::Instant::now() + self.preview_health_check_interval(),
                     );
@@ -98,24 +100,61 @@ impl StreamActor {
         self.cleanup().await;
     }
 
-    fn check_preview_process_health(&mut self) {
-        let Some(stream) = self.staged.as_mut() else {
-            return;
-        };
-        if !stream.preview_failed {
+    async fn check_preview_process_health(&mut self) {
+        let process_exited = {
+            let Some(stream) = self.staged.as_mut() else {
+                return;
+            };
             match stream.preview_process.try_wait() {
                 Ok(Some(status)) => {
-                    tracing::error!(%status, "HLS preview process stopped unexpectedly");
-                    stream.preview_failed = true;
+                    tracing::error!(%status, "HLS preview process stopped; restarting it");
+                    true
                 }
                 Err(error) => {
                     tracing::error!(%error, "Failed to inspect HLS preview process");
-                    stream.preview_failed = true;
+                    true
                 }
-                _ => {}
+                Ok(None) => false,
+            }
+        };
+
+        if process_exited {
+            let Some(stream_key) = self.staged.as_ref().map(|stream| stream.stream_key.clone())
+            else {
+                return;
+            };
+            if let Some(stream) = self.staged.as_mut() {
+                stream.preview_failed = true;
+            }
+            self.clear_preview_files().await;
+            match spawn_preview_process(self.listen_port, &stream_key, &self.preview_dir) {
+                Ok(preview_process) => {
+                    if let Some(stream) = self.staged.as_mut() {
+                        stream.preview_process = preview_process;
+                        stream.preview_failed = false;
+                    }
+                    tracing::info!("Restarted HLS preview process");
+                }
+                Err(error) => {
+                    tracing::error!(%error, "Failed to restart HLS preview process");
+                }
             }
         }
         self.update_status();
+    }
+
+    async fn clear_preview_files(&self) {
+        let Ok(mut entries) = tokio::fs::read_dir(&self.preview_dir).await else {
+            return;
+        };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let name = entry.file_name();
+            if name.to_str().is_some_and(valid_preview_file_name)
+                && let Err(error) = tokio::fs::remove_file(entry.path()).await
+            {
+                tracing::warn!(%error, "Failed to remove stale HLS preview file");
+            }
+        }
     }
 
     fn preview_health_check_interval(&self) -> Duration {
@@ -129,10 +168,10 @@ impl StreamActor {
     fn compute_status(&self) -> StreamStatus {
         let state = match self.staged.as_ref() {
             None => StreamState::Offline,
-            Some(stream) if stream.published => StreamState::Live,
             Some(stream) if stream.preview_failed => StreamState::PreviewFailed,
-            Some(_) if self.preview_dir.join("index.m3u8").is_file() => StreamState::PreviewReady,
-            Some(_) => StreamState::Preparing,
+            Some(_) if !self.preview_dir.join("index.m3u8").is_file() => StreamState::Preparing,
+            Some(stream) if stream.published => StreamState::Live,
+            Some(_) => StreamState::PreviewReady,
         };
         StreamStatus { state }
     }
@@ -150,50 +189,8 @@ impl StreamActor {
         }
         create_preview_dir(&self.preview_dir).await?;
 
-        let source_url = format!("rtmp://127.0.0.1:{}/live/{stream_key}", self.listen_port);
-        let playlist = self.preview_dir.join("index.m3u8");
-        let segments = self.preview_dir.join("segment_%06d.ts");
-        let playlist = playlist.to_string_lossy().into_owned();
-        let segments = segments.to_string_lossy().into_owned();
-
-        let preview_process = tokio::process::Command::new("ffmpeg")
-            .args([
-                "-loglevel",
-                "warning",
-                "-i",
-                &source_url,
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-tune",
-                "zerolatency",
-                "-g",
-                "60",
-                "-keyint_min",
-                "60",
-                "-sc_threshold",
-                "0",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "128k",
-                "-f",
-                "hls",
-                "-hls_time",
-                "2",
-                "-hls_list_size",
-                "6",
-                "-hls_flags",
-                "delete_segments+append_list+omit_endlist+independent_segments",
-                "-hls_segment_filename",
-                &segments,
-                &playlist,
-            ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()?;
+        let preview_process =
+            spawn_preview_process(self.listen_port, &stream_key, &self.preview_dir)?;
 
         self.staged = Some(StagedStream {
             stream_key,
@@ -306,6 +303,66 @@ impl StreamActor {
         }
         let _ = tokio::fs::remove_dir_all(&self.preview_dir).await;
     }
+}
+
+fn spawn_preview_process(listen_port: u16, stream_key: &str, preview_dir: &Path) -> Result<Child> {
+    let source_url = format!("rtmp://127.0.0.1:{listen_port}/live/{stream_key}");
+    let playlist = preview_dir.join("index.m3u8");
+    let segments = preview_dir.join("segment_%06d.ts");
+    let mut preview_process = tokio::process::Command::new("ffmpeg")
+        .args([
+            "-loglevel",
+            "warning",
+            "-i",
+            &source_url,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-tune",
+            "zerolatency",
+            "-g",
+            "60",
+            "-keyint_min",
+            "60",
+            "-sc_threshold",
+            "0",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-f",
+            "hls",
+            "-hls_time",
+            "2",
+            "-hls_list_size",
+            "6",
+            "-hls_flags",
+            "delete_segments+append_list+omit_endlist+independent_segments",
+            "-hls_segment_filename",
+            &segments.to_string_lossy(),
+            &playlist.to_string_lossy(),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .context("Failed to start HLS preview FFmpeg")?;
+
+    if let Some(stderr) = preview_process.stderr.take() {
+        let stream_key = stream_key.to_owned();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                tracing::warn!(
+                    message = %redact_secrets(&line, std::slice::from_ref(&stream_key)),
+                    "HLS preview FFmpeg"
+                );
+            }
+        });
+    }
+
+    Ok(preview_process)
 }
 
 /// Lightweight, cloneable handle to the StreamActor for lock-free status reads and async operations.
