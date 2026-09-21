@@ -79,6 +79,7 @@ pub fn parse_chat_event(body: &[u8]) -> Result<Option<IncomingChatMessage>> {
         external_id: event.data.payload.message_id,
         author: event.data.payload.author.data.username,
         text: event.data.payload.message,
+        parts: Vec::new(),
         avatar_url: event.data.payload.author.data.profile_image_url,
         sent_at: None,
     }))

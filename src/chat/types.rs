@@ -58,11 +58,22 @@ pub struct IncomingChatMessage {
     #[validate(max_length = 5000)]
     pub text: String,
     #[serde(default)]
+    pub parts: Vec<ChatMessagePart>,
+    #[serde(default)]
     #[validate(max_length = 2048)]
     pub avatar_url: Option<String>,
     #[serde(default)]
     #[validate(max_length = 100)]
     pub sent_at: Option<String>,
+}
+
+/// The ordered content of a chat message. Platform-specific images are kept
+/// separate from the plain text so messages remain readable if an image fails
+/// to load or a platform does not provide emote metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ChatMessagePart {
+    Text(String),
+    Emoji { alt: String, url: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

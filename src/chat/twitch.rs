@@ -1,4 +1,4 @@
-use crate::chat::{ChatHandle, IncomingChatMessage, Source};
+use crate::chat::{ChatHandle, ChatMessagePart, IncomingChatMessage, Source};
 use crate::util::now_unix_ms;
 use anyhow::{Context, Result};
 use std::time::Duration;
@@ -81,6 +81,7 @@ async fn read_connection(chat: &ChatHandle, channel: &str) -> Result<()> {
                 .unwrap_or_else(|| format!("irc-{}-{fallback_message_id}", now_unix_ms())),
             author: parsed.author,
             text: parsed.text,
+            parts: parsed.parts,
             avatar_url: None,
             sent_at: None,
         };
@@ -95,6 +96,7 @@ struct ParsedMessage {
     id: Option<String>,
     author: String,
     text: String,
+    parts: Vec<ChatMessagePart>,
 }
 
 fn parse_privmsg(line: &str) -> Option<ParsedMessage> {
@@ -123,12 +125,98 @@ fn parse_privmsg(line: &str) -> Option<ParsedMessage> {
     let author = tag("display-name")
         .or_else(|| prefix.split('!').next().map(str::to_owned))
         .filter(|author| !author.trim().is_empty())?;
+    let parts = tag("emotes")
+        .map(|emotes| parse_emotes(text, &emotes))
+        .unwrap_or_default();
 
     Some(ParsedMessage {
         id: tag("id"),
         author,
         text: text.to_owned(),
+        parts,
     })
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct EmoteRange {
+    id: String,
+    start: usize,
+    end: usize,
+}
+
+fn parse_emotes(text: &str, emotes_tag: &str) -> Vec<ChatMessagePart> {
+    let mut ranges = emotes_tag
+        .split('/')
+        .filter_map(|emote| {
+            let (id, positions) = emote.split_once(':')?;
+            if id.is_empty() || !id.chars().all(|character| character.is_ascii_digit()) {
+                return None;
+            }
+
+            Some(
+                positions
+                    .split(',')
+                    .filter_map(|position| {
+                        let (start, end) = position.split_once('-')?;
+                        let start = start.parse::<usize>().ok()?;
+                        let end = end.parse::<usize>().ok()?;
+                        (start <= end).then(|| EmoteRange {
+                            id: id.to_string(),
+                            start,
+                            end,
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .flatten()
+        .collect::<Vec<_>>();
+
+    if ranges.is_empty() {
+        return Vec::new();
+    }
+
+    ranges.sort_by_key(|range| (range.start, range.end));
+
+    // Twitch positions are inclusive Unicode character offsets, rather than
+    // UTF-8 byte offsets. Keeping byte boundaries for each character lets us
+    // slice Rust strings without splitting a multi-byte character.
+    let boundaries = text
+        .char_indices()
+        .map(|(index, _)| index)
+        .chain(std::iter::once(text.len()))
+        .collect::<Vec<_>>();
+    let character_count = boundaries.len().saturating_sub(1);
+    let mut parts = Vec::new();
+    let mut cursor = 0;
+
+    for range in ranges {
+        let end = range.end.saturating_add(1);
+        if range.start < cursor || end > character_count {
+            continue;
+        }
+        if cursor < range.start {
+            parts.push(ChatMessagePart::Text(
+                text[boundaries[cursor]..boundaries[range.start]].to_string(),
+            ));
+        }
+        let alt = text[boundaries[range.start]..boundaries[end]].to_string();
+        parts.push(ChatMessagePart::Emoji {
+            alt,
+            url: format!(
+                "https://static-cdn.jtvnw.net/emoticons/v2/{}/static/light/3.0",
+                range.id
+            ),
+        });
+        cursor = end;
+    }
+
+    if cursor < character_count {
+        parts.push(ChatMessagePart::Text(
+            text[boundaries[cursor]..].to_string(),
+        ));
+    }
+    parts
 }
 
 fn decode_tag(value: &str) -> String {
@@ -169,7 +257,60 @@ mod tests {
                 id: Some("message-123".into()),
                 author: "Some Viewer".into(),
                 text: "hello chat!".into(),
+                parts: Vec::new(),
             }
+        );
+    }
+
+    #[test]
+    fn parses_twitch_emotes_into_ordered_parts() {
+        let message = parse_privmsg(
+            "@display-name=Viewer;emotes=25:0-4/62835:6-16;id=message-123 :viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #channel :Kappa bleedPurple!\r\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            message.parts,
+            vec![
+                ChatMessagePart::Emoji {
+                    alt: "Kappa".into(),
+                    url: "https://static-cdn.jtvnw.net/emoticons/v2/25/static/light/3.0".into(),
+                },
+                ChatMessagePart::Text(" ".into()),
+                ChatMessagePart::Emoji {
+                    alt: "bleedPurple".into(),
+                    url: "https://static-cdn.jtvnw.net/emoticons/v2/62835/static/light/3.0".into(),
+                },
+                ChatMessagePart::Text("!".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_emotes_after_unicode_characters() {
+        let message = parse_privmsg(
+            "@emotes=25:2-6 :viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #channel :🔥 Kappa\r\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            message.parts,
+            vec![
+                ChatMessagePart::Text("🔥 ".into()),
+                ChatMessagePart::Emoji {
+                    alt: "Kappa".into(),
+                    url: "https://static-cdn.jtvnw.net/emoticons/v2/25/static/light/3.0".into(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn ignores_malformed_emote_ranges_without_losing_text() {
+        assert!(parse_emotes("hello", "not-an-emote:0-4").is_empty());
+        assert_eq!(
+            parse_emotes("hello", "25:8-12"),
+            vec![ChatMessagePart::Text("hello".into())]
         );
     }
 

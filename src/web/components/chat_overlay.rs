@@ -192,6 +192,9 @@ mod tests {
             external_id: "external-1".into(),
             author: "<viewer>".into(),
             text: "<script>alert(1)</script>".into(),
+            parts: vec![crate::chat::ChatMessagePart::Text(
+                "<script>alert(1)</script>".into(),
+            )],
             avatar_url: None,
             sent_at: None,
             received_at_unix_ms: 1,
@@ -204,5 +207,32 @@ mod tests {
         assert!(html.contains("&lt;viewer&gt;"));
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
         assert!(!html.contains("<script>alert(1)</script>"));
+    }
+
+    #[tokio::test]
+    async fn renders_youtube_emoji_parts_as_images() {
+        let html = render_chat_overlay_messages(vec![ChatMessage {
+            id: 2,
+            source: crate::chat::Source::YouTube,
+            external_id: "external-2".into(),
+            author: "Viewer".into(),
+            text: "Hello customEmoji".into(),
+            parts: vec![
+                crate::chat::ChatMessagePart::Text("Hello ".into()),
+                crate::chat::ChatMessagePart::Emoji {
+                    alt: "customEmoji".into(),
+                    url: "https://example.com/custom-emoji.png".into(),
+                },
+            ],
+            avatar_url: None,
+            sent_at: None,
+            received_at_unix_ms: 2,
+        }])
+        .await
+        .unwrap();
+
+        assert!(html.contains("src=\"https://example.com/custom-emoji.png\""));
+        assert!(html.contains("alt=\"customEmoji\""));
+        assert!(html.contains("Hello "));
     }
 }

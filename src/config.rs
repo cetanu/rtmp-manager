@@ -821,7 +821,9 @@ impl ConfigStore {
             config_path.to_path_buf()
         };
         let database_exists = database_path.exists();
-        if is_json && !config_path.exists() && !database_path.exists() {
+        let running_under_topcoat_dev = std::env::var_os("TOPCOAT_DEV_URL").is_some();
+        if is_json && !config_path.exists() && !database_path.exists() && !running_under_topcoat_dev
+        {
             bail!(
                 "Configuration database '{}' (from '{}') does not exist",
                 database_path.display(),

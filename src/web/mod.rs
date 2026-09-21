@@ -778,6 +778,7 @@ mod tests {
                 external_id: "test1".into(),
                 author: "TestViewer".into(),
                 text: "OBS overlay test message".into(),
+                parts: Vec::new(),
                 avatar_url: None,
                 sent_at: None,
             })

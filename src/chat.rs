@@ -20,8 +20,8 @@ pub mod x;
 pub mod youtube;
 
 pub use types::{
-    ChatState, EnqueueOutcome, IncomingChatMessage, Source, YouTubeChatConfig, YouTubeChatSink,
-    YouTubeChatTarget, YouTubeIngestState, YouTubeIngestStatus,
+    ChatMessagePart, ChatState, EnqueueOutcome, IncomingChatMessage, Source, YouTubeChatConfig,
+    YouTubeChatSink, YouTubeChatTarget, YouTubeIngestState, YouTubeIngestStatus,
 };
 
 const INBOX_PREVIEW_LIMIT: usize = 10;
@@ -34,6 +34,10 @@ impl IncomingChatMessage {
         self.external_id = self.external_id.trim().to_string();
         self.author = self.author.trim().to_string();
         self.text = self.text.trim().to_string();
+        self.parts.retain(|part| match part {
+            ChatMessagePart::Text(text) => !text.is_empty(),
+            ChatMessagePart::Emoji { alt, url } => !alt.is_empty() && !url.is_empty(),
+        });
         self.avatar_url = non_empty(self.avatar_url);
         self.sent_at = non_empty(self.sent_at);
 
@@ -86,6 +90,7 @@ pub struct ChatMessage {
     pub external_id: String,
     pub author: String,
     pub text: String,
+    pub parts: Vec<ChatMessagePart>,
     pub avatar_url: Option<String>,
     pub sent_at: Option<String>,
     pub received_at_unix_ms: u64,
@@ -101,6 +106,7 @@ struct StoredChatMessage {
     external_id: String,
     author: String,
     text: String,
+    emoji_data: Option<String>,
     avatar_url: Option<String>,
     sent_at: Option<String>,
     received_at_unix_ms: u64,
@@ -173,6 +179,7 @@ impl ChatInbox {
                 .exec(&mut database)
                 .await?;
         }
+        ensure_chat_message_emoji_column(&mut database).await?;
 
         let mut inbox = Self { capacity, database };
         inbox.trim_to_capacity().await?;
@@ -223,11 +230,15 @@ impl ChatInbox {
             remove_oldest_waiting(&mut messages, &mut transaction).await?;
         }
 
+        let emoji_data = (!incoming.parts.is_empty())
+            .then(|| serde_json::to_string(&incoming.parts))
+            .transpose()?;
         toasty::create!(StoredChatMessage {
             source: incoming.source.to_string(),
             external_id: incoming.external_id,
             author: incoming.author,
             text: incoming.text,
+            emoji_data,
             avatar_url: incoming.avatar_url,
             sent_at: incoming.sent_at,
             received_at_unix_ms: now_unix_ms(),
@@ -293,6 +304,13 @@ impl ChatInbox {
 }
 
 fn chat_message_from_model(message: &StoredChatMessage) -> Result<ChatMessage> {
+    let parts = message
+        .emoji_data
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .with_context(|| format!("Stored chat message {} has invalid emoji data", message.id))?
+        .unwrap_or_else(|| vec![ChatMessagePart::Text(message.text.clone())]);
     Ok(ChatMessage {
         id: message.id,
         source: message
@@ -302,10 +320,22 @@ fn chat_message_from_model(message: &StoredChatMessage) -> Result<ChatMessage> {
         external_id: message.external_id.clone(),
         author: message.author.clone(),
         text: message.text.clone(),
+        parts,
         avatar_url: message.avatar_url.clone(),
         sent_at: message.sent_at.clone(),
         received_at_unix_ms: message.received_at_unix_ms,
     })
+}
+
+async fn ensure_chat_message_emoji_column(database: &mut toasty::Db) -> Result<()> {
+    match toasty::sql::statement("ALTER TABLE chat_messages ADD COLUMN emoji_data TEXT")
+        .exec(database)
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(error) if error.to_string().contains("duplicate column name") => Ok(()),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// The first message is currently on-air. Eviction therefore starts at the
@@ -676,6 +706,7 @@ impl ChatHandle {
             external_id: format!("test-{}-{}", now_unix_ms(), seq),
             author,
             text,
+            parts: Vec::new(),
             avatar_url: req.avatar_url,
             sent_at: None,
         };
@@ -789,6 +820,7 @@ mod tests {
             external_id: external_id.into(),
             author: "Viewer".into(),
             text: text.into(),
+            parts: Vec::new(),
             avatar_url: None,
             sent_at: None,
         }
@@ -935,6 +967,37 @@ mod tests {
             assert_eq!(
                 inbox.snapshot().await.unwrap().messages[0].text,
                 "still here"
+            );
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn sqlite_queue_persists_youtube_emoji_parts() {
+        let path = database_path();
+        {
+            let mut inbox = ChatInbox::open(&path, 3).await.unwrap();
+            let mut message = message("youtube", "emoji", "Hello customEmoji");
+            message.parts = vec![
+                ChatMessagePart::Text("Hello ".into()),
+                ChatMessagePart::Emoji {
+                    alt: "customEmoji".into(),
+                    url: "https://example.com/custom-emoji.png".into(),
+                },
+            ];
+            inbox.enqueue(message).await.unwrap();
+        }
+        {
+            let inbox = ChatInbox::open(&path, 3).await.unwrap();
+            assert_eq!(
+                inbox.snapshot().await.unwrap().messages[0].parts,
+                vec![
+                    ChatMessagePart::Text("Hello ".into()),
+                    ChatMessagePart::Emoji {
+                        alt: "customEmoji".into(),
+                        url: "https://example.com/custom-emoji.png".into(),
+                    },
+                ]
             );
         }
         std::fs::remove_file(path).unwrap();

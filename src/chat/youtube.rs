@@ -1,6 +1,6 @@
 use crate::chat::types::{
-    EnqueueOutcome, IncomingChatMessage, Source, YouTubeChatConfig, YouTubeChatSink,
-    YouTubeChatTarget, YouTubeIngestState,
+    ChatMessagePart, EnqueueOutcome, IncomingChatMessage, Source, YouTubeChatConfig,
+    YouTubeChatSink, YouTubeChatTarget, YouTubeIngestState,
 };
 use crate::config::validate_outbound_url;
 use crate::util::now_unix_ms;
@@ -548,12 +548,14 @@ fn parse_renderer(renderer: &serde_json::Value, kind: MessageKind) -> Option<Inc
         avatar_url,
         sent_at,
     } = common_fields(renderer, kind)?;
-    let text = renderer_text(renderer, kind);
+    let parts = renderer_parts(renderer, kind);
+    let text = parts_text(&parts);
     Some(IncomingChatMessage {
         source: Source::YouTube,
         external_id,
         author,
         text,
+        parts,
         avatar_url,
         sent_at,
     })
@@ -583,39 +585,51 @@ fn common_fields(renderer: &serde_json::Value, kind: MessageKind) -> Option<Comm
     })
 }
 
-fn renderer_text(renderer: &serde_json::Value, kind: MessageKind) -> String {
+fn renderer_parts(renderer: &serde_json::Value, kind: MessageKind) -> Vec<ChatMessagePart> {
     match kind {
         MessageKind::Text => renderer
             .get("message")
-            .map(extract_runs)
+            .map(extract_parts)
             .unwrap_or_default(),
         MessageKind::Paid => {
             let amount = purchase_amount(renderer, "Super Chat");
             let body = renderer
                 .get("message")
-                .map(extract_runs)
+                .map(extract_parts)
                 .unwrap_or_default();
-            let suffix = if body.is_empty() {
-                String::new()
-            } else {
-                format!(" {body}")
-            };
-            format!("[Super Chat {amount}]{suffix}")
+            let mut parts = vec![ChatMessagePart::Text(format!("[Super Chat {amount}]"))];
+            if !body.is_empty() {
+                parts.push(ChatMessagePart::Text(" ".to_string()));
+                parts.extend(body);
+            }
+            parts
         }
         MessageKind::Membership => {
             let header = renderer
                 .get("headerSubtext")
-                .map(extract_runs)
-                .or_else(|| renderer.get("headerPrimaryText").map(extract_runs))
-                .unwrap_or_else(|| "Joined membership".to_string());
-            format!("[Member] {header}")
+                .map(extract_parts)
+                .or_else(|| renderer.get("headerPrimaryText").map(extract_parts))
+                .unwrap_or_else(|| vec![ChatMessagePart::Text("Joined membership".to_string())]);
+            let mut parts = vec![ChatMessagePart::Text("[Member] ".to_string())];
+            parts.extend(header);
+            parts
         }
-        MessageKind::Sticker => format!(
+        MessageKind::Sticker => vec![ChatMessagePart::Text(format!(
             "[Super Sticker {}]",
             purchase_amount(renderer, "Super Sticker")
-        ),
-        MessageKind::Gift => renderer.get("text").map(extract_runs).unwrap_or_default(),
+        ))],
+        MessageKind::Gift => renderer.get("text").map(extract_parts).unwrap_or_default(),
     }
+}
+
+fn parts_text(parts: &[ChatMessagePart]) -> String {
+    parts
+        .iter()
+        .map(|part| match part {
+            ChatMessagePart::Text(text) => text.as_str(),
+            ChatMessagePart::Emoji { alt, .. } => alt.as_str(),
+        })
+        .collect()
 }
 
 fn purchase_amount<'a>(renderer: &'a serde_json::Value, fallback: &'a str) -> &'a str {
@@ -626,33 +640,58 @@ fn purchase_amount<'a>(renderer: &'a serde_json::Value, fallback: &'a str) -> &'
 }
 
 fn extract_runs(value: &serde_json::Value) -> String {
+    parts_text(&extract_parts(value))
+}
+
+fn extract_parts(value: &serde_json::Value) -> Vec<ChatMessagePart> {
     if let Some(s) = value.as_str() {
-        return s.to_string();
+        return vec![ChatMessagePart::Text(s.to_string())];
     }
     if let Some(s) = value.get("simpleText").and_then(|v| v.as_str()) {
-        return s.to_string();
+        return vec![ChatMessagePart::Text(s.to_string())];
     }
     if let Some(s) = value.get("content").and_then(|v| v.as_str()) {
-        return s.to_string();
+        return vec![ChatMessagePart::Text(s.to_string())];
     }
     if let Some(runs) = value.get("runs").and_then(|v| v.as_array()) {
-        let mut result = String::new();
+        let mut parts = Vec::new();
         for run in runs {
             if let Some(text) = run.get("text").and_then(|t| t.as_str()) {
-                result.push_str(text);
+                parts.push(ChatMessagePart::Text(text.to_string()));
             } else if let Some(emoji) = run.get("emoji") {
-                if let Some(emoji_id) = emoji.get("emojiId").and_then(|e| e.as_str()) {
-                    result.push_str(emoji_id);
-                } else if let Some(shortcut) =
-                    emoji.pointer("/shortcuts/0").and_then(|s| s.as_str())
-                {
-                    result.push_str(shortcut);
+                let alt = emoji
+                    .get("emojiId")
+                    .and_then(|e| e.as_str())
+                    .or_else(|| emoji.pointer("/shortcuts/0").and_then(|s| s.as_str()))
+                    .unwrap_or("emoji");
+                if let Some(url) = extract_emoji_url(emoji) {
+                    parts.push(ChatMessagePart::Emoji {
+                        alt: alt.to_string(),
+                        url,
+                    });
+                } else {
+                    parts.push(ChatMessagePart::Text(alt.to_string()));
                 }
             }
         }
-        return result;
+        return parts;
     }
-    String::new()
+    Vec::new()
+}
+
+fn extract_emoji_url(emoji: &serde_json::Value) -> Option<String> {
+    emoji
+        .pointer("/image/thumbnails")
+        .and_then(|thumbnails| thumbnails.as_array())
+        .and_then(|thumbnails| thumbnails.last().or_else(|| thumbnails.first()))
+        .and_then(|thumbnail| thumbnail.get("url"))
+        .and_then(|url| url.as_str())
+        .filter(|url| {
+            reqwest::Url::parse(url)
+                .map(|url| matches!(url.scheme(), "http" | "https"))
+                .unwrap_or(false)
+        })
+        .map(str::to_string)
 }
 
 fn extract_avatar(value: &serde_json::Value) -> Option<String> {
@@ -746,7 +785,17 @@ mod tests {
                         "message": {
                             "runs": [
                                 { "text": "Hello world " },
-                                { "emoji": { "emojiId": "😊" } }
+                                {
+                                    "emoji": {
+                                        "emojiId": "😊",
+                                        "image": {
+                                            "thumbnails": [
+                                                { "url": "https://example.com/emoji-small.png" },
+                                                { "url": "https://example.com/emoji.png" }
+                                            ]
+                                        }
+                                    }
+                                }
                             ]
                         },
                         "timestampUsec": "1788101242184427"
@@ -760,6 +809,16 @@ mod tests {
         assert_eq!(parsed.external_id, "msg-123");
         assert_eq!(parsed.author, "@Alice");
         assert_eq!(parsed.text, "Hello world 😊");
+        assert_eq!(
+            parsed.parts,
+            vec![
+                ChatMessagePart::Text("Hello world ".into()),
+                ChatMessagePart::Emoji {
+                    alt: "😊".into(),
+                    url: "https://example.com/emoji.png".into(),
+                },
+            ]
+        );
         assert_eq!(
             parsed.avatar_url.as_deref(),
             Some("https://example.com/avatar.jpg")
