@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.20](https://github.com/cetanu/rtmp-manager/compare/v0.3.19...v0.3.20) - 2026-09-21
+
+### Added
+
+- *(overlay)* full-window focus banner, waiting count and opacity control
+- *(chat)* make inbox fill viewport and move toggles to toolbar card
+- *(chat)* persist pomodoro focus mode across restarts
+- *(cli)* add project-local migrate binary
+- *(db)* apply embedded toasty migrations on startup
+- *(metrics)* add chat messages chart
+- emoji support for chat
+
+### Fixed
+
+- *(db)* keep raw migration error out of info logs
+- *(clippy)* implement Default for WebhookAudit
+- *(preview)* recover stalled HLS playback
+
+### Other
+
+- document inactive rsa advisory
+- formatting
+- remove redundant comments and tests
+- extract shared library target
+- *(deps)* bump toasty from 0.9 to 0.10
+
 ## [0.3.19](https://github.com/cetanu/rtmp-manager/compare/v0.3.18...v0.3.19) - 2026-09-20
 
 ### Fixed
