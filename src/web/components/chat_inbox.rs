@@ -364,6 +364,12 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
                     >
                         (remaining)
                     </div>
+                    <div
+                        id="chat-focus-waiting"
+                        class="mt-1 text-sm text-muted-foreground"
+                    >
+                        (if snapshot.queued == 1 { "1 message waiting".to_string() } else { format!("{} messages waiting", snapshot.queued) })
+                    </div>
                 </div>
             } else {
                 <div class="min-h-0 flex-1 overflow-y-auto pr-1">

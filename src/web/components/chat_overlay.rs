@@ -15,6 +15,25 @@ html, body {
     margin: 0;
     padding: 0;
     overflow: hidden;
+    height: 100%;
+}
+/* Full-window focus banner: vh first for older Chromium/CEF builds
+   (e.g. OBS Browser Source), dvh as progressive enhancement. */
+body {
+    min-height: 100vh;
+    --overlay-alpha: 0.8;
+}
+#chat-overlay-wrapper {
+    min-height: calc(100vh - 1rem);
+    min-height: calc(100dvh - 1rem);
+}
+#chat-overlay-messages {
+    flex: 1;
+}
+#chat-overlay-pomodoro {
+    flex: 1;
+    min-height: calc(100vh - 1rem);
+    min-height: calc(100dvh - 1rem);
 }
 .chat-overlay-message {
     transition: opacity 0.2s ease, transform 0.2s ease;
@@ -25,16 +44,32 @@ body[data-theme="plain"] .chat-overlay-message {
     box-shadow: none !important;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
 }
+body[data-theme="plain"] #chat-overlay-pomodoro {
+    background-color: transparent !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
 body[data-theme="solid"] .chat-overlay-message {
     background-color: #18181b !important;
     border-color: #27272a !important;
 }
-body[data-size="sm"] .chat-overlay-message { font-size: 0.75rem; }
-body[data-size="lg"] .chat-overlay-message { font-size: 1.125rem; }
-body[data-size="xl"] .chat-overlay-message { font-size: 1.25rem; }
+body[data-theme="solid"] #chat-overlay-pomodoro {
+    background-color: #18181b !important;
+    border-color: #27272a !important;
+}
+/* NOTE: the message text lives in a `p.text-sm`, which beats inherited
+   font-size, so the size options must target it directly. */
+body[data-size="sm"] .chat-overlay-message,
+body[data-size="sm"] .chat-overlay-message p { font-size: 0.75rem; }
+body[data-size="lg"] .chat-overlay-message,
+body[data-size="lg"] .chat-overlay-message p { font-size: 1.125rem; }
+body[data-size="xl"] .chat-overlay-message,
+body[data-size="xl"] .chat-overlay-message p { font-size: 1.25rem; }
 body[data-align="bottom"] #chat-overlay-wrapper {
     justify-content: flex-end;
-    min-height: 100vh;
+    min-height: calc(100vh - 1rem);
+    min-height: calc(100dvh - 1rem);
 }
 body[data-direction="up"] #chat-overlay-messages,
 body[data-direction="reverse"] #chat-overlay-messages {
@@ -45,35 +80,23 @@ body[data-highlight="false"] .chat-overlay-message[data-highlighted="true"] {
     border-color: rgba(255, 255, 255, 0.1) !important;
     box-shadow: none !important;
 }
-"#;
-
-const OVERLAY_JS: &str = r#"
-(() => {
-    const params = new URLSearchParams(window.location.search);
-    const setChoice = (name, allowed) => {
-        const value = params.get(name);
-        if (allowed.includes(value)) document.body.dataset[name] = value;
-    };
-    setChoice("theme", ["plain", "solid"]);
-    setChoice("size", ["sm", "lg", "xl"]);
-    setChoice("align", ["top", "bottom"]);
-    setChoice("direction", ["down", "up", "reverse"]);
-    setChoice("highlight", ["true", "false"]);
-
-    const limit = Number.parseInt(params.get("limit"), 10);
-    if (Number.isInteger(limit) && limit >= 1 && limit <= 100) {
-        const style = document.createElement("style");
-        style.textContent = `.chat-overlay-message:nth-child(n+${limit + 1}) { display: none !important; }`;
-        document.head.appendChild(style);
-    }
-
-    const fade = Number.parseInt(params.get("fade"), 10);
-    if (Number.isInteger(fade) && fade > 0 && fade <= 3600) {
-        const style = document.createElement("style");
-        style.textContent = "@keyframes chatOverlayFade { 0%, 75% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-4px); pointer-events: none; } } .chat-overlay-message { animation: chatOverlayFade " + fade + "s forwards ease-in-out; }";
-        document.head.appendChild(style);
-    }
-})();
+/* Configurable container opacity (?opacity=0..100, default 80). Applies to the
+   default translucent surfaces: regular messages, the focus banner and the
+   flattened/accent highlights below (the accent tint is veiled rather than
+   replaced, so a hint of it survives below 100). The plain/solid themes keep
+   their explicit treatments. */
+body:not([data-theme]) .chat-overlay-message:not([data-highlighted="true"]) {
+    background-color: rgba(0, 0, 0, var(--overlay-alpha, 0.8)) !important;
+}
+body:not([data-theme]) #chat-overlay-pomodoro {
+    background-color: rgba(0, 0, 0, var(--overlay-alpha, 0.8)) !important;
+}
+body:not([data-theme])[data-highlight="false"] .chat-overlay-message[data-highlighted="true"] {
+    background-color: rgba(0, 0, 0, var(--overlay-alpha, 0.8)) !important;
+}
+body:not([data-theme]):not([data-highlight="false"]) .chat-overlay-message[data-highlighted="true"] {
+    background-image: linear-gradient(rgba(0, 0, 0, var(--overlay-alpha, 0.8)), rgba(0, 0, 0, var(--overlay-alpha, 0.8))) !important;
+}
 "#;
 
 #[component]
@@ -106,7 +129,6 @@ pub async fn chat_overlay_page() -> Result<impl View> {
                 style="background: transparent !important; background-color: transparent !important;"
             >
                 chat_overlay()
-                <script>(OVERLAY_JS)</script>
             </body>
         </html>
     })
@@ -119,7 +141,7 @@ pub async fn chat_overlay(cx: &Cx) -> Result<impl View> {
 
     Ok(view! {
         <div id="chat-overlay-wrapper" class="flex flex-col w-full">
-            chat_overlay_messages(messages: snapshot.messages, pomodoro: snapshot.pomodoro)
+            chat_overlay_messages(messages: snapshot.messages, pomodoro: snapshot.pomodoro, queued: snapshot.queued)
         </div>
     })
 }
@@ -128,6 +150,7 @@ pub async fn chat_overlay(cx: &Cx) -> Result<impl View> {
 pub async fn chat_overlay_messages(
     messages: Vec<ChatMessage>,
     pomodoro: Option<PomodoroState>,
+    queued: usize,
 ) -> Result<impl View> {
     let now = now_unix_ms();
     let pomodoro = pomodoro.filter(|state| !state.is_expired(now));
@@ -137,20 +160,26 @@ pub async fn chat_overlay_messages(
                 <div
                     id="chat-overlay-pomodoro"
                     data-ends-at=(state.ends_at_unix_ms.to_string())
-                    class="rounded-xl border border-white/10 bg-black/60 px-5 py-4 text-center shadow-xs backdrop-blur-xs"
+                    class="flex min-h-[calc(100dvh-1rem)] w-full flex-1 flex-col items-center justify-center rounded-xl border border-white/10 bg-black/60 px-8 py-10 text-center shadow-xs backdrop-blur-xs"
                 >
                     <div class="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400">
                         "Focus mode"
                     </div>
-                    <div class="mt-1 text-xl font-bold leading-snug text-zinc-100">
+                    <div class="mt-3 w-full text-4xl font-bold leading-tight break-words text-zinc-100">
                         (state.message.clone())
                     </div>
                     <div
                         data-pomodoro-countdown="true"
                         data-ends-at=(state.ends_at_unix_ms.to_string())
-                        class="mt-2 text-3xl font-bold tabular-nums text-zinc-100"
+                        class="mt-4 text-7xl font-bold tabular-nums text-zinc-100"
                     >
                         (state.remaining_mm_ss(now))
+                    </div>
+                    <div
+                        id="chat-overlay-waiting"
+                        class="mt-3 text-xl text-zinc-400"
+                    >
+                        (if queued == 1 { "1 message waiting".to_string() } else { format!("{queued} messages waiting") })
                     </div>
                 </div>
             } else if messages.is_empty() {
@@ -167,10 +196,11 @@ pub async fn chat_overlay_messages(
 pub async fn render_chat_overlay_messages(
     messages: Vec<ChatMessage>,
     pomodoro: Option<PomodoroState>,
+    queued: usize,
 ) -> Result<String> {
     let cx = Cx::default();
     let __cx = &cx;
-    let view = view! { chat_overlay_messages(messages: messages, pomodoro: pomodoro) };
+    let view = view! { chat_overlay_messages(messages: messages, pomodoro: pomodoro, queued: queued) };
     Ok(view.single().await?.render(&cx))
 }
 
@@ -217,6 +247,7 @@ mod tests {
                 received_at_unix_ms: 1,
             }],
             None,
+            1,
         )
         .await
         .unwrap();
@@ -249,6 +280,7 @@ mod tests {
                 received_at_unix_ms: 2,
             }],
             None,
+            1,
         )
         .await
         .unwrap();
@@ -278,6 +310,7 @@ mod tests {
                 started_at_unix_ms: now,
                 ends_at_unix_ms: now + 25 * 60 * 1000,
             }),
+            3,
         )
         .await
         .unwrap();
@@ -287,5 +320,17 @@ mod tests {
         assert!(!html.contains("should be hidden"));
         assert!(html.contains("data-pomodoro-countdown"));
         assert!(html.contains("25:00"));
+        assert!(html.contains("id=\"chat-overlay-waiting\""));
+        assert!(html.contains("3 messages waiting"));
+    }
+
+    #[test]
+    fn container_opacity_is_configurable_with_opaque_default() {
+        assert!(OVERLAY_CSS.contains("--overlay-alpha: 0.8"));
+        assert!(OVERLAY_CSS.contains("#chat-overlay-pomodoro"));
+        assert!(OVERLAY_CSS.contains(".chat-overlay-message"));
+        const OVERLAY_PARAMS_JS: &str = include_str!("../../../static/overlay-events.js");
+        assert!(OVERLAY_PARAMS_JS.contains("\"opacity\""));
+        assert!(OVERLAY_PARAMS_JS.contains("--overlay-alpha"));
     }
 }
