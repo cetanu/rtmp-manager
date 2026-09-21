@@ -1,0 +1,6 @@
+[advisories]
+ignore = [
+    # rsa is only retained in Cargo.lock through Toasty's optional MySQL driver.
+    # This project enables Toasty's SQLite driver; `cargo tree -i rsa` is empty.
+    "RUSTSEC-2023-0071",
+]
