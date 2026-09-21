@@ -148,39 +148,29 @@ pub struct ChatInbox {
 impl ChatInbox {
     pub async fn open(path: &Path, capacity: usize) -> Result<Self> {
         anyhow::ensure!(capacity > 0, "chat queue capacity must be positive");
-        let database = toasty::Db::builder()
-            .models(toasty::models!(
-                StoredChatMessage,
-                StoredChatSeen,
-                StoredChatState
-            ))
-            .connect(&format!("sqlite:{}", path.display()))
-            .await
-            .with_context(|| format!("Failed to open chat inbox database '{}'", path.display()))?;
+        // Full model registry: this file is shared with the config store
+        // (see `crate::db::connect`).
+        let database = crate::db::connect(path).await?;
         Self::from_database(database, capacity).await
     }
 
     async fn from_database(database: toasty::Db, capacity: usize) -> Result<Self> {
         let mut database = database.clone();
+        // Embedded migrations run on every open so redeploys against an
+        // existing SQLite file pick up schema changes instead of crashing.
+        crate::db::run_migrations(&database)
+            .await
+            .context("Failed to migrate chat inbox database")?;
         let state = StoredChatState::filter(StoredChatState::fields().id().eq(1_u64))
             .first()
             .exec(&mut database)
-            .await;
-        let state = if state.is_err() {
-            database.push_schema().await?;
-            StoredChatState::filter(StoredChatState::fields().id().eq(1_u64))
-                .first()
-                .exec(&mut database)
-                .await?
-        } else {
-            state?
-        };
+            .await
+            .context("Failed to load chat state after migrations")?;
         if state.is_none() {
             toasty::create!(StoredChatState { id: 1, dropped: 0 })
                 .exec(&mut database)
                 .await?;
         }
-        ensure_chat_message_emoji_column(&mut database).await?;
 
         let mut inbox = Self { capacity, database };
         inbox.trim_to_capacity().await?;
@@ -326,17 +316,6 @@ fn chat_message_from_model(message: &StoredChatMessage) -> Result<ChatMessage> {
         sent_at: message.sent_at.clone(),
         received_at_unix_ms: message.received_at_unix_ms,
     })
-}
-
-async fn ensure_chat_message_emoji_column(database: &mut toasty::Db) -> Result<()> {
-    match toasty::sql::statement("ALTER TABLE chat_messages ADD COLUMN emoji_data TEXT")
-        .exec(database)
-        .await
-    {
-        Ok(_) => Ok(()),
-        Err(error) if error.to_string().contains("duplicate column name") => Ok(()),
-        Err(error) => Err(error.into()),
-    }
 }
 
 /// The first message is currently on-air. Eviction therefore starts at the

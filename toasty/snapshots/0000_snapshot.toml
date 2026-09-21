@@ -1,0 +1,162 @@
+version = 1
+
+[schema]
+
+[[schema.tables]]
+id = 0
+name = "chat_state"
+primary_key = { columns = [{ table = 0, index = 0 }], index = { table = 0, index = 0 } }
+
+[[schema.tables.columns]]
+id = { table = 0, index = 0 }
+name = "id"
+ty = "U64"
+storage_ty = { UnsignedInteger = 8 }
+
+[[schema.tables.columns]]
+id = { table = 0, index = 1 }
+name = "dropped"
+ty = "U64"
+storage_ty = { UnsignedInteger = 8 }
+
+[[schema.tables.indices]]
+id = { table = 0, index = 0 }
+name = "index_chat_state_by_id"
+on = 0
+columns = [{ column = { table = 0, index = 0 }, op = "Eq", scope = "Partition" }]
+unique = true
+primary_key = true
+
+[[schema.tables]]
+id = 1
+name = "chat_seen"
+primary_key = { columns = [{ table = 1, index = 0 }], index = { table = 1, index = 0 } }
+
+[[schema.tables.columns]]
+id = { table = 1, index = 0 }
+name = "id"
+ty = "U64"
+storage_ty = { UnsignedInteger = 4 }
+auto_increment = true
+
+[[schema.tables.columns]]
+id = { table = 1, index = 1 }
+name = "source"
+ty = "String"
+storage_ty = "Text"
+
+[[schema.tables.columns]]
+id = { table = 1, index = 2 }
+name = "external_id"
+ty = "String"
+storage_ty = "Text"
+
+[[schema.tables.indices]]
+id = { table = 1, index = 0 }
+name = "index_chat_seen_by_id"
+on = 1
+columns = [{ column = { table = 1, index = 0 }, op = "Eq", scope = "Partition" }]
+unique = true
+primary_key = true
+
+[[schema.tables.indices]]
+id = { table = 1, index = 1 }
+name = "index_chat_seen_by_source_and_external_id"
+on = 1
+columns = [{ column = { table = 1, index = 1 }, op = "Eq", scope = "Partition" }, { column = { table = 1, index = 2 }, op = "Eq", scope = "Local" }]
+
+[[schema.tables]]
+id = 2
+name = "chat_messages"
+primary_key = { columns = [{ table = 2, index = 0 }], index = { table = 2, index = 0 } }
+
+[[schema.tables.columns]]
+id = { table = 2, index = 0 }
+name = "id"
+ty = "U64"
+storage_ty = { UnsignedInteger = 4 }
+auto_increment = true
+
+[[schema.tables.columns]]
+id = { table = 2, index = 1 }
+name = "source"
+ty = "String"
+storage_ty = "Text"
+
+[[schema.tables.columns]]
+id = { table = 2, index = 2 }
+name = "external_id"
+ty = "String"
+storage_ty = "Text"
+
+[[schema.tables.columns]]
+id = { table = 2, index = 3 }
+name = "author"
+ty = "String"
+storage_ty = "Text"
+
+[[schema.tables.columns]]
+id = { table = 2, index = 4 }
+name = "text"
+ty = "String"
+storage_ty = "Text"
+
+[[schema.tables.columns]]
+id = { table = 2, index = 5 }
+name = "emoji_data"
+ty = "String"
+storage_ty = "Text"
+nullable = true
+
+[[schema.tables.columns]]
+id = { table = 2, index = 6 }
+name = "avatar_url"
+ty = "String"
+storage_ty = "Text"
+nullable = true
+
+[[schema.tables.columns]]
+id = { table = 2, index = 7 }
+name = "sent_at"
+ty = "String"
+storage_ty = "Text"
+nullable = true
+
+[[schema.tables.columns]]
+id = { table = 2, index = 8 }
+name = "received_at_unix_ms"
+ty = "U64"
+storage_ty = { UnsignedInteger = 8 }
+
+[[schema.tables.indices]]
+id = { table = 2, index = 0 }
+name = "index_chat_messages_by_id"
+on = 2
+columns = [{ column = { table = 2, index = 0 }, op = "Eq", scope = "Partition" }]
+unique = true
+primary_key = true
+
+[[schema.tables]]
+id = 3
+name = "app_config"
+primary_key = { columns = [{ table = 3, index = 0 }], index = { table = 3, index = 0 } }
+
+[[schema.tables.columns]]
+id = { table = 3, index = 0 }
+name = "id"
+ty = "I64"
+storage_ty = { Integer = 8 }
+
+[[schema.tables.columns]]
+id = { table = 3, index = 1 }
+name = "data"
+ty = "String"
+storage_ty = "Text"
+
+[[schema.tables.indices]]
+id = { table = 3, index = 0 }
+name = "index_app_config_by_id"
+on = 3
+columns = [{ column = { table = 3, index = 0 }, op = "Eq", scope = "Partition" }]
+unique = true
+primary_key = true

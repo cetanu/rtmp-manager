@@ -831,16 +831,9 @@ impl ConfigStore {
             );
         }
 
-        let database = toasty::Db::builder()
-            .models(toasty::models!(StoredConfig))
-            .connect(&format!("sqlite:{}", database_path.display()))
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to open config database '{}'",
-                    database_path.display()
-                )
-            })?;
+        // Full model registry: this file is shared with the chat inbox, so
+        // both openers must agree on the schema (see `crate::db::connect`).
+        let database = crate::db::connect(&database_path).await?;
         #[cfg(unix)]
         if !database_exists {
             use std::os::unix::fs::PermissionsExt;
@@ -853,13 +846,20 @@ impl ConfigStore {
                 },
             )?;
         }
+        // Embedded migrations run on every open so redeploys against an
+        // existing SQLite file pick up schema changes instead of crashing.
+        crate::db::run_migrations(&database)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to migrate config database '{}'",
+                    database_path.display()
+                )
+            })?;
         let store = Self {
             path: database_path,
             database,
         };
-        if !database_exists {
-            store.database.push_schema().await?;
-        }
         let config = match store.load().await? {
             Some(config) => config,
             None => {

@@ -1,5 +1,6 @@
 pub mod chat;
 pub mod config;
+pub mod db;
 pub mod log_buffer;
 pub mod metrics;
 pub mod notifications;
