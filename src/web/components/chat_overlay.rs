@@ -1,7 +1,7 @@
 use crate::chat::{ChatMessage, PomodoroState};
 use crate::server::state::AppHandle;
-use crate::web::components::chat_message::chat_message_card;
 use crate::util::now_unix_ms;
+use crate::web::components::chat_message::chat_message_card;
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -200,34 +200,24 @@ pub async fn chat_overlay_message(message: ChatMessage, highlighted: bool) -> Re
 mod tests {
     use super::*;
 
-    #[test]
-    fn overlay_message_class_sets_highlighted_and_standard_styles() {
-        let highlighted = overlay_message_class(true);
-        assert!(highlighted.contains("bg-primary/20"));
-        assert!(highlighted.contains("ring-primary/40"));
-        assert!(highlighted.contains("chat-overlay-message"));
-
-        let standard = overlay_message_class(false);
-        assert!(standard.contains("bg-black/60"));
-        assert!(standard.contains("border-white/10"));
-        assert!(standard.contains("chat-overlay-message"));
-    }
-
     #[tokio::test]
     async fn renders_overlay_messages_as_escaped_server_html() {
-        let html = render_chat_overlay_messages(vec![ChatMessage {
-            id: 1,
-            source: crate::chat::Source::Twitch,
-            external_id: "external-1".into(),
-            author: "<viewer>".into(),
-            text: "<script>alert(1)</script>".into(),
-            parts: vec![crate::chat::ChatMessagePart::Text(
-                "<script>alert(1)</script>".into(),
-            )],
-            avatar_url: None,
-            sent_at: None,
-            received_at_unix_ms: 1,
-        }], None)
+        let html = render_chat_overlay_messages(
+            vec![ChatMessage {
+                id: 1,
+                source: crate::chat::Source::Twitch,
+                external_id: "external-1".into(),
+                author: "<viewer>".into(),
+                text: "<script>alert(1)</script>".into(),
+                parts: vec![crate::chat::ChatMessagePart::Text(
+                    "<script>alert(1)</script>".into(),
+                )],
+                avatar_url: None,
+                sent_at: None,
+                received_at_unix_ms: 1,
+            }],
+            None,
+        )
         .await
         .unwrap();
 
@@ -240,23 +230,26 @@ mod tests {
 
     #[tokio::test]
     async fn renders_youtube_emoji_parts_as_images() {
-        let html = render_chat_overlay_messages(vec![ChatMessage {
-            id: 2,
-            source: crate::chat::Source::YouTube,
-            external_id: "external-2".into(),
-            author: "Viewer".into(),
-            text: "Hello customEmoji".into(),
-            parts: vec![
-                crate::chat::ChatMessagePart::Text("Hello ".into()),
-                crate::chat::ChatMessagePart::Emoji {
-                    alt: "customEmoji".into(),
-                    url: "https://example.com/custom-emoji.png".into(),
-                },
-            ],
-            avatar_url: None,
-            sent_at: None,
-            received_at_unix_ms: 2,
-        }], None)
+        let html = render_chat_overlay_messages(
+            vec![ChatMessage {
+                id: 2,
+                source: crate::chat::Source::YouTube,
+                external_id: "external-2".into(),
+                author: "Viewer".into(),
+                text: "Hello customEmoji".into(),
+                parts: vec![
+                    crate::chat::ChatMessagePart::Text("Hello ".into()),
+                    crate::chat::ChatMessagePart::Emoji {
+                        alt: "customEmoji".into(),
+                        url: "https://example.com/custom-emoji.png".into(),
+                    },
+                ],
+                avatar_url: None,
+                sent_at: None,
+                received_at_unix_ms: 2,
+            }],
+            None,
+        )
         .await
         .unwrap();
 

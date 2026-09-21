@@ -627,9 +627,7 @@ impl ChatActor {
                     duration_secs,
                     respond_to,
                 } => {
-                    let response = self
-                        .start_pomodoro(&handle, message, duration_secs)
-                        .await;
+                    let response = self.start_pomodoro(&handle, message, duration_secs).await;
                     let _ = respond_to.send(response);
                 }
                 ChatCommand::StopPomodoro { respond_to } => {
@@ -1391,7 +1389,9 @@ mod tests {
     fn pomodoro_validation_rejects_bad_durations_and_long_messages() {
         assert!(validate_pomodoro("focus", 30).is_err());
         assert!(validate_pomodoro("focus", POMODORO_MAX_DURATION_SECS + 1).is_err());
-        assert!(validate_pomodoro("x".repeat(POMODORO_MAX_MESSAGE_CHARS + 1).as_str(), 600).is_err());
+        assert!(
+            validate_pomodoro("x".repeat(POMODORO_MAX_MESSAGE_CHARS + 1).as_str(), 600).is_err()
+        );
         let (message, secs) = validate_pomodoro("  deep work  ", 25 * 60).unwrap();
         assert_eq!((message.as_str(), secs), ("deep work", 1500));
         let (defaulted, _) = validate_pomodoro("   ", 25 * 60).unwrap();
@@ -1436,8 +1436,6 @@ mod tests {
             .unwrap();
         assert!(started.pomodoro.is_some());
 
-        // Simulate a process restart: a fresh handle on the same database
-        // rehydrates the still-active pomodoro.
         let restarted = ChatHandle::spawn(&path, 5, Client::new(), Arc::new(Metrics::default()))
             .await
             .unwrap();

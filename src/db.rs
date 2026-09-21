@@ -1,30 +1,8 @@
-//! Centralized SQLite schema management and migrations.
+//! Shared SQLite connection and migration management.
 //!
-//! Both [`crate::config::ConfigStore`] and [`crate::chat::ChatInbox`] share a
-//! single SQLite file, so both open it through [`connect`] (full model
-//! registry) and migrate it through [`run_migrations`] on every startup.
-//!
-//! Migrations are Toasty-native now (Toasty 0.10):
-//!
-//! * Schema changes are generated with the project-local CLI:
-//!   `cargo run --bin migrate -- migration generate --name describe_change`.
-//!   Generated files under `toasty/` (`history.toml` + `migrations/*.sql`)
-//!   are committed alongside code.
-//! * [`MIGRATIONS`] embeds those files into the binary at compile time via
-//!   `toasty::embed_migrations!`, and [`run_migrations`] applies pending ones
-//!   through the `__toasty_migrations` ledger.
-//!
-//! [`MIGRATIONS`]: toasty::migration::MigrationSet
-//!
-//! ## Legacy databases
-//!
-//! Databases created before the migration system existed (via
-//! `push_schema()` or the hand-rolled DDL runner) already contain the tables
-//! but have an empty `__toasty_migrations` ledger, so the baseline migration
-//! fails with `table ... already exists`. [`run_migrations`] detects that
-//! case, backfills any evolved columns, safety-nets missing tables, stamps
-//! the embedded migrations as applied, and verifies the ledger is clean.
-//! Genuine failures (I/O errors, corrupt files) still abort startup loudly.
+//! Configuration and chat state use the same model registry and database file.
+//! Startup applies embedded migrations and bridges databases created by older
+//! releases before the migration ledger existed.
 
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -32,10 +10,6 @@ use std::path::Path;
 static MIGRATIONS: toasty::migration::MigrationSet = toasty::embed_migrations!();
 
 /// Opens the shared SQLite database with the full model registry.
-///
-/// Migration generation diffs this exact set against the stored snapshot, and
-/// the embedded migration set is generated from it, so every opener must use
-/// it. Registering a subset would let schemas drift between openers.
 pub async fn connect(db_path: &Path) -> Result<toasty::Db> {
     toasty::Db::builder()
         .models(toasty::models!(crate::*))
@@ -44,12 +18,7 @@ pub async fn connect(db_path: &Path) -> Result<toasty::Db> {
         .with_context(|| format!("Failed to open database '{}'", db_path.display()))
 }
 
-/// Applies pending embedded migrations, bridging pre-migration databases.
-///
-/// Safe to call on every startup, on fresh and existing databases, and from
-/// multiple openers sharing the same SQLite file (a second call is a no-op
-/// reporting `applied = 0`). Returns the final [`apply`](toasty::migration::MigrationSet::apply)
-/// report.
+/// Applies pending embedded migrations, including the legacy database bridge.
 pub async fn run_migrations(db: &toasty::Db) -> Result<toasty::migration::MigrationReport> {
     let mut conn = db.connection().await?;
     // Best-effort: avoid `database is locked` when both stores open the same
@@ -85,13 +54,7 @@ pub async fn run_migrations(db: &toasty::Db) -> Result<toasty::migration::Migrat
     }
 }
 
-/// Brings a pre-migration database up to the embedded baseline and stamps the
-/// ledger so the baseline is not re-applied.
-///
-/// Only runs after [`MIGRATIONS`] failed with `already exists`, i.e. the
-/// tables are provably present. Each step is idempotent: missing columns are
-/// added tolerantly, missing tables are created, and ledger rows are inserted
-/// with `OR IGNORE`.
+/// Brings a pre-migration database up to the embedded baseline.
 async fn bridge_legacy_database(db: &toasty::Db) -> Result<()> {
     let mut conn = db.connection().await?;
 
@@ -206,8 +169,6 @@ mod tests {
         directory
     }
 
-    /// Opens a database without any models, for simulating legacy deployments
-    /// whose tables were created by older binaries.
     async fn open_raw(db_path: &Path) -> toasty::Db {
         toasty::Db::builder()
             .connect(&format!("sqlite:{}", db_path.display()))
@@ -255,7 +216,6 @@ mod tests {
             "emoji_data column missing: {columns:?}"
         );
 
-        // Second startup is a clean no-op.
         let report = run_migrations(&db).await.unwrap();
         assert_eq!(report.applied(), 0);
         assert_eq!(report.skipped(), MIGRATIONS.migrations().len());
@@ -268,8 +228,6 @@ mod tests {
         let directory = unique_dir("migrations-legacy");
         let path = directory.join("legacy.sqlite3");
 
-        // Simulate a deployed database from before the migration system: all
-        // tables exist (without `emoji_data`), but the ledger is empty.
         {
             let raw = open_raw(&path).await;
             let mut conn = raw.connection().await.unwrap();
@@ -310,11 +268,9 @@ mod tests {
             .unwrap();
         }
 
-        // Migrating must bridge the schema and preserve the existing row.
         {
             let db = connect(&path).await.unwrap();
             run_migrations(&db).await.unwrap();
-            // Restart-after-deploy is safe.
             let report = run_migrations(&db).await.unwrap();
             assert_eq!(report.applied(), 0);
 
@@ -341,8 +297,6 @@ mod tests {
         let directory = unique_dir("migrations-shared");
         let path = directory.join("shared.sqlite3");
 
-        // Simulate a pre-migration deploy: config + chat tables, no
-        // `emoji_data` column, no migration ledger.
         {
             let raw = open_raw(&path).await;
             let mut conn = raw.connection().await.unwrap();
@@ -377,8 +331,6 @@ mod tests {
             }
         }
 
-        // Both openers share one file; each must migrate idempotently
-        // regardless of order, then remain fully functional.
         let (store, _) = crate::config::ConfigStore::open(&path).await.unwrap();
         let mut inbox = crate::chat::ChatInbox::open(&path, 5).await.unwrap();
         inbox
@@ -395,8 +347,6 @@ mod tests {
             .unwrap();
         assert_eq!(inbox.snapshot().await.unwrap().queued, 1);
 
-        // Reverse order on an already-migrated file must also work
-        // (proves restart-after-deploy is safe).
         drop(inbox);
         let inbox = crate::chat::ChatInbox::open(&path, 5).await.unwrap();
         let (_, _) = crate::config::ConfigStore::open(&path).await.unwrap();

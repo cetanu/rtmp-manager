@@ -10,7 +10,6 @@ use std::sync::Arc;
 use tracing::{info, warn};
 use tracing_subscriber::prelude::*;
 
-// Embed standalone systemd unit template at compile time
 const SYSTEMD_UNIT_TEMPLATE: &str = include_str!("../systemd/rtmp-proxy.service");
 
 #[derive(Parser, Debug)]
@@ -138,7 +137,6 @@ async fn main() -> Result<()> {
 
     let app = AppHandle::new(metrics, config_handle, http_client, listen_port).await?;
 
-    // Spawn Web Server
     let web_app = app.clone();
     tokio::spawn(async move {
         if let Err(e) = rtmp_proxy::web::run_web_server(web_app, web_addr).await {
@@ -146,7 +144,6 @@ async fn main() -> Result<()> {
         }
     });
 
-    // Spawn SRT Ingest Server if enabled
     if srt_enabled {
         let srt_app = app.clone();
         tokio::spawn(async move {
@@ -158,6 +155,5 @@ async fn main() -> Result<()> {
         });
     }
 
-    // Run RTMP Server
     run_rtmp_server(rtmp_listen, app).await
 }

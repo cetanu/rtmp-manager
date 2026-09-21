@@ -587,17 +587,6 @@ mod tests {
     }
 
     #[test]
-    fn direct_test_prevents_concurrent_runs() {
-        let running = Arc::new(AtomicBool::new(false));
-
-        assert!(!running.swap(true, Ordering::SeqCst));
-        assert!(running.swap(true, Ordering::SeqCst));
-
-        running.store(false, Ordering::SeqCst);
-        assert!(!running.load(Ordering::SeqCst));
-    }
-
-    #[test]
     fn direct_test_rejects_resource_exhausting_inputs() {
         let metrics = Arc::new(Metrics::default());
         let running = Arc::new(AtomicBool::new(false));

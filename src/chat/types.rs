@@ -177,6 +177,9 @@ mod tests {
         assert_eq!(state.remaining_mm_ss(1_000 + 7 * 1000), "25:00");
         assert_eq!(state.remaining_mm_ss(1_000 + (24 * 60 + 7) * 1000), "01:00");
         assert_eq!(state.remaining_mm_ss(state.ends_at_unix_ms), "00:00");
-        assert_eq!(state.remaining_mm_ss(state.ends_at_unix_ms + 60_000), "00:00");
+        assert_eq!(
+            state.remaining_mm_ss(state.ends_at_unix_ms + 60_000),
+            "00:00"
+        );
     }
 }

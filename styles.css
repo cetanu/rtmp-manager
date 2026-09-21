@@ -1,40 +1,16 @@
-/* Neutral, the built-in Topcoat theme.
-
-   The theme is a small set of design tokens. Components refer to tokens only,
-   never to raw colors, so a project restyles itself by editing the values in
-   `:root` and `.dark` below.
-
-     --background              the page background
-     --foreground              text and iconography on the background
-     --muted-foreground        secondary text: captions, descriptions, placeholders
-     --primary                 the emphasis color: primary actions, selection, highlights
-     --primary-foreground      text on a primary-filled surface
-     --destructive             destructive actions and error states
-     --destructive-foreground  text on a destructive-filled surface
-     --border                  hairline borders and dividers
-     --ring                    the focus ring
-     --shadow-xs               a subtle shadow for controls: buttons, inputs
-     --shadow-sm               a shadow for raised surfaces: cards, menus
-
-   Interactive states (hover, press) have no tokens of their own: components
-   derive them by applying the fill or foreground color at reduced opacity,
-   which adapts to both color schemes automatically.
-
-   The Geist font is not bundled here; provide it with topcoat-font. */
+/* Neutral theme tokens. Components use these variables so the palette can be
+   changed in one place. Geist is provided separately by topcoat-font. */
 
 @import "tailwindcss";
 
-/* Scan the project's Rust sources for the Tailwind classes they use. This
-   file is installed at the project root, so `./src` is the crate's source. */
+/* Tailwind classes are used in the Rust view source. */
 @source "./src/**/*.rs";
 
 /* Dark mode is opted into by putting the `dark` class on an ancestor,
    typically <html>. */
 @custom-variant dark (&:is(.dark *));
 
-/* Expose the tokens as Tailwind utilities (`bg-background`, `text-primary`,
-   `border-border`, ...). The indirection through plain variables on `:root`
-   and `.dark` is what lets the values swap when the color scheme changes. */
+/* Expose the tokens as Tailwind utilities. */
 @theme inline {
   --font-sans: "Geist", sans-serif;
   --color-background: var(--background);

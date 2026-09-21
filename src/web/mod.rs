@@ -852,7 +852,6 @@ mod tests {
         assert!(body1.contains("OBS overlay test message"));
         assert!(body1.contains("data-source=\"twitch\""));
 
-        // A missing overlay key is rejected, even when dashboard auth is disabled.
         let overlay_without_key = client
             .get(format!("http://{local_addr}/overlay/chat"))
             .send()
@@ -863,7 +862,6 @@ mod tests {
             reqwest::StatusCode::UNAUTHORIZED
         );
 
-        // Verify dashboard auth and the overlay's scoped token are independent.
         let mut authed_config = app_handle.config.get().as_ref().clone();
         authed_config.web_auth.username = "admin".into();
         authed_config.web_auth.password = "secretpassword123".into();
@@ -873,7 +871,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Dashboard routes (/chat, /settings) require authentication
         let unauthed_dashboard = client
             .get(format!("http://{local_addr}/chat"))
             .send()
@@ -884,7 +881,6 @@ mod tests {
             reqwest::StatusCode::UNAUTHORIZED
         );
 
-        // Overlay requires its own token and does not accept the dashboard credentials.
         let overlay_no_auth = client
             .get(format!("http://{local_addr}/overlay/chat"))
             .send()
@@ -974,7 +970,6 @@ mod tests {
             let _ = topcoat::serve(listener, app).await;
         });
 
-        // Start focus mode via the API.
         let start = client
             .post(format!("http://{local_addr}/api/chat/pomodoro"))
             .header("Content-Type", "application/json")
@@ -984,7 +979,6 @@ mod tests {
             .unwrap();
         assert_eq!(start.status(), reqwest::StatusCode::OK);
 
-        // First page load shows the focus panel.
         let first_load = client
             .get(format!("http://{local_addr}/chat"))
             .send()
@@ -998,7 +992,6 @@ mod tests {
             "first load should render the focus panel"
         );
 
-        // Simulated refresh: full page load again — focus must survive.
         let second_load = client
             .get(format!("http://{local_addr}/chat"))
             .send()
@@ -1078,7 +1071,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Extract procedure ID for send_test_chat
         let proc_id = html_content
             .split("chat-test-button")
             .nth(1)
@@ -1092,7 +1084,6 @@ mod tests {
             .split("&quot;")
             .next()
             .unwrap();
-        // 1. Post to /api/chat/test with empty body (generates sample message)
         let resp = client
             .post(format!("http://{local_addr}/api/chat/test"))
             .send()
@@ -1103,7 +1094,6 @@ mod tests {
         assert_eq!(snapshot.messages.len(), 1);
         let message_id = snapshot.messages[0].id;
 
-        // 2. Post to /api/chat/test with custom payload
         let custom_resp = client
             .post(format!("http://{local_addr}/api/chat/test"))
             .header("Content-Type", "application/json")
@@ -1115,7 +1105,6 @@ mod tests {
         let snapshot: crate::chat::ChatInboxSnapshot = custom_resp.json().await.unwrap();
         assert_eq!(snapshot.messages.len(), 2);
 
-        // 3. Acknowledge first message
         let ack_resp = client
             .post(format!("http://{local_addr}/api/chat/acknowledge"))
             .header("Content-Type", "application/json")

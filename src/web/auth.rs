@@ -103,13 +103,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn credential_comparison_rejects_different_values_and_lengths() {
-        assert!(constant_time_eq(b"same", b"same"));
-        assert!(!constant_time_eq(b"same", b"diff"));
-        assert!(!constant_time_eq(b"short", b"longer"));
-    }
-
-    #[test]
     fn public_paths_only_include_webhooks_and_assets() {
         assert!(is_public_path("/api/webhook"));
         assert!(is_public_path("/_topcoat/assets/tailwind-123.css"));

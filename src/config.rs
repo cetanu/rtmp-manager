@@ -1551,7 +1551,7 @@ mod tests {
         assert_eq!(updated.chat.queue_capacity, 250);
     }
 
-        #[test]
+    #[test]
     fn pomodoro_settings_are_configurable_and_capped_at_45_minutes() {
         let form: ConfigForm = serde_qs::Config::new()
             .use_form_encoding(true)
@@ -1579,7 +1579,6 @@ mod tests {
 
     #[test]
     fn query_mode_does_not_decode_browser_form_keys() {
-
         let form: ConfigForm =
             serde_qs::from_str("server%5Blisten%5D=127.0.0.1%3A1936&action=save").unwrap();
 

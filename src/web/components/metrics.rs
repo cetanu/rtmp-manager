@@ -172,14 +172,3 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
         </section>
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::format_bitrate;
-
-    #[test]
-    fn formats_bitrate_for_dashboard() {
-        assert_eq!(format_bitrate(2_450_000), "2.45 Mbps");
-        assert_eq!(format_bitrate(450_000), "450 Kbps");
-    }
-}

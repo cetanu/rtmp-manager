@@ -23,18 +23,6 @@ pub enum ButtonVariant {
 }
 
 impl ButtonVariant {
-    /// The Tailwind classes for this variant.
-    ///
-    /// Hover and press states apply the fill or foreground color at reduced
-    /// opacity, so they hold up in both color schemes without `dark:`
-    /// overrides. Every variant with a resting fill or border casts the
-    /// theme's control shadow; `Ghost` is flat until hovered, so it casts
-    /// none.
-    ///
-    /// Each variant sets its own border color rather than inheriting a
-    /// transparent one from [`BASE`]: with two border-color classes on the
-    /// same element, stylesheet order (not class order) would decide the
-    /// winner.
     fn classes(self) -> StaticClass {
         match self {
             Self::Primary => class!(
@@ -78,12 +66,6 @@ pub enum ButtonSize {
 }
 
 impl ButtonSize {
-    /// The Tailwind classes for this size.
-    ///
-    /// The height and padding are calibrated so the button sits on the 4px
-    /// grid while centering its label baseline against sibling form controls.
-    /// `Icon` uses equal width and height to remain square regardless of its
-    /// child's natural aspect ratio.
     fn classes(self) -> StaticClass {
         match self {
             Self::Sm => class!("h-8 rounded-md px-3 text-xs gap-1.5"),
@@ -94,13 +76,6 @@ impl ButtonSize {
     }
 }
 
-/// The base classes applied to every button, before variant and size styles.
-///
-/// Flex layout centers child elements (such as an icon and label) and aligns
-/// them along the row. Transitions animate fill and border colors on hover
-/// and active states. The focus ring is styled through `focus-visible:` so
-/// pointer clicks avoid an outline, while keyboard navigation produces the
-/// theme's two-color focus ring.
 const BASE: StaticClass = class!(
     "inline-flex shrink-0 items-center justify-center border \
      font-medium whitespace-nowrap transition-colors outline-none select-none \
@@ -108,18 +83,7 @@ const BASE: StaticClass = class!(
      focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
 );
 
-/// Builds the full class list for a button of the given `variant` and `size`.
-///
-/// Use it to give button styling to an element that is not a `<button>`, such
-/// as a link styled as a button:
-///
-/// ```ignore
-/// view! {
-///     <a href="/login" class=(button_variants(ButtonVariant::Outline, ButtonSize::Md))>
-///         "Sign in"
-///     </a>
-/// }
-/// ```
+/// Builds the full class list for a button variant and size.
 #[must_use]
 pub fn button_variants(
     variant: ButtonVariant,
@@ -128,26 +92,7 @@ pub fn button_variants(
     class!(BASE, variant.classes(), size.classes())
 }
 
-/// A button component.
-///
-/// The `variant` and `size` parameters select the styling, defaulting to
-/// `Primary` and `Md`. The `attrs` (such as `class`, `type`, `disabled`, or
-/// event handlers) are forwarded to the underlying `<button>`; a `class` among
-/// them is appended to the computed classes. Child nodes become the button's
-/// content.
-///
-/// ```ignore
-/// view! {
-///     button(
-///         variant: ButtonVariant::Destructive,
-///         attrs: attributes! { type="submit" },
-///         "Delete"
-///     )
-/// }
-/// ```
-///
-/// To style a non-`<button>` element like a button, use [`button_variants`]
-/// directly.
+/// A styled button with configurable variant, size, attributes, and content.
 #[component]
 pub async fn button(
     #[default] variant: ButtonVariant,

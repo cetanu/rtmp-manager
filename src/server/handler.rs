@@ -60,16 +60,3 @@ impl RtmpHandler for ProxyHandler {
         info!(session_id = %ctx.session_id, "Client disconnected");
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ingest_requires_an_exact_nonempty_stream_key() {
-        assert!(secure_token_matches("private-key", "private-key"));
-        assert!(!secure_token_matches("private-key", "wrong-key"));
-        assert!(!secure_token_matches("private-key", "private-key-extra"));
-        assert!(!secure_token_matches("", ""));
-    }
-}

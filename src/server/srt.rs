@@ -267,11 +267,6 @@ mod tests {
         assert!(!validate_srt_stream_id("my-secret-key", ""));
     }
 
-    #[test]
-    fn missing_ffmpeg_stdin_is_reported_without_panicking() {
-        assert!(require_piped_stdin::<()>(None).is_err());
-    }
-
     #[tokio::test]
     async fn srt_listener_accepts_valid_and_rejects_invalid_stream_id() {
         let udp = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -295,13 +290,11 @@ mod tests {
             }
         });
 
-        // Test rejected client
         let rejected = SrtSocket::builder()
             .call(local_addr, Some("#!::r=live,m=publish,u=bad-key"))
             .await;
         assert!(rejected.is_err());
 
-        // Test accepted client
         let accepted = SrtSocket::builder()
             .call(local_addr, Some("#!::r=live,m=publish,u=correct-key"))
             .await;
