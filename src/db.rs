@@ -69,8 +69,9 @@ pub async fn run_migrations(db: &toasty::Db) -> Result<toasty::migration::Migrat
         }
         Err(error) if is_already_exists_error(&error) => {
             tracing::info!(
-                "Database predates the migration ledger; bridging legacy schema: {error:#}"
+                "Database predates the migration ledger; running one-time legacy bridge"
             );
+            tracing::debug!("Baseline migration skipped on legacy database: {error:#}");
             bridge_legacy_database(db).await?;
             let report = MIGRATIONS.apply(db).await?;
             tracing::info!(
