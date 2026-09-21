@@ -74,10 +74,10 @@ pub async fn chat_settings(cx: &Cx) -> Result<impl View> {
                                     attrs: attributes! {
                                         id="youtube_channel_id"
                                         name="chat[youtube_channel_id]"
-                                    value=(chat.youtube_channel_id.clone().unwrap_or_default())
-                                }
+                                        value=(chat.youtube_channel_id.clone().unwrap_or_default())
+                                    }
+                                )
                             )
-                        )
                         </div>
                     </div>
                     <div class="grid gap-6 md:grid-cols-2">

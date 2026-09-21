@@ -145,13 +145,17 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
                         attrs: attributes! { class="!px-3" },
                         <div class="flex items-center justify-between gap-3">
                             card_title("Messages received")
-                            <span class="text-xs text-muted-foreground">"All sources"</span>
+                            <span class="text-xs text-muted-foreground">
+                                "All sources"
+                            </span>
                         </div>
                     )
                     card_content(
                         attrs: attributes! { class="!px-3" },
                         <div class="mb-2">
-                            <div class="text-xs uppercase tracking-wide text-muted-foreground">
+                            <div
+                                class="text-xs uppercase tracking-wide text-muted-foreground"
+                            >
                                 "Total messages"
                             </div>
                             <div

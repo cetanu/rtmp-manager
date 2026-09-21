@@ -8,10 +8,7 @@ use topcoat::{
 #[component]
 async fn chat_message_part(part: ChatMessagePart, text_class: &'static str) -> Result<impl View> {
     Ok(match part {
-        ChatMessagePart::Text(text) => view! {
-            <span class=(text_class)>(text)</span>
-        }
-        .boxed(),
+        ChatMessagePart::Text(text) => view! { <span class=(text_class)>(text)</span> }.boxed(),
         ChatMessagePart::Emoji { alt, url } => view! {
             <img
                 src=(url)

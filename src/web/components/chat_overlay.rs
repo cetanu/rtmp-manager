@@ -141,7 +141,11 @@ pub async fn chat_overlay(cx: &Cx) -> Result<impl View> {
 
     Ok(view! {
         <div id="chat-overlay-wrapper" class="flex flex-col w-full">
-            chat_overlay_messages(messages: snapshot.messages, pomodoro: snapshot.pomodoro, queued: snapshot.queued)
+            chat_overlay_messages(
+                messages: snapshot.messages,
+                pomodoro: snapshot.pomodoro,
+                queued: snapshot.queued
+            )
         </div>
     })
 }
@@ -162,10 +166,14 @@ pub async fn chat_overlay_messages(
                     data-ends-at=(state.ends_at_unix_ms.to_string())
                     class="flex min-h-[calc(100dvh-1rem)] w-full flex-1 flex-col items-center justify-center rounded-xl border border-white/10 bg-black/60 px-8 py-10 text-center shadow-xs backdrop-blur-xs"
                 >
-                    <div class="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400">
+                    <div
+                        class="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400"
+                    >
                         "Focus mode"
                     </div>
-                    <div class="mt-3 w-full text-4xl font-bold leading-tight break-words text-zinc-100">
+                    <div
+                        class="mt-3 w-full text-4xl font-bold leading-tight break-words text-zinc-100"
+                    >
                         (state.message.clone())
                     </div>
                     <div
@@ -175,11 +183,12 @@ pub async fn chat_overlay_messages(
                     >
                         (state.remaining_mm_ss(now))
                     </div>
-                    <div
-                        id="chat-overlay-waiting"
-                        class="mt-3 text-xl text-zinc-400"
-                    >
-                        (if queued == 1 { "1 message waiting".to_string() } else { format!("{queued} messages waiting") })
+                    <div id="chat-overlay-waiting" class="mt-3 text-xl text-zinc-400">
+                        (if queued == 1 {
+                            "1 message waiting".to_string()
+                        } else {
+                            format!("{queued} messages waiting")
+                        })
                     </div>
                 </div>
             } else if messages.is_empty() {
@@ -200,7 +209,9 @@ pub async fn render_chat_overlay_messages(
 ) -> Result<String> {
     let cx = Cx::default();
     let __cx = &cx;
-    let view = view! { chat_overlay_messages(messages: messages, pomodoro: pomodoro, queued: queued) };
+    let view = view! {
+        chat_overlay_messages(messages: messages, pomodoro: pomodoro, queued: queued)
+    };
     Ok(view.single().await?.render(&cx))
 }
 
@@ -221,7 +232,7 @@ pub async fn chat_overlay_message(message: ChatMessage, highlighted: bool) -> Re
             message: message,
             row_class: row_class,
             highlighted: highlighted,
-            overlay: true,
+            overlay: true
         )
     })
 }

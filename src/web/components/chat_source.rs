@@ -76,7 +76,10 @@ pub(crate) async fn chat_source_icon(source: Source) -> Result<impl View> {
     let style = source_style(source);
 
     Ok(view! {
-        <span class=(format!("mt-0.5 shrink-0 {}", style.color)) title=(source.to_string())>
+        <span
+            class=(format!("mt-0.5 shrink-0 {}", style.color))
+            title=(source.to_string())
+        >
             <svg
                 aria-hidden="true"
                 width="18"

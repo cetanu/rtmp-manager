@@ -165,7 +165,9 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
 
     Ok(view! {
         card(
-            attrs: attributes! { class="mb-1 h-[calc(100dvh-3.5rem)] max-h-[calc(100dvh-3.5rem)] min-h-[18rem] !gap-2 !py-3" },
+            attrs: attributes! {
+                class="mb-1 h-[calc(100dvh-3.5rem)] max-h-[calc(100dvh-3.5rem)] min-h-[18rem] !gap-2 !py-3"
+            },
             chat_inbox_content(revision: $(revision.get()))
             card_footer(
                 attrs: attributes! { class="!px-3 justify-between flex-wrap gap-y-2" },
@@ -260,64 +262,66 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
         card(
             attrs: attributes! { class="mb-2 !gap-0 !py-2" },
             card_content(
-                attrs: attributes! { class="!px-3 flex items-center justify-between gap-3 flex-wrap" },
-            <div class="flex items-center gap-4">
-                if youtube_configured {
+                attrs: attributes! {
+                    class="!px-3 flex items-center justify-between gap-3 flex-wrap"
+                },
+                <div class="flex items-center gap-4">
+                    if youtube_configured {
+                        chat_toggle(
+                            label: "YouTube polling",
+                            platform: "youtube".to_string(),
+                            enabled: &youtube_polling_enabled,
+                            pending: &youtube_toggle_pending,
+                            error: &polling_error
+                        )
+                    }
                     chat_toggle(
-                        label: "YouTube polling",
-                        platform: "youtube".to_string(),
-                        enabled: &youtube_polling_enabled,
-                        pending: &youtube_toggle_pending,
-                        error: &polling_error,
+                        label: "X chat",
+                        platform: "x".to_string(),
+                        enabled: &x_webhook_enabled,
+                        pending: &x_toggle_pending,
+                        error: &polling_error
                     )
-                }
-                chat_toggle(
-                    label: "X chat",
-                    platform: "x".to_string(),
-                    enabled: &x_webhook_enabled,
-                    pending: &x_toggle_pending,
-                    error: &polling_error,
-                )
-                chat_toggle(
-                    label: "Kick chat",
-                    platform: "kick".to_string(),
-                    enabled: &kick_webhook_enabled,
-                    pending: &kick_toggle_pending,
-                    error: &polling_error,
-                )
-                <p
-                    :hidden=$(polling_error.get().is_empty())
-                    class="text-xs text-destructive"
+                    chat_toggle(
+                        label: "Kick chat",
+                        platform: "kick".to_string(),
+                        enabled: &kick_webhook_enabled,
+                        pending: &kick_toggle_pending,
+                        error: &polling_error
+                    )
+                    <p
+                        :hidden=$(polling_error.get().is_empty())
+                        class="text-xs text-destructive"
+                    >
+                        $(polling_error.get())
+                    </p>
+                </div>
+                <a
+                    href=(format!("/overlay/chat?key={overlay_token}"))
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                    title="Open OBS browser source overlay in a new tab"
                 >
-                    $(polling_error.get())
-                </p>
-            </div>
-            <a
-                href=(format!("/overlay/chat?key={overlay_token}"))
-                target="_blank"
-                rel="noopener noreferrer"
-                class="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                title="Open OBS browser source overlay in a new tab"
-            >
-                <svg
-                    aria-hidden="true"
-                    width="13"
-                    height="13"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                >
-                    <path
-                        d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
-                    />
-                    <polyline points="15 3 21 3 21 9" />
-                    <line x1="10" y1="14" x2="21" y2="3" />
-                </svg>
-                <span>"OBS Overlay"</span>
-            </a>
+                    <svg
+                        aria-hidden="true"
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path
+                            d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
+                        />
+                        <polyline points="15 3 21 3 21 9" />
+                        <line x1="10" y1="14" x2="21" y2="3" />
+                    </svg>
+                    <span>"OBS Overlay"</span>
+                </a>
             )
         )
     })
@@ -351,12 +355,12 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
                     data-ends-at=(ends_at.clone())
                     class="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-2 text-center"
                 >
-                    <div class="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    <div
+                        class="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground"
+                    >
                         "Focus mode"
                     </div>
-                    <div class="text-lg font-semibold">
-                        (message)
-                    </div>
+                    <div class="text-lg font-semibold">(message)</div>
                     <div
                         data-pomodoro-countdown="true"
                         data-ends-at=(ends_at)
@@ -368,7 +372,11 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
                         id="chat-focus-waiting"
                         class="mt-1 text-sm text-muted-foreground"
                     >
-                        (if snapshot.queued == 1 { "1 message waiting".to_string() } else { format!("{} messages waiting", snapshot.queued) })
+                        (if snapshot.queued == 1 {
+                            "1 message waiting".to_string()
+                        } else {
+                            format!("{} messages waiting", snapshot.queued)
+                        })
                     </div>
                 </div>
             } else {
@@ -381,7 +389,10 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
                                 .messages
                                 .into_iter()
                                 .enumerate() {
-                                chat_message_card(message: message, highlighted: index == 0)
+                                chat_message_card(
+                                    message: message,
+                                    highlighted: index == 0
+                                )
                             }
                         }
                     </div>
@@ -413,7 +424,7 @@ pub async fn chat_message_card(message: ChatMessage, highlighted: bool) -> Resul
             message: message,
             row_class: row_class,
             highlighted: highlighted,
-            overlay: false,
+            overlay: false
         )
     })
 }

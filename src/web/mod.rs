@@ -576,8 +576,12 @@ async fn overlay_events(
                 last_revision = revision;
                 let event = match chat.snapshot().await {
                     Ok(snapshot) => {
-                        match render_chat_overlay_messages(snapshot.messages, snapshot.pomodoro, snapshot.queued)
-                            .await
+                        match render_chat_overlay_messages(
+                            snapshot.messages,
+                            snapshot.pomodoro,
+                            snapshot.queued,
+                        )
+                        .await
                         {
                             Ok(html) => Ok(SseEvent::new().event("chat").data(html)),
                             Err(error) => {
