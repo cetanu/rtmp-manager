@@ -1,4 +1,4 @@
-use crate::chat::{ChatMessage, PomodoroState};
+use crate::chat::{ChatMessage, PollState, PomodoroState};
 use crate::server::state::AppHandle;
 use crate::util::now_unix_ms;
 use crate::web::components::chat_message::chat_message_card;
@@ -35,6 +35,73 @@ body {
     min-height: calc(100vh - 1rem);
     min-height: calc(100dvh - 1rem);
 }
+#chat-overlay-poll {
+    flex: 1;
+    box-sizing: border-box;
+    height: calc(100vh - 1rem);
+    height: calc(100dvh - 1rem);
+    min-height: 0;
+    max-height: calc(100vh - 1rem);
+    max-height: calc(100dvh - 1rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    justify-content: flex-start;
+    justify-content: safe center;
+    padding: clamp(1rem, 4vh, 2.5rem) clamp(1rem, 4vw, 2rem);
+}
+.chat-overlay-poll-question {
+    margin-top: clamp(0.5rem, 2vh, 0.75rem) !important;
+    font-size: clamp(1.5rem, 6vh, 2.25rem) !important;
+}
+.chat-overlay-poll-options {
+    gap: clamp(0.5rem, 1.5vh, 1rem) !important;
+    margin-top: clamp(1rem, 4vh, 2rem) !important;
+}
+.chat-overlay-poll-option {
+    padding: clamp(0.5rem, 1.5vh, 1rem) clamp(0.75rem, 2vw, 1.25rem) !important;
+}
+.chat-overlay-poll-option-row {
+    font-size: clamp(0.95rem, 3vh, 1.25rem) !important;
+}
+.chat-overlay-poll-footer {
+    margin-top: clamp(0.75rem, 2vh, 1.5rem) !important;
+    font-size: clamp(0.9rem, 2.5vh, 1.125rem) !important;
+}
+@media (max-height: 500px) {
+    #chat-overlay-poll {
+        padding: 0.5rem 1rem;
+    }
+    .chat-overlay-poll-question {
+        margin-top: 0.5rem !important;
+        font-size: 1.75rem !important;
+    }
+    .chat-overlay-poll-options {
+        gap: 0.5rem !important;
+        margin-top: 0.75rem !important;
+    }
+    .chat-overlay-poll-option {
+        padding: 0.625rem 0.75rem !important;
+    }
+    .chat-overlay-poll-option-row {
+        font-size: 1.125rem !important;
+    }
+    .chat-overlay-poll-footer {
+        margin-top: 0.75rem !important;
+        font-size: 0.875rem !important;
+    }
+    .chat-overlay-poll-options[data-dense="true"] {
+        gap: 0.375rem !important;
+    }
+    .chat-overlay-poll-options[data-dense="true"] .chat-overlay-poll-option {
+        padding: 0.375rem 0.75rem !important;
+    }
+    .chat-overlay-poll-options[data-dense="true"] .chat-overlay-poll-option-row {
+        font-size: 1rem !important;
+    }
+    #chat-overlay-poll #chat-overlay-poll-waiting {
+        display: none;
+    }
+}
 .chat-overlay-message {
     transition: opacity 0.2s ease, transform 0.2s ease;
 }
@@ -50,11 +117,21 @@ body[data-theme="plain"] #chat-overlay-pomodoro {
     box-shadow: none !important;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
 }
+body[data-theme="plain"] #chat-overlay-poll {
+    background-color: transparent !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
 body[data-theme="solid"] .chat-overlay-message {
     background-color: #18181b !important;
     border-color: #27272a !important;
 }
 body[data-theme="solid"] #chat-overlay-pomodoro {
+    background-color: #18181b !important;
+    border-color: #27272a !important;
+}
+body[data-theme="solid"] #chat-overlay-poll {
     background-color: #18181b !important;
     border-color: #27272a !important;
 }
@@ -89,6 +166,9 @@ body:not([data-theme]) .chat-overlay-message:not([data-highlighted="true"]) {
     background-color: rgba(0, 0, 0, var(--overlay-alpha, 0.8)) !important;
 }
 body:not([data-theme]) #chat-overlay-pomodoro {
+    background-color: rgba(0, 0, 0, var(--overlay-alpha, 0.8)) !important;
+}
+body:not([data-theme]) #chat-overlay-poll {
     background-color: rgba(0, 0, 0, var(--overlay-alpha, 0.8)) !important;
 }
 body:not([data-theme])[data-highlight="false"] .chat-overlay-message[data-highlighted="true"] {
@@ -144,6 +224,7 @@ pub async fn chat_overlay(cx: &Cx) -> Result<impl View> {
             chat_overlay_messages(
                 messages: snapshot.messages,
                 pomodoro: snapshot.pomodoro,
+                poll: snapshot.poll,
                 queued: snapshot.queued
             )
         </div>
@@ -154,10 +235,18 @@ pub async fn chat_overlay(cx: &Cx) -> Result<impl View> {
 pub async fn chat_overlay_messages(
     messages: Vec<ChatMessage>,
     pomodoro: Option<PomodoroState>,
+    poll: Option<PollState>,
     queued: usize,
 ) -> Result<impl View> {
     let now = now_unix_ms();
     let pomodoro = pomodoro.filter(|state| !state.is_expired(now));
+    let poll = poll.filter(|poll| poll.is_active() || poll.is_showing_results(now));
+    let poll_total_votes = poll.as_ref().map(|poll| poll.total_votes()).unwrap_or(0);
+    let poll_max_votes = poll
+        .as_ref()
+        .and_then(|poll| poll.options.iter().map(|option| option.votes).max())
+        .unwrap_or(0);
+    let show_messages = pomodoro.is_none() && poll.is_none();
     Ok(view! {
         <div id="chat-overlay-messages" class="flex flex-col gap-2">
             if let Some(state) = pomodoro {
@@ -191,11 +280,98 @@ pub async fn chat_overlay_messages(
                         })
                     </div>
                 </div>
-            } else if messages.is_empty() {
-                <div class="hidden" aria-hidden="true"></div>
-            } else {
-                for (index, message) in messages.into_iter().enumerate() {
-                    chat_overlay_message(message: message, highlighted: index == 0)
+            }
+            if let Some(poll) = poll {
+                <div
+                    id="chat-overlay-poll"
+                    class="chat-overlay-poll flex min-h-[calc(100dvh-1rem)] w-full flex-1 flex-col justify-center rounded-xl border border-white/10 bg-black/60 px-8 py-10 shadow-xs backdrop-blur-xs"
+                >
+                    <div
+                        class="text-center text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400"
+                    >
+                        (if poll.is_active() { "Poll" } else { "Poll results" })
+                    </div>
+                    <div
+                        class="chat-overlay-poll-question mt-3 text-center text-4xl font-bold leading-tight break-words text-zinc-100"
+                    >
+                        (poll.question.clone())
+                    </div>
+                    <div
+                        class="chat-overlay-poll-options mt-8 flex flex-col gap-4"
+                        data-dense=((poll.options.len() > 4).to_string())
+                    >
+                        for option in poll.options.iter() {
+                            <div
+                                class=(if poll.stopped_at_unix_ms.is_some() && poll_max_votes > 0 && option.votes == poll_max_votes {
+                                    "chat-overlay-poll-option relative overflow-hidden rounded-lg border border-green-500 bg-white/5 px-5 py-4"
+                                } else {
+                                    "chat-overlay-poll-option relative overflow-hidden rounded-lg border border-white/10 bg-white/5 px-5 py-4"
+                                })
+                            >
+                                if poll.stopped_at_unix_ms.is_some() {
+                                    <div
+                                        class="pointer-events-none absolute inset-y-0 left-0 bg-white/10"
+                                        style=(format!(
+                                            "width: {}%",
+                                            crate::web::components::chat_inbox::poll_percent(
+                                                option.votes,
+                                                poll_total_votes
+                                            ),
+                                        ))
+                                        aria-hidden="true"
+                                    ></div>
+                                }
+                                <div
+                                    class="chat-overlay-poll-option-row relative flex items-center justify-between gap-4 text-xl text-zinc-100"
+                                >
+                                    <span class="min-w-0 break-words">
+                                        <span class="mr-3 font-bold text-primary">
+                                            (format!("{}.", option.number))
+                                        </span>
+                                        (option.label.clone())
+                                    </span>
+                                    if poll.stopped_at_unix_ms.is_some() {
+                                        <span class="shrink-0 font-bold tabular-nums">
+                                            (format!("{}", option.votes))
+                                        </span>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                    <div
+                        class="chat-overlay-poll-footer mt-6 text-center text-lg text-zinc-400"
+                    >
+                        (if poll.is_active() {
+                            format!(
+                                "{} votes · vote by sending the number of your choice",
+                                poll_total_votes,
+                            )
+                        } else if poll.total_votes() == 1 {
+                            "1 vote".to_string()
+                        } else {
+                            format!("{} votes", poll.total_votes())
+                        })
+                    </div>
+                    <div
+                        id="chat-overlay-poll-waiting"
+                        class="mt-3 text-center text-xl text-zinc-400"
+                    >
+                        (if queued == 1 {
+                            "1 message waiting".to_string()
+                        } else {
+                            format!("{queued} messages waiting")
+                        })
+                    </div>
+                </div>
+            }
+            if show_messages {
+                if messages.is_empty() {
+                    <div class="hidden" aria-hidden="true"></div>
+                } else {
+                    for (index, message) in messages.into_iter().enumerate() {
+                        chat_overlay_message(message: message, highlighted: index == 0)
+                    }
                 }
             }
         </div>
@@ -205,12 +381,18 @@ pub async fn chat_overlay_messages(
 pub async fn render_chat_overlay_messages(
     messages: Vec<ChatMessage>,
     pomodoro: Option<PomodoroState>,
+    poll: Option<PollState>,
     queued: usize,
 ) -> Result<String> {
     let cx = Cx::default();
     let __cx = &cx;
     let view = view! {
-        chat_overlay_messages(messages: messages, pomodoro: pomodoro, queued: queued)
+        chat_overlay_messages(
+            messages: messages,
+            pomodoro: pomodoro,
+            poll: poll,
+            queued: queued
+        )
     };
     Ok(view.single().await?.render(&cx))
 }
@@ -258,6 +440,7 @@ mod tests {
                 received_at_unix_ms: 1,
             }],
             None,
+            None,
             1,
         )
         .await
@@ -291,6 +474,7 @@ mod tests {
                 received_at_unix_ms: 2,
             }],
             None,
+            None,
             1,
         )
         .await
@@ -321,6 +505,7 @@ mod tests {
                 started_at_unix_ms: now,
                 ends_at_unix_ms: now + 25 * 60 * 1000,
             }),
+            None,
             3,
         )
         .await

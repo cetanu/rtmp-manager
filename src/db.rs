@@ -123,6 +123,23 @@ const LEGACY_TABLE_DDL: &[&str] = &[
         "ends_at_unix_ms" INTEGER NOT NULL,
         PRIMARY KEY ("id")
     )"#,
+    r#"CREATE TABLE IF NOT EXISTS "chat_poll" (
+        "id" INTEGER NOT NULL,
+        "question" TEXT NOT NULL,
+        "options_data" TEXT NOT NULL,
+        "started_at_unix_ms" INTEGER NOT NULL,
+        "stopped_at_unix_ms" INTEGER,
+        "results_ends_at_unix_ms" INTEGER,
+        PRIMARY KEY ("id")
+    )"#,
+    r#"CREATE TABLE IF NOT EXISTS "chat_poll_votes" (
+        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "poll_id" INTEGER NOT NULL,
+        "voter_key" TEXT NOT NULL,
+        "option_number" INTEGER NOT NULL
+    )"#,
+    r#"CREATE UNIQUE INDEX IF NOT EXISTS "index_chat_poll_votes_by_poll_and_voter"
+        ON "chat_poll_votes" ("poll_id", "voter_key")"#,
     r#"CREATE INDEX IF NOT EXISTS "index_chat_seen_by_source_and_external_id" ON "chat_seen" ("source", "external_id")"#,
 ];
 
@@ -199,6 +216,8 @@ mod tests {
             "chat_seen",
             "chat_state",
             "chat_pomodoro",
+            "chat_poll",
+            "chat_poll_votes",
             "__toasty_migrations",
         ] {
             assert!(

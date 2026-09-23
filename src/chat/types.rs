@@ -136,6 +136,7 @@ pub struct ChatState {
     pub revision: u64,
     pub youtube_status: Option<YouTubeIngestStatus>,
     pub pomodoro: Option<PomodoroState>,
+    pub poll: Option<PollState>,
 }
 
 /// Focus timer shown on the OBS overlay instead of chat messages.
@@ -160,6 +161,40 @@ impl PomodoroState {
         let secs = self.remaining_secs(now_unix_ms);
         format!("{:02}:{:02}", secs / 60, secs % 60)
     }
+}
+
+/// A poll shown on the chat inbox and OBS overlay.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PollState {
+    pub question: String,
+    pub options: Vec<PollOption>,
+    pub started_at_unix_ms: u64,
+    pub stopped_at_unix_ms: Option<u64>,
+    pub results_ends_at_unix_ms: Option<u64>,
+}
+
+impl PollState {
+    pub fn is_active(&self) -> bool {
+        self.stopped_at_unix_ms.is_none()
+    }
+
+    pub fn is_showing_results(&self, now_unix_ms: u64) -> bool {
+        self.stopped_at_unix_ms.is_some()
+            && self
+                .results_ends_at_unix_ms
+                .is_some_and(|ends_at| now_unix_ms < ends_at)
+    }
+
+    pub fn total_votes(&self) -> u64 {
+        self.options.iter().map(|option| option.votes).sum()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PollOption {
+    pub number: u8,
+    pub label: String,
+    pub votes: u64,
 }
 
 #[cfg(test)]

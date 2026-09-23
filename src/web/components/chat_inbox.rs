@@ -7,7 +7,7 @@ use crate::web::components::ui::card::{card, card_content, card_footer};
 use topcoat::{
     Result,
     context::{Cx, app_context},
-    runtime::{procedure, shard, signal},
+    runtime::{Event, procedure, shard, signal},
     view::{View, attributes, component, view},
 };
 
@@ -123,6 +123,164 @@ async fn pomodoro_active(cx: &Cx) -> Result<bool> {
     Ok(app.chat.snapshot().await?.pomodoro.is_some())
 }
 
+#[procedure]
+async fn start_poll(cx: &Cx, question: String, options_text: String) -> Result<String> {
+    let app: &AppHandle = app_context(cx);
+    let options = options_text
+        .lines()
+        .map(str::trim)
+        .filter(|option| !option.is_empty())
+        .map(str::to_string)
+        .collect();
+    match app
+        .chat
+        .start_poll(
+            question,
+            options,
+            app.config.get().chat.poll_results_seconds,
+        )
+        .await
+    {
+        Ok(_) => Ok(String::new()),
+        Err(error) => Ok(error.to_string()),
+    }
+}
+
+#[procedure]
+async fn stop_poll(cx: &Cx) -> Result<String> {
+    let app: &AppHandle = app_context(cx);
+    Ok(first_message_id(&app.chat.stop_poll().await?))
+}
+
+#[procedure]
+async fn clear_poll(cx: &Cx) -> Result<String> {
+    let app: &AppHandle = app_context(cx);
+    Ok(first_message_id(&app.chat.clear_poll().await?))
+}
+
+pub(crate) fn poll_percent(votes: u64, total: u64) -> u64 {
+    votes
+        .checked_mul(100)
+        .and_then(|scaled| scaled.checked_div(total))
+        .unwrap_or(0)
+}
+
+#[procedure]
+async fn poll_is_visible(cx: &Cx) -> Result<bool> {
+    let app: &AppHandle = app_context(cx);
+    Ok(app.chat.snapshot().await?.poll.is_some())
+}
+
+#[procedure]
+async fn poll_is_active(cx: &Cx) -> Result<bool> {
+    let app: &AppHandle = app_context(cx);
+    Ok(app
+        .chat
+        .snapshot()
+        .await?
+        .poll
+        .is_some_and(|poll| poll.is_active()))
+}
+
+#[derive(Clone)]
+struct PollSetupSignals {
+    question: topcoat::runtime::Signal<String>,
+    options: topcoat::runtime::Signal<String>,
+    pending: topcoat::runtime::Signal<bool>,
+    error: topcoat::runtime::Signal<String>,
+    form_open: topcoat::runtime::Signal<bool>,
+    visible: topcoat::runtime::Signal<bool>,
+    active: topcoat::runtime::Signal<bool>,
+    revision: topcoat::runtime::Signal<f64>,
+}
+
+#[component]
+async fn poll_setup(signals: PollSetupSignals) -> Result<impl View> {
+    let PollSetupSignals {
+        question,
+        options,
+        pending,
+        error,
+        form_open,
+        visible,
+        active,
+        revision,
+    } = signals;
+
+    Ok(view! {
+        card_content(
+            attrs: attributes! { class="!px-6 flex min-h-0 flex-1 flex-col justify-center" },
+            <div class="mx-auto flex w-full max-w-2xl flex-col gap-6">
+                <div>
+                    <h2 class="text-lg font-semibold">"Start a poll"</h2>
+                    <p class="mt-1 text-sm text-muted-foreground">
+                        "Chatters vote by sending the number of their choice. Add one option per line."
+                    </p>
+                </div>
+                <label class="text-sm font-medium">
+                    "Question"
+                    <input
+                        id="chat-poll-question"
+                        type="text"
+                        maxlength="280"
+                        placeholder="What should we do next?"
+                        class="mt-2 h-10 w-full rounded-lg border border-border bg-background px-3"
+                        @input=$(move |event: Event| question.set(event.target.value))
+                    />
+                </label>
+                <label class="text-sm font-medium">
+                    "Options (2–6, one per line)"
+                    <textarea
+                        id="chat-poll-options"
+                        rows="6"
+                        placeholder="Option one&#10;Option two"
+                        class="mt-2 min-h-32 w-full rounded-lg border border-border bg-background px-3 py-2"
+                        @input=$(move |event: Event| options.set(event.target.value))
+                    ></textarea>
+                </label>
+                <p
+                    :hidden=$(error.get().is_empty())
+                    class="text-sm text-destructive"
+                >
+                    $(error.get())
+                </p>
+                <div class="flex justify-center gap-3">
+                    <button
+                        type="button"
+                        class=(button_variants(ButtonVariant::Outline, ButtonSize::Md))
+                        @click=$(move |_event| {
+                            error.set("".to_owned());
+                            form_open.set(false);
+                        })
+                    >
+                        "Cancel"
+                    </button>
+                    <button
+                        id="chat-poll-confirm"
+                        type="button"
+                        class=(button_variants(ButtonVariant::Primary, ButtonSize::Md))
+                        :disabled=$(pending.get())
+                        @click=$(async move |_event| {
+                            pending.set(true);
+                            let next_error = start_poll(question.get(), options.get()).await;
+                            error.set(next_error);
+                            if error.get().is_empty() {
+                                visible.set(true);
+                                active.set(true);
+                                form_open.set(false);
+                            }
+                            pending.set(false);
+                            revision.set(revision.get() + 1.0);
+                        })
+                    >
+                        "Start"
+                    </button>
+                </div>
+            </div>
+        )
+    })
+}
+
 fn first_message_id(snapshot: &crate::chat::ChatInboxSnapshot) -> String {
     snapshot
         .messages
@@ -138,6 +296,11 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
     let initial_snapshot = app.chat.snapshot().await?;
     let initial_id = first_message_id(&initial_snapshot);
     let initial_pomodoro_active = initial_snapshot.pomodoro.is_some();
+    let initial_poll_visible = initial_snapshot.poll.is_some();
+    let initial_poll_active = initial_snapshot
+        .poll
+        .as_ref()
+        .is_some_and(|poll| poll.is_active());
     let chat = app.config.get().chat.clone();
     let youtube_configured = [
         &chat.youtube_live_chat_id,
@@ -161,14 +324,35 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
     let pomo_active = signal(cx, || initial_pomodoro_active);
     let pomo_error = signal(cx, String::new);
     let pomo_pending = signal(cx, || false);
+    let poll_visible = signal(cx, || initial_poll_visible);
+    let poll_active = signal(cx, || initial_poll_active);
+    let poll_form_open = signal(cx, || false);
+    let poll_question = signal(cx, String::new);
+    let poll_options = signal(cx, String::new);
+    let poll_error = signal(cx, String::new);
+    let poll_pending = signal(cx, || false);
     let destructive_button = button_variants(ButtonVariant::Destructive, ButtonSize::Md);
+    let poll_setup_signals = PollSetupSignals {
+        question: poll_question,
+        options: poll_options,
+        pending: poll_pending.clone(),
+        error: poll_error,
+        form_open: poll_form_open.clone(),
+        visible: poll_visible.clone(),
+        active: poll_active.clone(),
+        revision: revision.clone(),
+    };
 
     Ok(view! {
         card(
             attrs: attributes! {
                 class="mb-1 h-[calc(100dvh-3.5rem)] max-h-[calc(100dvh-3.5rem)] min-h-[18rem] !gap-2 !py-3"
             },
-            chat_inbox_content(revision: $(revision.get()))
+            if poll_form_open.get() {
+                poll_setup(signals: poll_setup_signals.clone())
+            } else {
+                chat_inbox_content(revision: $(revision.get()))
+            }
             card_footer(
                 attrs: attributes! { class="!px-3 justify-between flex-wrap gap-y-2" },
                 <div class="flex items-center gap-2">
@@ -176,7 +360,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                         id="chat-pomodoro-focus"
                         type="button"
                         class=(outline_button.clone())
-                        :hidden=$(if pomo_active.get() { true } else { false })
+                        :hidden=$(if pomo_active.get() { true } else if poll_form_open.get() { true } else { false })
                         :disabled=$(pomo_pending.get())
                         @click=$(async |_event| {
                             pomo_pending.set(true);
@@ -190,6 +374,50 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                         })
                     >
                         "Focus"
+                    </button>
+                    <button
+                        id="chat-poll-start"
+                        type="button"
+                        class=(outline_button.clone())
+                        :hidden=$(if poll_visible.get() { true } else if poll_form_open.get() { true } else { false })
+                        @click=$(|_event| poll_form_open.set(!poll_form_open.get()))
+                    >
+                        "Poll"
+                    </button>
+                    <button
+                        id="chat-poll-stop"
+                        type="button"
+                        class=(destructive_button.clone())
+                        :hidden=$(if poll_active.get() { false } else { true })
+                        :disabled=$(poll_pending.get())
+                        @click=$(async |_event| {
+                            poll_pending.set(true);
+                            let next_id = stop_poll().await;
+                            current_id.set(next_id);
+                            poll_active.set(false);
+                            poll_pending.set(false);
+                            revision.set(revision.get() + 1.0);
+                        })
+                    >
+                        "Stop poll"
+                    </button>
+                    <button
+                        id="chat-poll-clear"
+                        type="button"
+                        class=(outline_button.clone())
+                        :hidden=$(if poll_visible.get() { if poll_active.get() { true } else { false } } else { true })
+                        :disabled=$(poll_pending.get())
+                        @click=$(async |_event| {
+                            poll_pending.set(true);
+                            let next_id = clear_poll().await;
+                            current_id.set(next_id);
+                            poll_visible.set(false);
+                            poll_active.set(false);
+                            poll_pending.set(false);
+                            revision.set(revision.get() + 1.0);
+                        })
+                    >
+                        "Clear results"
                     </button>
                     <button
                         id="chat-pomodoro-stop"
@@ -217,7 +445,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                 </div>
                 <div
                     class="ml-auto flex items-center gap-2"
-                    :hidden=$(if pomo_active.get() { true } else { false })
+                    :hidden=$(poll_form_open.get())
                 >
                     <button
                         id="chat-test-button"
@@ -239,6 +467,8 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                             let refreshed_id = refresh_chat().await;
                             current_id.set(refreshed_id);
                             pomo_active.set(pomodoro_active().await);
+                            poll_visible.set(poll_is_visible().await);
+                            poll_active.set(poll_is_active().await);
                             revision.set(revision.get() + 1.0);
                         })
                     >
@@ -344,7 +574,13 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
                 state.remaining_mm_ss(now),
             )
         });
-    let show_chat = pomodoro.is_none();
+    let poll = snapshot.poll.clone();
+    let poll_total_votes = poll.as_ref().map(|poll| poll.total_votes()).unwrap_or(0);
+    let poll_max_votes = poll
+        .as_ref()
+        .and_then(|poll| poll.options.iter().map(|option| option.votes).max())
+        .unwrap_or(0);
+    let show_chat = pomodoro.is_none() && poll.is_none();
 
     Ok(view! {
         card_content(
@@ -379,7 +615,53 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
                         })
                     </div>
                 </div>
-            } else {
+            }
+            if let Some(poll) = poll {
+                <div
+                    id="chat-poll-status"
+                    class="flex min-h-0 flex-1 flex-col justify-center gap-4 px-2"
+                >
+                    <div class="text-center text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                        (if poll.is_active() { "Poll" } else { "Poll results" })
+                    </div>
+                    <div class="text-center text-xl font-semibold">(poll.question.clone())</div>
+                    <div class="flex flex-col gap-2">
+                        for option in poll.options.iter() {
+                            <div class=(if poll.stopped_at_unix_ms.is_some() && poll_max_votes > 0 && option.votes == poll_max_votes {
+                                "relative flex items-center justify-between gap-3 overflow-hidden rounded-md border border-green-500 px-3 py-2"
+                            } else {
+                                "relative flex items-center justify-between gap-3 overflow-hidden rounded-md border border-border px-3 py-2"
+                            })>
+                                if poll.stopped_at_unix_ms.is_some() {
+                                    <div
+                                        class="pointer-events-none absolute inset-y-0 left-0 bg-muted"
+                                        style=(format!(
+                                            "width: {}%",
+                                            poll_percent(option.votes, poll_total_votes)
+                                        ))
+                                        aria-hidden="true"
+                                    ></div>
+                                }
+                                <span class="relative min-w-0 break-words">
+                                    <span class="mr-2 font-bold text-primary">(format!("{}.", option.number))</span>
+                                    (option.label.clone())
+                                </span>
+                                <span class="relative shrink-0 font-semibold tabular-nums">(format!("{}", option.votes))</span>
+                            </div>
+                        }
+                    </div>
+                    <div class="text-center text-sm text-muted-foreground">
+                        (if poll.is_active() {
+                            format!("{} votes", poll_total_votes)
+                        } else if poll.total_votes() == 1 {
+                            "1 vote".to_string()
+                        } else {
+                            format!("{} votes", poll.total_votes())
+                        })
+                    </div>
+                </div>
+            }
+            if show_chat {
                 <div class="min-h-0 flex-1 overflow-y-auto pr-1">
                     <div class="flex flex-col gap-2">
                         if snapshot.messages.is_empty() {

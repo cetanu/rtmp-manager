@@ -56,6 +56,7 @@ const MAX_WEBHOOK_SIZE: usize = 128 * 1024;
 const MAX_CONFIG_BODY_SIZE: usize = 1024 * 1024;
 const MAX_CHAT_TEST_BODY_SIZE: usize = 64 * 1024;
 const MAX_POMODORO_BODY_SIZE: usize = 16 * 1024;
+const MAX_POLL_BODY_SIZE: usize = 16 * 1024;
 
 pub async fn run_web_server(
     app_handle: AppHandle,
@@ -73,6 +74,7 @@ pub async fn run_web_server(
         .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import-file"))
         .layer(topcoat::router::BodyLimit::max(MAX_CHAT_TEST_BODY_SIZE).at("/api/chat/test"))
         .layer(topcoat::router::BodyLimit::max(MAX_POMODORO_BODY_SIZE).at("/api/chat/pomodoro"))
+        .layer(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE).at("/api/chat/poll"))
         .app_context(app_handle)
         .build();
 
@@ -480,6 +482,40 @@ async fn stop_chat_pomodoro(cx: &Cx) -> Result<Response> {
     Json(app.chat.stop_pomodoro().await?).into_response(cx)
 }
 
+#[derive(Debug, Deserialize)]
+struct StartPollRequest {
+    question: String,
+    options: Vec<String>,
+    #[serde(default)]
+    results_seconds: Option<u64>,
+}
+
+#[route(POST "/api/chat/poll")]
+async fn start_chat_poll(cx: &Cx, Json(request): Json<StartPollRequest>) -> Result<Response> {
+    let app: &AppHandle = app_context(cx);
+    let results_seconds = request
+        .results_seconds
+        .unwrap_or(app.config.get().chat.poll_results_seconds);
+    let snapshot = app
+        .chat
+        .start_poll(request.question, request.options, results_seconds)
+        .await
+        .map_err(|error| bad_request(error.to_string()))?;
+    Json(snapshot).into_response(cx)
+}
+
+#[route(DELETE "/api/chat/poll")]
+async fn stop_chat_poll(cx: &Cx) -> Result<Response> {
+    let app: &AppHandle = app_context(cx);
+    Json(app.chat.stop_poll().await?).into_response(cx)
+}
+
+#[route(DELETE "/api/chat/poll/clear")]
+async fn clear_chat_poll(cx: &Cx) -> Result<Response> {
+    let app: &AppHandle = app_context(cx);
+    Json(app.chat.clear_poll().await?).into_response(cx)
+}
+
 #[route(GET "/api/events")]
 async fn server_events(
     cx: &Cx,
@@ -579,6 +615,7 @@ async fn overlay_events(
                         match render_chat_overlay_messages(
                             snapshot.messages,
                             snapshot.pomodoro,
+                            snapshot.poll,
                             snapshot.queued,
                         )
                         .await

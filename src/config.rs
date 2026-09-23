@@ -164,6 +164,10 @@ pub struct ChatSettings {
     #[serde(default = "default_pomodoro_message")]
     #[validate(max_length = 280)]
     pub pomodoro_message: String,
+    #[serde(default = "default_poll_results_seconds")]
+    #[validate(minimum = 1)]
+    #[validate(maximum = 300)]
+    pub poll_results_seconds: u64,
 }
 
 fn default_chat_queue_capacity() -> usize {
@@ -184,6 +188,10 @@ fn default_pomodoro_minutes() -> u64 {
 
 fn default_pomodoro_message() -> String {
     crate::chat::POMODORO_DEFAULT_MESSAGE.to_string()
+}
+
+pub fn default_poll_results_seconds() -> u64 {
+    15
 }
 
 impl Default for ChatSettings {
@@ -209,6 +217,7 @@ impl Default for ChatSettings {
             kick_webhook_enabled: false,
             pomodoro_minutes: default_pomodoro_minutes(),
             pomodoro_message: default_pomodoro_message(),
+            poll_results_seconds: default_poll_results_seconds(),
         }
     }
 }
@@ -426,6 +435,9 @@ fn merge_chat(config: &mut AppConfig, form: ChatForm) {
             .unwrap_or(config.chat.pomodoro_minutes),
         pomodoro_message: non_empty(form.pomodoro_message)
             .unwrap_or_else(|| config.chat.pomodoro_message.clone()),
+        poll_results_seconds: form
+            .poll_results_seconds
+            .unwrap_or(config.chat.poll_results_seconds),
     };
 }
 
@@ -757,6 +769,7 @@ pub struct ChatForm {
     pub kick_webhook_enabled: Option<bool>,
     pub pomodoro_minutes: Option<u64>,
     pub pomodoro_message: Option<String>,
+    pub poll_results_seconds: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]

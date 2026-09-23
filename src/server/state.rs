@@ -31,6 +31,7 @@ impl AppHandle {
         let chat = ChatHandle::spawn(
             config_handle.path(),
             initial_config.chat.queue_capacity,
+            initial_config.chat.poll_results_seconds,
             http_client.clone(),
             Arc::clone(&metrics),
         )

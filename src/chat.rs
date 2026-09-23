@@ -21,8 +21,9 @@ pub mod x;
 pub mod youtube;
 
 pub use types::{
-    ChatMessagePart, ChatState, EnqueueOutcome, IncomingChatMessage, PomodoroState, Source,
-    YouTubeChatConfig, YouTubeChatSink, YouTubeChatTarget, YouTubeIngestState, YouTubeIngestStatus,
+    ChatMessagePart, ChatState, EnqueueOutcome, IncomingChatMessage, PollOption, PollState,
+    PomodoroState, Source, YouTubeChatConfig, YouTubeChatSink, YouTubeChatTarget,
+    YouTubeIngestState, YouTubeIngestStatus,
 };
 
 const INBOX_PREVIEW_LIMIT: usize = 10;
@@ -33,6 +34,12 @@ pub const POMODORO_MIN_DURATION_SECS: u64 = 60;
 pub const POMODORO_MAX_DURATION_SECS: u64 = 45 * 60;
 pub const POMODORO_DEFAULT_MESSAGE: &str = "Focus mode — chat paused";
 pub const POMODORO_MAX_MESSAGE_CHARS: usize = 280;
+pub const POLL_MIN_OPTIONS: usize = 2;
+pub const POLL_MAX_OPTIONS: usize = 6;
+pub const POLL_MAX_QUESTION_CHARS: usize = 280;
+pub const POLL_MAX_OPTION_CHARS: usize = 120;
+pub const POLL_MIN_RESULTS_SECS: u64 = 1;
+pub const POLL_MAX_RESULTS_SECS: u64 = 300;
 
 impl IncomingChatMessage {
     pub fn normalized(mut self) -> Result<Self> {
@@ -148,6 +155,30 @@ struct StoredPomodoro {
     ends_at_unix_ms: u64,
 }
 
+#[derive(Debug, toasty::Model)]
+#[table = "chat_poll"]
+struct StoredPoll {
+    #[key]
+    id: u64,
+    question: String,
+    options_data: String,
+    started_at_unix_ms: u64,
+    stopped_at_unix_ms: Option<u64>,
+    results_ends_at_unix_ms: Option<u64>,
+}
+
+#[derive(Debug, toasty::Model)]
+#[table = "chat_poll_votes"]
+#[unique(name = "index_chat_poll_votes_by_poll_and_voter", poll_id, voter_key)]
+struct StoredPollVote {
+    #[key]
+    #[auto]
+    id: u64,
+    poll_id: u64,
+    voter_key: String,
+    option_number: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatInboxSnapshot {
     pub messages: Vec<ChatMessage>,
@@ -155,6 +186,8 @@ pub struct ChatInboxSnapshot {
     pub dropped: u64,
     #[serde(default)]
     pub pomodoro: Option<PomodoroState>,
+    #[serde(default)]
+    pub poll: Option<PollState>,
 }
 
 pub fn validate_pomodoro(message: &str, duration_secs: u64) -> Result<(String, u64)> {
@@ -175,6 +208,38 @@ pub fn validate_pomodoro(message: &str, duration_secs: u64) -> Result<(String, u
         "Pomodoro message must be at most {POMODORO_MAX_MESSAGE_CHARS} characters",
     );
     Ok((message, duration_secs))
+}
+
+pub fn validate_poll(
+    question: &str,
+    options: &[String],
+    results_secs: u64,
+) -> Result<(String, Vec<String>, u64)> {
+    anyhow::ensure!(
+        (POLL_MIN_RESULTS_SECS..=POLL_MAX_RESULTS_SECS).contains(&results_secs),
+        "Poll results duration must be between {POLL_MIN_RESULTS_SECS} and {POLL_MAX_RESULTS_SECS} seconds"
+    );
+    let question = question.trim().to_string();
+    anyhow::ensure!(
+        !question.is_empty() && question.chars().count() <= POLL_MAX_QUESTION_CHARS,
+        "Poll question must be between 1 and {POLL_MAX_QUESTION_CHARS} characters"
+    );
+    let options = options
+        .iter()
+        .map(|option| option.trim().to_string())
+        .filter(|option| !option.is_empty())
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        (POLL_MIN_OPTIONS..=POLL_MAX_OPTIONS).contains(&options.len()),
+        "Polls must have between {POLL_MIN_OPTIONS} and {POLL_MAX_OPTIONS} options"
+    );
+    anyhow::ensure!(
+        options
+            .iter()
+            .all(|option| option.chars().count() <= POLL_MAX_OPTION_CHARS),
+        "Poll options must be at most {POLL_MAX_OPTION_CHARS} characters"
+    );
+    Ok((question, options, results_secs))
 }
 
 /// SQLite-backed persistent chat inbox with bounded queue capacity and deduplication.
@@ -305,6 +370,7 @@ impl ChatInbox {
             queued,
             dropped,
             pomodoro: None,
+            poll: None,
         })
     }
 
@@ -375,6 +441,149 @@ impl ChatInbox {
         Ok(())
     }
 
+    pub async fn load_persisted_poll(&self) -> Result<Option<PollState>> {
+        let mut database = self.database.clone();
+        let Some(row) = StoredPoll::filter(StoredPoll::fields().id().eq(1_u64))
+            .first()
+            .exec(&mut database)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let poll = PollState {
+            question: row.question.clone(),
+            options: serde_json::from_str(&row.options_data)
+                .context("Stored poll has invalid option data")?,
+            started_at_unix_ms: row.started_at_unix_ms,
+            stopped_at_unix_ms: row.stopped_at_unix_ms,
+            results_ends_at_unix_ms: row.results_ends_at_unix_ms,
+        };
+        if !poll.is_active() && !poll.is_showing_results(now_unix_ms()) {
+            self.clear_persisted_poll().await?;
+            return Ok(None);
+        }
+        Ok(Some(poll))
+    }
+
+    pub async fn save_persisted_poll(&self, poll: &PollState) -> Result<()> {
+        let mut database = self.database.clone();
+        let options_data = serde_json::to_string(&poll.options)?;
+        if let Some(mut row) = StoredPoll::filter(StoredPoll::fields().id().eq(1_u64))
+            .first()
+            .exec(&mut database)
+            .await?
+        {
+            row.update()
+                .question(poll.question.clone())
+                .options_data(options_data)
+                .started_at_unix_ms(poll.started_at_unix_ms)
+                .stopped_at_unix_ms(poll.stopped_at_unix_ms)
+                .results_ends_at_unix_ms(poll.results_ends_at_unix_ms)
+                .exec(&mut database)
+                .await?;
+        } else {
+            toasty::create!(StoredPoll {
+                id: 1,
+                question: poll.question.clone(),
+                options_data,
+                started_at_unix_ms: poll.started_at_unix_ms,
+                stopped_at_unix_ms: poll.stopped_at_unix_ms,
+                results_ends_at_unix_ms: poll.results_ends_at_unix_ms,
+            })
+            .exec(&mut database)
+            .await?;
+        }
+        Ok(())
+    }
+
+    pub async fn clear_poll_votes(&self) -> Result<()> {
+        let mut database = self.database.clone();
+        toasty::sql::statement("DELETE FROM chat_poll_votes WHERE poll_id = 1")
+            .exec(&mut database)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn clear_persisted_poll(&self) -> Result<()> {
+        self.clear_poll_votes().await?;
+        let mut database = self.database.clone();
+        if let Some(row) = StoredPoll::filter(StoredPoll::fields().id().eq(1_u64))
+            .first()
+            .exec(&mut database)
+            .await?
+        {
+            row.delete().exec(&mut database).await?;
+        }
+        Ok(())
+    }
+
+    async fn record_poll_vote(
+        &self,
+        incoming: &IncomingChatMessage,
+        option_number: u8,
+    ) -> Result<PollVoteOutcome> {
+        let mut database = self.database.clone();
+        let mut transaction = database.transaction().await?;
+        let seen = StoredChatSeen::filter(
+            StoredChatSeen::fields()
+                .source()
+                .eq(incoming.source.as_str())
+                .and(
+                    StoredChatSeen::fields()
+                        .external_id()
+                        .eq(&incoming.external_id),
+                ),
+        )
+        .first()
+        .exec(&mut transaction)
+        .await?;
+        if seen.is_some() {
+            return Ok(PollVoteOutcome::Duplicate);
+        }
+        toasty::create!(StoredChatSeen {
+            source: incoming.source.to_string(),
+            external_id: incoming.external_id.clone(),
+        })
+        .exec(&mut transaction)
+        .await?;
+        trim_seen(
+            &mut transaction,
+            self.capacity.saturating_mul(SEEN_ID_RETENTION_MULTIPLIER),
+        )
+        .await?;
+
+        let voter_key = poll_voter_key(incoming);
+        let previous_option = StoredPollVote::filter(
+            StoredPollVote::fields()
+                .poll_id()
+                .eq(1_u64)
+                .and(StoredPollVote::fields().voter_key().eq(&voter_key)),
+        )
+        .first()
+        .exec(&mut transaction)
+        .await?;
+        let previous_option = if let Some(mut vote) = previous_option {
+            let previous = u8::try_from(vote.option_number)
+                .context("Stored poll vote has an invalid option number")?;
+            vote.update()
+                .option_number(u64::from(option_number))
+                .exec(&mut transaction)
+                .await?;
+            Some(previous)
+        } else {
+            toasty::create!(StoredPollVote {
+                poll_id: 1,
+                voter_key,
+                option_number: u64::from(option_number),
+            })
+            .exec(&mut transaction)
+            .await?;
+            None
+        };
+        transaction.commit().await?;
+        Ok(PollVoteOutcome::Accepted { previous_option })
+    }
+
     async fn trim_to_capacity(&mut self) -> Result<()> {
         let mut database = self.database.clone();
         let mut transaction = database.transaction().await?;
@@ -416,6 +625,27 @@ fn chat_message_from_model(message: &StoredChatMessage) -> Result<ChatMessage> {
         sent_at: message.sent_at.clone(),
         received_at_unix_ms: message.received_at_unix_ms,
     })
+}
+
+fn poll_voter_key(message: &IncomingChatMessage) -> String {
+    format!(
+        "{}:{}",
+        message.source,
+        message.author.trim().to_ascii_lowercase()
+    )
+}
+
+fn parse_poll_vote(text: &str, option_count: usize) -> Option<u8> {
+    let number = text.trim().parse::<usize>().ok()?;
+    (1..=option_count)
+        .contains(&number)
+        .then(|| u8::try_from(number).ok())
+        .flatten()
+}
+
+enum PollVoteOutcome {
+    Accepted { previous_option: Option<u8> },
+    Duplicate,
 }
 
 /// The first message is currently on-air. Eviction therefore starts at the
@@ -543,6 +773,19 @@ enum ChatCommand {
         respond_to: oneshot::Sender<Result<ChatInboxSnapshot>>,
     },
     ExpirePomodoro,
+    StartPoll {
+        question: String,
+        options: Vec<String>,
+        results_secs: u64,
+        respond_to: oneshot::Sender<Result<ChatInboxSnapshot>>,
+    },
+    StopPoll {
+        respond_to: oneshot::Sender<Result<ChatInboxSnapshot>>,
+    },
+    ClearPoll {
+        respond_to: oneshot::Sender<Result<ChatInboxSnapshot>>,
+    },
+    ExpirePollResults,
 }
 
 /// Actor owning chat queue storage and background platform workers exclusively without mutexes.
@@ -551,6 +794,8 @@ struct ChatActor {
     twitch_task: Option<JoinHandle<()>>,
     youtube_task: Option<JoinHandle<()>>,
     pomodoro_timer: Option<JoinHandle<()>>,
+    poll_timer: Option<JoinHandle<()>>,
+    poll_results_secs: u64,
     state: ChatState,
     state_tx: watch::Sender<ChatState>,
     http_client: Client,
@@ -564,12 +809,11 @@ impl ChatActor {
                     message,
                     respond_to,
                 } => {
-                    let outcome = self.inbox.enqueue(message).await;
+                    let outcome = self.handle_enqueue(message).await;
                     if let Ok(outcome) = &outcome
                         && matches!(outcome, EnqueueOutcome::Accepted | EnqueueOutcome::Dropped)
                     {
                         handle.metrics.add_chat_messages_received(1);
-                        self.notify_changed();
                     }
                     let _ = respond_to.send(outcome);
                 }
@@ -586,6 +830,7 @@ impl ChatActor {
                 ChatCommand::Snapshot { respond_to } => {
                     let response = self.inbox.snapshot().await.map(|mut snapshot| {
                         snapshot.pomodoro = self.active_pomodoro();
+                        snapshot.poll = self.active_poll();
                         snapshot
                     });
                     let _ = respond_to.send(response);
@@ -641,6 +886,34 @@ impl ChatActor {
                         tracing::warn!("Failed to clear expired pomodoro: {error:#}");
                     }
                 }
+                ChatCommand::StartPoll {
+                    question,
+                    options,
+                    results_secs,
+                    respond_to,
+                } => {
+                    let response = self.start_poll(question, options, results_secs).await;
+                    let _ = respond_to.send(response);
+                }
+                ChatCommand::StopPoll { respond_to } => {
+                    let response = self.stop_poll(&handle).await;
+                    let _ = respond_to.send(response);
+                }
+                ChatCommand::ClearPoll { respond_to } => {
+                    let response = self.clear_poll_and_snapshot().await;
+                    let _ = respond_to.send(response);
+                }
+                ChatCommand::ExpirePollResults => {
+                    if self
+                        .state
+                        .poll
+                        .as_ref()
+                        .is_some_and(|poll| !poll.is_active())
+                        && let Err(error) = self.clear_poll().await
+                    {
+                        tracing::warn!("Failed to clear expired poll results: {error:#}");
+                    }
+                }
             }
         }
     }
@@ -659,6 +932,46 @@ impl ChatActor {
         }
     }
 
+    fn active_poll(&self) -> Option<PollState> {
+        let poll = self.state.poll.clone()?;
+        if poll.is_active() || poll.is_showing_results(now_unix_ms()) {
+            Some(poll)
+        } else {
+            None
+        }
+    }
+
+    async fn handle_enqueue(&mut self, message: IncomingChatMessage) -> Result<EnqueueOutcome> {
+        if let Some(poll) = self.state.poll.as_ref().filter(|poll| poll.is_active())
+            && let Some(option_number) = parse_poll_vote(&message.text, poll.options.len())
+        {
+            let outcome = self.inbox.record_poll_vote(&message, option_number).await?;
+            if let PollVoteOutcome::Accepted { previous_option } = outcome {
+                let poll = self.state.poll.as_mut().expect("active poll disappeared");
+                if let Some(previous_option) = previous_option
+                    && let Some(previous) = poll
+                        .options
+                        .iter_mut()
+                        .find(|o| o.number == previous_option)
+                {
+                    previous.votes = previous.votes.saturating_sub(1);
+                }
+                if let Some(current) = poll.options.iter_mut().find(|o| o.number == option_number) {
+                    current.votes = current.votes.saturating_add(1);
+                }
+                self.inbox.save_persisted_poll(poll).await?;
+                self.notify_changed();
+                return Ok(EnqueueOutcome::Accepted);
+            }
+            return Ok(EnqueueOutcome::Duplicate);
+        }
+        let outcome = self.inbox.enqueue(message).await?;
+        if matches!(outcome, EnqueueOutcome::Accepted | EnqueueOutcome::Dropped) {
+            self.notify_changed();
+        }
+        Ok(outcome)
+    }
+
     async fn clear_pomodoro(&mut self) -> Result<()> {
         if let Some(timer) = self.pomodoro_timer.take() {
             timer.abort();
@@ -670,9 +983,26 @@ impl ChatActor {
         Ok(())
     }
 
-    async fn snapshot_with_pomodoro(&self) -> Result<ChatInboxSnapshot> {
+    async fn clear_poll(&mut self) -> Result<()> {
+        if let Some(timer) = self.poll_timer.take() {
+            timer.abort();
+        }
+        self.inbox.clear_persisted_poll().await?;
+        if self.state.poll.take().is_some() {
+            self.notify_changed();
+        }
+        Ok(())
+    }
+
+    async fn clear_poll_and_snapshot(&mut self) -> Result<ChatInboxSnapshot> {
+        self.clear_poll().await?;
+        self.snapshot_with_overlay().await
+    }
+
+    async fn snapshot_with_overlay(&self) -> Result<ChatInboxSnapshot> {
         let mut snapshot = self.inbox.snapshot().await?;
         snapshot.pomodoro = self.active_pomodoro();
+        snapshot.poll = self.active_poll();
         Ok(snapshot)
     }
 
@@ -705,12 +1035,71 @@ impl ChatActor {
         });
         self.pomodoro_timer = Some(timer);
 
-        self.snapshot_with_pomodoro().await
+        self.snapshot_with_overlay().await
     }
 
     async fn stop_pomodoro(&mut self) -> Result<ChatInboxSnapshot> {
         self.clear_pomodoro().await?;
-        self.snapshot_with_pomodoro().await
+        self.snapshot_with_overlay().await
+    }
+
+    async fn start_poll(
+        &mut self,
+        question: String,
+        options: Vec<String>,
+        results_secs: u64,
+    ) -> Result<ChatInboxSnapshot> {
+        anyhow::ensure!(self.active_poll().is_none(), "A poll is already active");
+        let (question, options, results_secs) = validate_poll(&question, &options, results_secs)?;
+        self.poll_results_secs = results_secs;
+        let now = now_unix_ms();
+        let poll = PollState {
+            question,
+            options: options
+                .into_iter()
+                .enumerate()
+                .map(|(index, label)| PollOption {
+                    number: u8::try_from(index + 1).expect("validated poll option count"),
+                    label,
+                    votes: 0,
+                })
+                .collect(),
+            started_at_unix_ms: now,
+            stopped_at_unix_ms: None,
+            results_ends_at_unix_ms: None,
+        };
+        // Poll rows are singletons (id = 1) while votes carry poll_id = 1, so
+        // stale votes from a previous poll must be dropped before saving.
+        self.inbox.clear_poll_votes().await?;
+        self.inbox.save_persisted_poll(&poll).await?;
+        self.state.poll = Some(poll);
+        self.notify_changed();
+        self.snapshot_with_overlay().await
+    }
+
+    async fn stop_poll(&mut self, handle: &ChatHandle) -> Result<ChatInboxSnapshot> {
+        let Some(poll) = self.state.poll.as_mut() else {
+            return self.snapshot_with_overlay().await;
+        };
+        if !poll.is_active() {
+            return self.snapshot_with_overlay().await;
+        }
+        let stopped_at = now_unix_ms();
+        poll.stopped_at_unix_ms = Some(stopped_at);
+        poll.results_ends_at_unix_ms =
+            Some(stopped_at.saturating_add(self.poll_results_secs.saturating_mul(1000)));
+        self.inbox.save_persisted_poll(poll).await?;
+        if let Some(timer) = self.poll_timer.take() {
+            timer.abort();
+        }
+        let sender = handle.sender.clone();
+        let results_secs = self.poll_results_secs;
+        self.poll_timer = Some(tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(results_secs)).await;
+            let _ = sender.send(ChatCommand::ExpirePollResults).await;
+        }));
+        self.notify_changed();
+        self.snapshot_with_overlay().await
     }
 
     async fn handle_apply_config(
@@ -718,6 +1107,16 @@ impl ChatActor {
         chat: &ChatSettings,
         handle: &ChatHandle,
     ) -> Result<()> {
+        // Keep the in-flight poll's results duration stable: only pick up the
+        // configured value when no poll is actively collecting votes.
+        if self
+            .state
+            .poll
+            .as_ref()
+            .is_none_or(|poll| !poll.is_active())
+        {
+            self.poll_results_secs = chat.poll_results_seconds;
+        }
         self.inbox.resize(chat.queue_capacity).await?;
 
         if let Some(task) = self.twitch_task.take() {
@@ -817,6 +1216,7 @@ impl ChatHandle {
     pub async fn spawn(
         path: &Path,
         capacity: usize,
+        poll_results_secs: u64,
         http_client: Client,
         metrics: Arc<Metrics>,
     ) -> Result<Self> {
@@ -835,6 +1235,7 @@ impl ChatHandle {
         // expired while the process was down, and re-arm its expiry timer.
         let mut state = ChatState::default();
         let mut pomodoro_timer = None;
+        let mut poll_timer = None;
         if let Some(pomodoro) = inbox.load_persisted_pomodoro().await? {
             let remaining_ms = pomodoro.ends_at_unix_ms.saturating_sub(now_unix_ms());
             if remaining_ms > 0 {
@@ -847,6 +1248,21 @@ impl ChatHandle {
                 tracing::info!("Restored active pomodoro focus mode after restart");
             }
         }
+        if let Some(poll) = inbox.load_persisted_poll().await? {
+            if let Some(results_ends_at) = poll.results_ends_at_unix_ms {
+                let remaining_ms = results_ends_at.saturating_sub(now_unix_ms());
+                if remaining_ms > 0 {
+                    state.poll = Some(poll);
+                    let timer_sender = handle.sender.clone();
+                    poll_timer = Some(tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_millis(remaining_ms)).await;
+                        let _ = timer_sender.send(ChatCommand::ExpirePollResults).await;
+                    }));
+                }
+            } else {
+                state.poll = Some(poll);
+            }
+        }
         state_tx.send_replace(state.clone());
 
         let actor = ChatActor {
@@ -854,6 +1270,8 @@ impl ChatHandle {
             twitch_task: None,
             youtube_task: None,
             pomodoro_timer,
+            poll_timer,
+            poll_results_secs,
             state,
             state_tx,
             http_client,
@@ -972,6 +1390,40 @@ impl ChatHandle {
         self.call(
             |respond_to| ChatCommand::StopPomodoro { respond_to },
             "Chat actor dropped stop_pomodoro response",
+        )
+        .await
+    }
+
+    pub async fn start_poll(
+        &self,
+        question: String,
+        options: Vec<String>,
+        results_secs: u64,
+    ) -> Result<ChatInboxSnapshot> {
+        self.call(
+            |respond_to| ChatCommand::StartPoll {
+                question,
+                options,
+                results_secs,
+                respond_to,
+            },
+            "Chat actor dropped start_poll response",
+        )
+        .await
+    }
+
+    pub async fn stop_poll(&self) -> Result<ChatInboxSnapshot> {
+        self.call(
+            |respond_to| ChatCommand::StopPoll { respond_to },
+            "Chat actor dropped stop_poll response",
+        )
+        .await
+    }
+
+    pub async fn clear_poll(&self) -> Result<ChatInboxSnapshot> {
+        self.call(
+            |respond_to| ChatCommand::ClearPoll { respond_to },
+            "Chat actor dropped clear_poll response",
         )
         .await
     }
@@ -1283,9 +1735,15 @@ mod tests {
     #[tokio::test]
     async fn chat_handle_actor_processes_commands() {
         let path = database_path();
-        let handle = ChatHandle::spawn(&path, 5, Client::new(), Arc::new(Metrics::default()))
-            .await
-            .unwrap();
+        let handle = ChatHandle::spawn(
+            &path,
+            5,
+            crate::config::default_poll_results_seconds(),
+            Client::new(),
+            Arc::new(Metrics::default()),
+        )
+        .await
+        .unwrap();
         let mut rev_rx = handle.subscribe_changes();
 
         let outcome = handle
@@ -1332,15 +1790,22 @@ mod tests {
         let handle_path = database_path();
         let inbox = ChatInbox::open(&actor_path, 5).await.unwrap();
         let (state_tx, _) = watch::channel(ChatState::default());
-        let handle =
-            ChatHandle::spawn(&handle_path, 5, Client::new(), Arc::new(Metrics::default()))
-                .await
-                .unwrap();
+        let handle = ChatHandle::spawn(
+            &handle_path,
+            5,
+            crate::config::default_poll_results_seconds(),
+            Client::new(),
+            Arc::new(Metrics::default()),
+        )
+        .await
+        .unwrap();
         let mut actor = ChatActor {
             inbox,
             twitch_task: None,
             youtube_task: None,
             pomodoro_timer: None,
+            poll_timer: None,
+            poll_results_secs: crate::config::default_poll_results_seconds(),
             state: ChatState::default(),
             state_tx,
             http_client: Client::new(),
@@ -1367,9 +1832,15 @@ mod tests {
     #[tokio::test]
     async fn enqueue_test_generates_valid_messages_and_can_be_acknowledged() {
         let path = database_path();
-        let handle = ChatHandle::spawn(&path, 5, Client::new(), Arc::new(Metrics::default()))
-            .await
-            .unwrap();
+        let handle = ChatHandle::spawn(
+            &path,
+            5,
+            crate::config::default_poll_results_seconds(),
+            Client::new(),
+            Arc::new(Metrics::default()),
+        )
+        .await
+        .unwrap();
 
         let outcome = handle.enqueue_test(None).await.unwrap();
         assert_eq!(outcome, EnqueueOutcome::Accepted);
@@ -1398,12 +1869,89 @@ mod tests {
         assert_eq!(defaulted, POMODORO_DEFAULT_MESSAGE);
     }
 
+    #[test]
+    fn poll_validation_requires_a_question_and_two_to_six_options() {
+        assert!(validate_poll("question", &["one".into()], 15).is_err());
+        assert!(validate_poll("", &["one".into(), "two".into()], 15).is_err());
+        assert!(validate_poll("question", &["one".into(), "two".into()], 0).is_err());
+        let (question, options, results_secs) =
+            validate_poll(" question ", &[" one ".into(), "two".into()], 20).unwrap();
+        assert_eq!(
+            (question, options, results_secs),
+            ("question".into(), vec!["one".into(), "two".into()], 20)
+        );
+    }
+
+    #[tokio::test]
+    async fn poll_counts_one_vote_per_platform_author_and_allows_changes() {
+        let path = database_path();
+        let handle = ChatHandle::spawn(
+            &path,
+            5,
+            crate::config::default_poll_results_seconds(),
+            Client::new(),
+            Arc::new(Metrics::default()),
+        )
+        .await
+        .unwrap();
+        handle
+            .start_poll("Choose".into(), vec!["One".into(), "Two".into()], 15)
+            .await
+            .unwrap();
+
+        handle
+            .enqueue(message("twitch", "vote-1", "1"))
+            .await
+            .unwrap();
+        let first = handle.snapshot().await.unwrap();
+        assert_eq!(first.poll.as_ref().unwrap().options[0].votes, 1);
+        assert_eq!(first.queued, 0, "vote messages should not enter the inbox");
+
+        handle
+            .enqueue(message("twitch", "vote-2", "2"))
+            .await
+            .unwrap();
+        let changed = handle.snapshot().await.unwrap();
+        let options = &changed.poll.as_ref().unwrap().options;
+        assert_eq!(options[0].votes, 0);
+        assert_eq!(options[1].votes, 1);
+
+        assert_eq!(
+            handle
+                .enqueue(message("twitch", "vote-2", "1"))
+                .await
+                .unwrap(),
+            EnqueueOutcome::Duplicate
+        );
+        let unchanged = handle.snapshot().await.unwrap();
+        assert_eq!(unchanged.poll.as_ref().unwrap().total_votes(), 1);
+
+        handle.stop_poll().await.unwrap();
+        assert!(
+            handle
+                .snapshot()
+                .await
+                .unwrap()
+                .poll
+                .unwrap()
+                .stopped_at_unix_ms
+                .is_some()
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
     #[tokio::test]
     async fn pomodoro_start_and_stop_flow_through_handle() {
         let path = database_path();
-        let handle = ChatHandle::spawn(&path, 5, Client::new(), Arc::new(Metrics::default()))
-            .await
-            .unwrap();
+        let handle = ChatHandle::spawn(
+            &path,
+            5,
+            crate::config::default_poll_results_seconds(),
+            Client::new(),
+            Arc::new(Metrics::default()),
+        )
+        .await
+        .unwrap();
 
         assert!(handle.snapshot().await.unwrap().pomodoro.is_none());
         let snapshot = handle
@@ -1427,18 +1975,30 @@ mod tests {
     #[tokio::test]
     async fn pomodoro_survives_respawn_until_stopped() {
         let path = database_path();
-        let handle = ChatHandle::spawn(&path, 5, Client::new(), Arc::new(Metrics::default()))
-            .await
-            .unwrap();
+        let handle = ChatHandle::spawn(
+            &path,
+            5,
+            crate::config::default_poll_results_seconds(),
+            Client::new(),
+            Arc::new(Metrics::default()),
+        )
+        .await
+        .unwrap();
         let started = handle
             .start_pomodoro("restart-proof".into(), 25 * 60)
             .await
             .unwrap();
         assert!(started.pomodoro.is_some());
 
-        let restarted = ChatHandle::spawn(&path, 5, Client::new(), Arc::new(Metrics::default()))
-            .await
-            .unwrap();
+        let restarted = ChatHandle::spawn(
+            &path,
+            5,
+            crate::config::default_poll_results_seconds(),
+            Client::new(),
+            Arc::new(Metrics::default()),
+        )
+        .await
+        .unwrap();
         let pomodoro = restarted.snapshot().await.unwrap().pomodoro.unwrap();
         assert_eq!(pomodoro.message, "restart-proof");
         assert_eq!(
@@ -1447,9 +2007,15 @@ mod tests {
         );
 
         restarted.stop_pomodoro().await.unwrap();
-        let after_stop = ChatHandle::spawn(&path, 5, Client::new(), Arc::new(Metrics::default()))
-            .await
-            .unwrap();
+        let after_stop = ChatHandle::spawn(
+            &path,
+            5,
+            crate::config::default_poll_results_seconds(),
+            Client::new(),
+            Arc::new(Metrics::default()),
+        )
+        .await
+        .unwrap();
         assert!(after_stop.snapshot().await.unwrap().pomodoro.is_none());
 
         std::fs::remove_file(path).unwrap();
@@ -1469,9 +2035,15 @@ mod tests {
             .unwrap();
         drop(inbox);
 
-        let handle = ChatHandle::spawn(&path, 5, Client::new(), Arc::new(Metrics::default()))
-            .await
-            .unwrap();
+        let handle = ChatHandle::spawn(
+            &path,
+            5,
+            crate::config::default_poll_results_seconds(),
+            Client::new(),
+            Arc::new(Metrics::default()),
+        )
+        .await
+        .unwrap();
         assert!(handle.snapshot().await.unwrap().pomodoro.is_none());
         let reopened = ChatInbox::open(&path, 5).await.unwrap();
         assert!(reopened.load_persisted_pomodoro().await.unwrap().is_none());

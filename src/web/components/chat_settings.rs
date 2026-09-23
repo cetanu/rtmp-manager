@@ -171,6 +171,20 @@ pub async fn chat_settings(cx: &Cx) -> Result<impl View> {
                                 }
                             )
                         )
+                        form_field(
+                            control_id: "poll_results_seconds",
+                            label_text: "Poll results display (seconds, 1–300)",
+                            input(
+                                attrs: attributes! {
+                                    id="poll_results_seconds"
+                                    name="chat[poll_results_seconds]"
+                                    type="number"
+                                    min="1"
+                                    max="300"
+                                    value=(chat.poll_results_seconds.to_string())
+                                }
+                            )
+                        )
                     </div>
                 </div>
             )
