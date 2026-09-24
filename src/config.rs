@@ -857,7 +857,6 @@ impl ConfigStore {
         } else {
             config_path.to_path_buf()
         };
-        let database_exists = database_path.exists();
         let running_under_topcoat_dev = std::env::var_os("TOPCOAT_DEV_URL").is_some();
         if is_json && !config_path.exists() && !database_path.exists() && !running_under_topcoat_dev
         {
@@ -872,16 +871,13 @@ impl ConfigStore {
         // both openers must agree on the schema (see `crate::db::connect`).
         let database = crate::db::connect(&database_path).await?;
         #[cfg(unix)]
-        if !database_exists {
+        {
             use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&database_path, fs::Permissions::from_mode(0o600)).with_context(
-                || {
-                    format!(
-                        "Failed to secure config database '{}'",
-                        database_path.display()
-                    )
-                },
-            )?;
+            // Always enforce 0600, not just on creation: pre-existing files
+            // may have been created with a permissive umask.
+            if let Err(error) = fs::set_permissions(&database_path, fs::Permissions::from_mode(0o600)) {
+                tracing::warn!(%error, path = %database_path.display(), "Failed to secure config database permissions");
+            }
         }
         // Embedded migrations run on every open so redeploys against an
         // existing SQLite file pick up schema changes instead of crashing.
