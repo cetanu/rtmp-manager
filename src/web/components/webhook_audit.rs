@@ -88,9 +88,9 @@ async fn webhook_audit_table(cx: &Cx, revision: f64) -> Result<impl View> {
                                     secret_input(
                                         control_id: format!("webhook-payload-{}", entry.id),
                                         attrs: attributes! {
-                                            value=(entry.payload)
+                                            value=(entry.payload.chars().take(2048).collect::<String>())
                                             readonly="readonly"
-                                            aria-label="Webhook payload"
+                                            aria-label="Webhook payload (truncated to 2K)"
                                             class="font-mono text-xs"
                                         }
                                     )
