@@ -9,6 +9,7 @@ use tokio::sync::watch;
 pub struct Metrics {
     ingest_bytes: AtomicU64,
     ingest_bps: AtomicU64,
+    egress_bytes: AtomicU64,
     chat_messages_received: AtomicU64,
     last_sample_ingest_bytes: AtomicU64,
     last_sample_timestamp_ms: AtomicU64,
@@ -23,6 +24,8 @@ const HISTORY_WINDOW: Duration = Duration::from_secs(300);
 #[derive(Default)]
 pub struct TargetBitrate {
     outbound_bps: AtomicU64,
+    outbound_bytes: AtomicU64,
+    last_total_size: AtomicU64,
 }
 
 #[derive(Clone, Serialize)]
@@ -35,6 +38,8 @@ pub struct TargetBitrateSample {
 pub struct MetricsSample {
     pub timestamp_ms: u128,
     pub ingest_bps: u64,
+    pub ingest_bytes: u64,
+    pub egress_bytes: u64,
     pub chat_messages_received: u64,
     pub targets: Vec<TargetBitrateSample>,
 }
@@ -51,6 +56,7 @@ impl Metrics {
         Self {
             ingest_bytes: AtomicU64::new(0),
             ingest_bps: AtomicU64::new(0),
+            egress_bytes: AtomicU64::new(0),
             chat_messages_received: AtomicU64::new(0),
             last_sample_ingest_bytes: AtomicU64::new(0),
             last_sample_timestamp_ms: AtomicU64::new(0),
@@ -108,6 +114,8 @@ impl Metrics {
         let sample = MetricsSample {
             timestamp_ms,
             ingest_bps,
+            ingest_bytes: bytes,
+            egress_bytes: self.current_egress_bytes(),
             chat_messages_received: self.current_chat_messages_received(),
             targets: self.current_target_bitrates(),
         };
@@ -141,6 +149,18 @@ impl Metrics {
         self.ingest_bps.load(Ordering::Relaxed)
     }
 
+    pub fn current_ingest_bytes(&self) -> u64 {
+        self.ingest_bytes.load(Ordering::Relaxed)
+    }
+
+    pub fn add_egress_bytes(&self, bytes: u64) {
+        self.egress_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn current_egress_bytes(&self) -> u64 {
+        self.egress_bytes.load(Ordering::Relaxed)
+    }
+
     pub fn add_chat_messages_received(&self, count: u64) {
         self.chat_messages_received
             .fetch_add(count, Ordering::Relaxed);
@@ -171,6 +191,24 @@ impl TargetBitrate {
     pub fn update_from_ffmpeg(&self, bits_per_second: u64) {
         self.outbound_bps.store(bits_per_second, Ordering::Relaxed);
     }
+
+    /// Records an absolute `total_size` value reported by FFmpeg and returns
+    /// the delta to add to the global egress counter.
+    ///
+    /// FFmpeg reports a per-process cumulative byte count, so a restart resets
+    /// it to zero. When the reported value goes backwards we treat it as a
+    /// fresh process and count the full value as new bytes.
+    pub fn update_total_bytes(&self, total_size: u64) -> u64 {
+        let previous = self.last_total_size.swap(total_size, Ordering::Relaxed);
+        let delta = if total_size >= previous {
+            total_size - previous
+        } else {
+            total_size
+        };
+        self.outbound_bytes
+            .fetch_add(delta, Ordering::Relaxed);
+        delta
+    }
 }
 
 #[cfg(test)]
@@ -198,5 +236,21 @@ mod tests {
     #[test]
     fn ingest_sample_uses_actual_elapsed_time() {
         assert_eq!(calculate_ingest_bps(250, 125, 1_000, 2_500), 666);
+    }
+
+    #[test]
+    fn egress_totals_accumulate_and_survive_ffmpeg_restarts() {
+        let metrics = Metrics::default();
+        let target = metrics.register_target("twitch".to_string());
+        metrics.add_ingest_bytes(1_000);
+        metrics.add_egress_bytes(target.update_total_bytes(500));
+        metrics.add_egress_bytes(target.update_total_bytes(800));
+        // Restart resets FFmpeg's counter; the new bytes still count.
+        metrics.add_egress_bytes(target.update_total_bytes(100));
+        assert_eq!(metrics.current_egress_bytes(), 900);
+        metrics.record_sample();
+        let sample = metrics.history().pop().expect("one sample");
+        assert_eq!(sample.ingest_bytes, 1_000);
+        assert_eq!(sample.egress_bytes, 900);
     }
 }

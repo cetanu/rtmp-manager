@@ -251,6 +251,10 @@ pub fn run_direct_test(
                     String::new()
                 };
 
+                if total_bytes > 0 {
+                    metrics.add_egress_bytes(total_bytes);
+                }
+
                 match exit_status {
                     _ if timed_out => {}
                     Ok(status) if status.success() => {
@@ -368,6 +372,7 @@ async fn supervise_relay(
 
         let stdout_task = child.stdout.take().map(|stdout| {
             let bitrate = Arc::clone(&bitrate);
+            let metrics = Arc::clone(&metrics);
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
@@ -375,6 +380,13 @@ async fn supervise_relay(
                         && let Some(bps) = parse_ffmpeg_bitrate(value)
                     {
                         bitrate.update_from_ffmpeg(bps);
+                    } else if let Some(value) = line.strip_prefix("total_size=")
+                        && let Some(total) = parse_ffmpeg_total_size(value)
+                    {
+                        let delta = bitrate.update_total_bytes(total);
+                        if delta > 0 {
+                            metrics.add_egress_bytes(delta);
+                        }
                     }
                 }
             })

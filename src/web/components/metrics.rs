@@ -17,10 +17,25 @@ fn format_bitrate(bits_per_second: u64) -> String {
     }
 }
 
+fn format_bytes(bytes: u64) -> String {
+    if bytes >= 1_000_000_000 {
+        format!("{:.2} GB", bytes as f64 / 1_000_000_000.0)
+    } else if bytes >= 1_000_000 {
+        format!("{:.2} MB", bytes as f64 / 1_000_000.0)
+    } else if bytes >= 1_000 {
+        format!("{:.1} KB", bytes as f64 / 1_000.0)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 #[component]
 pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
     let app: &AppHandle = app_context(cx);
     let ingest_bps = app.metrics.current_ingest_bps();
+    let ingest_bytes = app.metrics.current_ingest_bytes();
+    let egress_bytes = app.metrics.current_egress_bytes();
+    let total_bytes = ingest_bytes.saturating_add(egress_bytes);
     let chat_messages_received = app.metrics.current_chat_messages_received();
     let current = app
         .metrics
@@ -77,6 +92,68 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
                             class="h-28 w-full"
                             height="112"
                             aria-label="Streamer ingest bitrate history"
+                        ></canvas>
+                    )
+                )
+                card(
+                    attrs: attributes! {
+                        class="!gap-3 !rounded-lg !py-3"
+                        data-transfer-metric="true"
+                    },
+                    card_header(
+                        attrs: attributes! { class="!px-3" },
+                        <div class="flex items-center justify-between gap-3">
+                            card_title("Data transferred")
+                            <span class="text-xs text-muted-foreground">"In / Out"</span>
+                        </div>
+                    )
+                    card_content(
+                        attrs: attributes! { class="!px-3" },
+                        <div class="mb-2 grid grid-cols-3 gap-2">
+                            <div>
+                                <div
+                                    class="text-xs uppercase tracking-wide text-muted-foreground"
+                                >
+                                    "In"
+                                </div>
+                                <div
+                                    class="text-base font-semibold"
+                                    data-transfer-in="true"
+                                >
+                                    (format_bytes(ingest_bytes))
+                                </div>
+                            </div>
+                            <div>
+                                <div
+                                    class="text-xs uppercase tracking-wide text-muted-foreground"
+                                >
+                                    "Out"
+                                </div>
+                                <div
+                                    class="text-base font-semibold"
+                                    data-transfer-out="true"
+                                >
+                                    (format_bytes(egress_bytes))
+                                </div>
+                            </div>
+                            <div>
+                                <div
+                                    class="text-xs uppercase tracking-wide text-muted-foreground"
+                                >
+                                    "Total"
+                                </div>
+                                <div
+                                    class="text-base font-semibold"
+                                    data-transfer-total="true"
+                                >
+                                    (format_bytes(total_bytes))
+                                </div>
+                            </div>
+                        </div>
+                        <canvas
+                            class="h-28 w-full"
+                            height="112"
+                            aria-label="Data transferred history (in, out, total)"
                         ></canvas>
                     )
                 )
