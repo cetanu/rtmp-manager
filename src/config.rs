@@ -1104,9 +1104,17 @@ fn restore_redacted_secrets(current: &AppConfig, mut imported: AppConfig) -> App
     if imported.chat.kick_client_secret.is_none() {
         imported.chat.kick_client_secret = current.chat.kick_client_secret.clone();
     }
-    for (imported_target, current_target) in imported.targets.iter_mut().zip(&current.targets) {
+    for imported_target in imported.targets.iter_mut() {
         if imported_target.stream_key.is_empty() {
-            imported_target.stream_key = current_target.stream_key.clone();
+            // Match by stable identity, not position: reordered/added/removed
+            // targets must never receive another target's key.
+            if let Some(current_target) = current
+                .targets
+                .iter()
+                .find(|current| current.name == imported_target.name && current.url == imported_target.url)
+            {
+                imported_target.stream_key = current_target.stream_key.clone();
+            }
         }
     }
     imported
