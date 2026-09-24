@@ -31,11 +31,11 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
     let targets = app.config.get().targets.clone();
 
     Ok(view! {
-        <section aria-labelledby="target-throughput-heading">
+        <section aria-labelledby="ingest-heading">
             <div class="mb-2 flex items-end justify-between gap-4">
                 <div>
-                    <h2 id="target-throughput-heading" class="text-base font-semibold">
-                        "Throughput"
+                    <h2 id="ingest-heading" class="text-base font-semibold">
+                        "Stream ingest"
                     </h2>
                 </div>
                 <span data-metrics-status="true" class="text-xs text-muted-foreground">
@@ -80,6 +80,20 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
                         ></canvas>
                     )
                 )
+            </div>
+        </section>
+        <section aria-labelledby="targets-heading" class="mt-6">
+            <div class="mb-2 flex items-end justify-between gap-4">
+                <div>
+                    <h2 id="targets-heading" class="text-base font-semibold">
+                        "Targets"
+                    </h2>
+                </div>
+            </div>
+            <div
+                class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                data-metrics-charts="true"
+            >
                 for target in &targets {
                     let sample = current.get(&target.name);
                     let outbound = sample.map_or(0, |value| value.outbound_bps);
