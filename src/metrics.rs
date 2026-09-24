@@ -100,15 +100,18 @@ impl Metrics {
             .as_millis();
         let bytes = self.ingest_bytes.load(Ordering::Relaxed);
         let previous = self.last_sample_ingest_bytes.swap(bytes, Ordering::Relaxed);
+        let now_ms: u64 = timestamp_ms.try_into().unwrap_or_else(|_| {
+            crate::util::now_unix_ms()
+        });
         let previous_timestamp_ms = self.last_sample_timestamp_ms.swap(
-            timestamp_ms.try_into().unwrap_or(u64::MAX),
+            now_ms,
             Ordering::Relaxed,
         );
         let ingest_bps = calculate_ingest_bps(
             bytes,
             previous,
             previous_timestamp_ms,
-            timestamp_ms.try_into().unwrap_or(u64::MAX),
+            now_ms,
         );
         self.ingest_bps.store(ingest_bps, Ordering::Relaxed);
         let sample = MetricsSample {
