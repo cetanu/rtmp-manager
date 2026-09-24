@@ -20,7 +20,8 @@ impl Display for StreamState {
                 StreamState::Offline => "Offline",
                 StreamState::Preparing => "Preparing...",
                 StreamState::PreviewFailed => "Preview unavailable",
-                _ => "",
+                StreamState::Live => "Live",
+                StreamState::PreviewReady => "Ready",
             }
         )
     }

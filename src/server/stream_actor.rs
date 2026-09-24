@@ -23,6 +23,7 @@ struct StagedStream {
     preview_process: Child,
     preview_failed: bool,
     published: bool,
+    consecutive_restart_failures: u8,
 }
 
 pub enum StreamCommand {
@@ -52,6 +53,7 @@ pub struct StreamActor {
     http_client: Client,
     config_rx: watch::Receiver<Arc<AppConfig>>,
     status_tx: watch::Sender<StreamStatus>,
+    preview_playlist_ready: bool,
 }
 
 impl StreamActor {
@@ -90,9 +92,8 @@ impl StreamActor {
                             }
                         }
                     }
-                    status_check.as_mut().reset(
-                        tokio::time::Instant::now() + self.preview_health_check_interval(),
-                    );
+                    // Don't reset the health timer here: a flooded command
+                    // channel must not starve preview health checks.
                 }
             }
         }
@@ -123,22 +124,46 @@ impl StreamActor {
             else {
                 return;
             };
+            let failures = self.staged.as_ref().map(|s| s.consecutive_restart_failures).unwrap_or(0);
+            // Circuit-breaker: don't spawn-bomb ffmpeg forever on permanent errors.
+            if failures >= 5 {
+                if let Some(stream) = self.staged.as_mut() {
+                    stream.preview_failed = true;
+                }
+                tracing::error!("HLS preview restart failed 5 times; giving up until next stage");
+                self.update_status();
+                return;
+            }
             if let Some(stream) = self.staged.as_mut() {
                 stream.preview_failed = true;
             }
             self.clear_preview_files().await;
+            self.preview_playlist_ready = false;
+            // Reap the exited child before spawning a replacement.
+            if let Some(stream) = self.staged.as_mut() {
+                let _ = tokio::time::timeout(Duration::from_secs(2), stream.preview_process.wait()).await;
+            }
             match spawn_preview_process(self.listen_port, &stream_key, &self.preview_dir) {
                 Ok(preview_process) => {
                     if let Some(stream) = self.staged.as_mut() {
                         stream.preview_process = preview_process;
                         stream.preview_failed = false;
+                        stream.consecutive_restart_failures = 0;
                     }
                     tracing::info!("Restarted HLS preview process");
                 }
                 Err(error) => {
+                    if let Some(stream) = self.staged.as_mut() {
+                        stream.consecutive_restart_failures = failures.saturating_add(1);
+                    }
                     tracing::error!(%error, "Failed to restart HLS preview process");
                 }
             }
+        } else if self.staged.is_some() {
+            // Refresh cached playlist existence without blocking `compute_status`.
+            self.preview_playlist_ready = tokio::fs::try_exists(self.preview_dir.join("index.m3u8"))
+                .await
+                .unwrap_or(false);
         }
         self.update_status();
     }
@@ -169,7 +194,7 @@ impl StreamActor {
         let state = match self.staged.as_ref() {
             None => StreamState::Offline,
             Some(stream) if stream.preview_failed => StreamState::PreviewFailed,
-            Some(_) if !self.preview_dir.join("index.m3u8").is_file() => StreamState::Preparing,
+            Some(_) if !self.preview_playlist_ready => StreamState::Preparing,
             Some(stream) if stream.published => StreamState::Live,
             Some(_) => StreamState::PreviewReady,
         };
@@ -197,7 +222,12 @@ impl StreamActor {
             preview_process,
             preview_failed: false,
             published: false,
+            consecutive_restart_failures: 0,
         });
+        // Best-effort initial playlist check; health loop refreshes it.
+        self.preview_playlist_ready = tokio::fs::try_exists(self.preview_dir.join("index.m3u8"))
+            .await
+            .unwrap_or(false);
 
         self.update_status();
         tracing::info!("Stream staged with local HLS preview");
@@ -242,8 +272,13 @@ impl StreamActor {
         self.active_relays.insert(stream_key, relays);
         self.update_status();
 
+        // Bound notification dispatch so a slow webhook can't leak a detached task
+        // that fires `went-live` after the stream stopped.
         tokio::spawn(async move {
-            dispatcher.dispatch(&notification_targets).await;
+            match tokio::time::timeout(Duration::from_secs(10), dispatcher.dispatch(&notification_targets)).await {
+                Ok(()) => {}
+                Err(_) => tracing::warn!("Going-live notification dispatch timed out"),
+            }
         });
 
         tracing::info!("Staged stream published to enabled targets");
@@ -282,10 +317,12 @@ impl StreamActor {
     async fn end_current_stream(&mut self) {
         if let Some(mut stream) = self.staged.take() {
             let _ = stream.preview_process.kill().await;
+            let _ = tokio::time::timeout(Duration::from_secs(5), stream.preview_process.wait()).await;
             if let Some(relays) = self.active_relays.remove(&stream.stream_key) {
                 cancel_relays(relays).await;
             }
         }
+        self.preview_playlist_ready = false;
         if let Err(error) = tokio::fs::remove_dir_all(&self.preview_dir).await
             && error.kind() != std::io::ErrorKind::NotFound
         {
@@ -297,6 +334,7 @@ impl StreamActor {
     async fn cleanup(&mut self) {
         if let Some(mut stream) = self.staged.take() {
             let _ = stream.preview_process.kill().await;
+            let _ = tokio::time::timeout(Duration::from_secs(5), stream.preview_process.wait()).await;
         }
         for (_, relays) in self.active_relays.drain() {
             cancel_relays(relays).await;
@@ -353,11 +391,20 @@ fn spawn_preview_process(listen_port: u16, stream_key: &str, preview_dir: &Path)
         let stream_key = stream_key.to_owned();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                tracing::warn!(
-                    message = %redact_secrets(&line, std::slice::from_ref(&stream_key)),
-                    "HLS preview FFmpeg"
-                );
+            loop {
+                match lines.next_line().await {
+                    Ok(Some(line)) => {
+                        tracing::warn!(
+                            message = %redact_secrets(&line, std::slice::from_ref(&stream_key)),
+                            "HLS preview FFmpeg"
+                        );
+                    }
+                    Ok(None) => break,
+                    Err(error) => {
+                        tracing::warn!(%error, "HLS preview FFmpeg stderr read error");
+                        break;
+                    }
+                }
             }
         });
     }
@@ -382,7 +429,19 @@ impl StreamHandle {
         http_client: Client,
         config_rx: watch::Receiver<Arc<AppConfig>>,
     ) -> Result<Self> {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        // `SystemTime` can fail on clock skew; fall back to a pid + random suffix
+        // instead of failing server startup.
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_else(|_| {
+                use std::collections::hash_map::DefaultHasher;
+                use std::hash::{Hash, Hasher};
+                let mut hasher = DefaultHasher::new();
+                std::process::id().hash(&mut hasher);
+                std::thread::current().id().hash(&mut hasher);
+                hasher.finish() as u128
+            });
         let preview_dir =
             std::env::temp_dir().join(format!("rtmp-manager-hls-{}-{unique}", std::process::id()));
         create_preview_dir(&preview_dir).await?;
@@ -410,9 +469,13 @@ impl StreamHandle {
             http_client,
             config_rx,
             status_tx,
+            preview_playlist_ready: false,
         };
 
-        tokio::spawn(actor.run(receiver));
+        tokio::spawn(async move {
+            actor.run(receiver).await;
+            tracing::warn!("Stream actor exited");
+        });
 
         Ok(handle)
     }
@@ -426,7 +489,10 @@ impl StreamHandle {
             })
             .await
             .map_err(|_| anyhow::anyhow!("Stream actor stopped"))?;
-        rx.await.context("Stream actor dropped stage response")?
+        tokio::time::timeout(Duration::from_secs(10), rx)
+            .await
+            .context("Stream actor stage timed out")?
+            .context("Stream actor dropped stage response")?
     }
 
     pub async fn publish_staged_stream(&self) -> Result<()> {
@@ -435,7 +501,10 @@ impl StreamHandle {
             .send(StreamCommand::PublishStagedStream { respond_to: tx })
             .await
             .map_err(|_| anyhow::anyhow!("Stream actor stopped"))?;
-        rx.await.context("Stream actor dropped publish response")?
+        tokio::time::timeout(Duration::from_secs(10), rx)
+            .await
+            .context("Stream actor publish timed out")?
+            .context("Stream actor dropped publish response")?
     }
 
     pub async fn stop_publishing(&self) -> Result<()> {
@@ -444,17 +513,23 @@ impl StreamHandle {
             .send(StreamCommand::StopPublishing { respond_to: tx })
             .await
             .map_err(|_| anyhow::anyhow!("Stream actor stopped"))?;
-        rx.await.context("Stream actor dropped stop response")?
+        tokio::time::timeout(Duration::from_secs(10), rx)
+            .await
+            .context("Stream actor stop timed out")?
+            .context("Stream actor dropped stop response")?
     }
 
     pub async fn end_stream(&self, stream_key: &str) {
-        let _ = self
-            .sender
-            .send(StreamCommand::EndStream {
+        // Best-effort with timeout: never block RTMP disconnect on a full actor queue.
+        let _ = tokio::time::timeout(
+            Duration::from_secs(5),
+            self.sender.send(StreamCommand::EndStream {
                 stream_key: stream_key.to_string(),
                 respond_to: None,
-            })
-            .await;
+            }),
+        )
+        .await
+        .map_err(|_| tracing::warn!("Timed out queueing EndStream for actor"));
     }
 
     pub fn run_test_stream(&self, duration_secs: u64, targets: Vec<TargetConfig>) -> Result<()> {
