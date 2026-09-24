@@ -39,9 +39,9 @@ pub async fn web_auth(cx: &Cx) -> Result<impl View> {
                             attrs: attributes! {
                                 name="web_auth[password]"
                                 autocomplete="new-password"
-                                value=(auth.password)
+                                value=""
                                 minlength="12"
-                                placeholder="At least 12 characters"
+                                placeholder=(if auth.password.is_empty() { "At least 12 characters".to_string() } else { "Configured — leave blank to keep".to_string() })
                             }
                         )
                         field_description(
@@ -56,9 +56,9 @@ pub async fn web_auth(cx: &Cx) -> Result<impl View> {
                             attrs: attributes! {
                                 name="web_auth[overlay_token]"
                                 autocomplete="new-password"
-                                value=(auth.overlay_token)
+                                value=""
                                 minlength="16"
-                                placeholder="At least 16 characters"
+                                placeholder=(if auth.overlay_token.is_empty() { "At least 16 characters".to_string() } else { "Configured — leave blank to keep".to_string() })
                             }
                         )
                         field_description(

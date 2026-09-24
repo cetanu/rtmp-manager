@@ -73,6 +73,7 @@ pub async fn secret_input(
 }
 
 /// A password field whose configured value can be revealed, edited, or cleared.
+/// The existing secret is never rendered into the DOM: blank preserves it.
 #[component]
 pub async fn clearable_secret_field(
     #[into] control_id: String,
@@ -87,6 +88,11 @@ pub async fn clearable_secret_field(
         .map(|(group, field)| format!("{group}[clear_{field}]"))
         .unwrap_or_else(|| format!("clear_{name}"));
     let configured = !value.is_empty();
+    let placeholder = if configured {
+        "Configured — leave blank to keep".to_string()
+    } else {
+        empty_placeholder
+    };
     Ok(view! {
         form_field(
             control_id: control_id.clone(),
@@ -95,8 +101,9 @@ pub async fn clearable_secret_field(
                 control_id: control_id,
                 attrs: attributes! {
                     name=(name)
-                    value=(value)
-                    placeholder=(empty_placeholder)
+                    value=""
+                    autocomplete="new-password"
+                    placeholder=(placeholder)
                 }
             )
             <label class="flex items-center gap-2 text-xs text-muted-foreground">

@@ -116,8 +116,9 @@ pub async fn target_item(index: usize, target: TargetConfig) -> Result<impl View
                             control_id: key_id,
                             attrs: attributes! {
                                 name=(format!("targets[{index}][stream_key]"))
-                                value=(target.stream_key.clone())
-                                placeholder="Optional when already included in the RTMP URL"
+                                value=""
+                                autocomplete="new-password"
+                                placeholder=(if target.stream_key.is_empty() { "Optional when already included in the RTMP URL".to_string() } else { "Configured — leave blank to keep".to_string() })
                             }
                         )
                     )
