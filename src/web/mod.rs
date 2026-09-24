@@ -534,7 +534,6 @@ async fn server_events(
         .json_data(&*status_rx.borrow())?;
     let initial_events = futures_util::stream::iter([
         Ok(initial_status),
-        Ok(SseEvent::new().event("chat_changed").data("changed")),
         SseEvent::new()
             .event("metrics_history")
             .json_data(&app.metrics.history()),
