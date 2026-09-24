@@ -124,7 +124,11 @@ impl StreamActor {
             else {
                 return;
             };
-            let failures = self.staged.as_ref().map(|s| s.consecutive_restart_failures).unwrap_or(0);
+            let failures = self
+                .staged
+                .as_ref()
+                .map(|s| s.consecutive_restart_failures)
+                .unwrap_or(0);
             // Circuit-breaker: don't spawn-bomb ffmpeg forever on permanent errors.
             if failures >= 5 {
                 if let Some(stream) = self.staged.as_mut() {
@@ -141,7 +145,8 @@ impl StreamActor {
             self.preview_playlist_ready = false;
             // Reap the exited child before spawning a replacement.
             if let Some(stream) = self.staged.as_mut() {
-                let _ = tokio::time::timeout(Duration::from_secs(2), stream.preview_process.wait()).await;
+                let _ = tokio::time::timeout(Duration::from_secs(2), stream.preview_process.wait())
+                    .await;
             }
             match spawn_preview_process(self.listen_port, &stream_key, &self.preview_dir) {
                 Ok(preview_process) => {
@@ -161,9 +166,10 @@ impl StreamActor {
             }
         } else if self.staged.is_some() {
             // Refresh cached playlist existence without blocking `compute_status`.
-            self.preview_playlist_ready = tokio::fs::try_exists(self.preview_dir.join("index.m3u8"))
-                .await
-                .unwrap_or(false);
+            self.preview_playlist_ready =
+                tokio::fs::try_exists(self.preview_dir.join("index.m3u8"))
+                    .await
+                    .unwrap_or(false);
         }
         self.update_status();
     }
@@ -275,7 +281,12 @@ impl StreamActor {
         // Bound notification dispatch so a slow webhook can't leak a detached task
         // that fires `went-live` after the stream stopped.
         tokio::spawn(async move {
-            match tokio::time::timeout(Duration::from_secs(10), dispatcher.dispatch(&notification_targets)).await {
+            match tokio::time::timeout(
+                Duration::from_secs(10),
+                dispatcher.dispatch(&notification_targets),
+            )
+            .await
+            {
                 Ok(()) => {}
                 Err(_) => tracing::warn!("Going-live notification dispatch timed out"),
             }
@@ -317,7 +328,8 @@ impl StreamActor {
     async fn end_current_stream(&mut self) {
         if let Some(mut stream) = self.staged.take() {
             let _ = stream.preview_process.kill().await;
-            let _ = tokio::time::timeout(Duration::from_secs(5), stream.preview_process.wait()).await;
+            let _ =
+                tokio::time::timeout(Duration::from_secs(5), stream.preview_process.wait()).await;
             if let Some(relays) = self.active_relays.remove(&stream.stream_key) {
                 cancel_relays(relays).await;
             }
@@ -334,7 +346,8 @@ impl StreamActor {
     async fn cleanup(&mut self) {
         if let Some(mut stream) = self.staged.take() {
             let _ = stream.preview_process.kill().await;
-            let _ = tokio::time::timeout(Duration::from_secs(5), stream.preview_process.wait()).await;
+            let _ =
+                tokio::time::timeout(Duration::from_secs(5), stream.preview_process.wait()).await;
         }
         for (_, relays) in self.active_relays.drain() {
             cancel_relays(relays).await;

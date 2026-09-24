@@ -43,9 +43,10 @@ fn has_overlay_access(cx: &Cx, app: &AppHandle) -> bool {
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
-        && constant_time_eq(expected, bearer.trim().as_bytes()) {
-            return true;
-        }
+        && constant_time_eq(expected, bearer.trim().as_bytes())
+    {
+        return true;
+    }
 
     // Legacy: ?key=... for OBS Browser Sources that can't set headers.
     // Keep working, but prefer Bearer; never log the query value.

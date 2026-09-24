@@ -40,7 +40,9 @@ pub async fn cancel_relays(relays: Vec<RelayProcess>) {
                 tracing::warn!(%join_error, "Relay task ended with join error during cancel");
             }
             Err(_) => {
-                tracing::warn!("Relay task did not stop within 5s of cancel; leaving it to abort on drop");
+                tracing::warn!(
+                    "Relay task did not stop within 5s of cancel; leaving it to abort on drop"
+                );
             }
         }
     }
@@ -487,13 +489,15 @@ async fn supervise_relay(
         };
         bitrate.update_from_ffmpeg(0);
         if let Some(task) = stdout_task
-            && let Err(join_error) = task.await {
-                tracing::warn!(name = %target.name, %join_error, "Relay stdout drain task failed");
-            }
+            && let Err(join_error) = task.await
+        {
+            tracing::warn!(name = %target.name, %join_error, "Relay stdout drain task failed");
+        }
         if let Some(task) = stderr_task
-            && let Err(join_error) = task.await {
-                tracing::warn!(name = %target.name, %join_error, "Relay stderr drain task failed");
-            }
+            && let Err(join_error) = task.await
+        {
+            tracing::warn!(name = %target.name, %join_error, "Relay stderr drain task failed");
+        }
         // Release the ffmpeg slot before the reconnect backoff sleep.
         drop(ffmpeg_slot);
 

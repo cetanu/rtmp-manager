@@ -50,20 +50,38 @@ pub async fn stream_preview_player(#[default] child: Child<'_>) -> Result<impl V
             <span class="hud-corner hud-corner-tr"></span>
             <span class="hud-corner hud-corner-bl"></span>
             <span class="hud-corner hud-corner-br"></span>
-            <div class="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between gap-2 px-4 pt-3" aria-hidden="true">
-                <span class="flex items-center gap-1.5 rounded-[3px] border border-white/10 bg-black/60 px-2 py-1 font-mono text-[10px] tracking-[0.18em] text-white/80 uppercase backdrop-blur">
-                    <span data-preview-rec-dot="true" class="hud-dot bg-white/30 text-white/30"></span>
+            <div
+                class="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between gap-2 px-4 pt-3"
+                aria-hidden="true"
+            >
+                <span
+                    class="flex items-center gap-1.5 rounded-[3px] border border-white/10 bg-black/60 px-2 py-1 font-mono text-[10px] tracking-[0.18em] text-white/80 uppercase backdrop-blur"
+                >
+                    <span
+                        data-preview-rec-dot="true"
+                        class="hud-dot bg-white/30 text-white/30"
+                    ></span>
                     <span data-preview-rec-label="true">"STBY"</span>
                 </span>
-                <span class="rounded-[3px] border border-white/10 bg-black/60 px-2 py-1 font-mono text-[10px] tracking-[0.18em] text-white/80 uppercase backdrop-blur">
+                <span
+                    class="rounded-[3px] border border-white/10 bg-black/60 px-2 py-1 font-mono text-[10px] tracking-[0.18em] text-white/80 uppercase backdrop-blur"
+                >
                     "PROGRAM // PREVIEW"
                 </span>
             </div>
-            <div class="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 px-4 pb-3" aria-hidden="true">
-                <span data-preview-bitrate="true" class="rounded-[3px] border border-white/10 bg-black/60 px-2 py-1 font-mono text-[10px] tracking-[0.14em] text-white/70 tabular-nums backdrop-blur">
+            <div
+                class="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 px-4 pb-3"
+                aria-hidden="true"
+            >
+                <span
+                    data-preview-bitrate="true"
+                    class="rounded-[3px] border border-white/10 bg-black/60 px-2 py-1 font-mono text-[10px] tracking-[0.14em] text-white/70 tabular-nums backdrop-blur"
+                >
                     "-- Mbps"
                 </span>
-                <span class="rounded-[3px] border border-white/10 bg-black/60 px-2 py-1 font-mono text-[10px] tracking-[0.14em] text-white/70 tabular-nums backdrop-blur">
+                <span
+                    class="rounded-[3px] border border-white/10 bg-black/60 px-2 py-1 font-mono text-[10px] tracking-[0.14em] text-white/70 tabular-nums backdrop-blur"
+                >
                     "SAFE // 16:9"
                 </span>
             </div>
@@ -86,8 +104,16 @@ pub async fn stream_preview_placeholder(cx: &Cx, revision: f64) -> Result<impl V
         <div
             class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center"
         >
-            <span class="font-mono text-[11px] tracking-[0.24em] text-white/50 uppercase">(message)</span>
-            <span class="font-mono text-[10px] tracking-[0.18em] text-white/25 uppercase">"awaiting ingest // rtmp"</span>
+            <span
+                class="font-mono text-[11px] tracking-[0.24em] text-white/50 uppercase"
+            >
+                (message)
+            </span>
+            <span
+                class="font-mono text-[10px] tracking-[0.18em] text-white/25 uppercase"
+            >
+                "awaiting ingest // rtmp"
+            </span>
         </div>
     })
 }

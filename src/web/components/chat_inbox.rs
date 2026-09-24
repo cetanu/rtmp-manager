@@ -209,7 +209,9 @@ async fn poll_setup(signals: PollSetupSignals) -> Result<impl View> {
 
     Ok(view! {
         card_content(
-            attrs: attributes! { class="!px-6 flex min-h-0 flex-1 flex-col justify-center" },
+            attrs: attributes! {
+                class="!px-6 flex min-h-0 flex-1 flex-col justify-center"
+            },
             <div class="mx-auto flex w-full max-w-2xl flex-col gap-6">
                 <div>
                     <h2 class="text-lg font-semibold">"Start a poll"</h2>
@@ -238,10 +240,7 @@ async fn poll_setup(signals: PollSetupSignals) -> Result<impl View> {
                         @input=$(move |event: Event| options.set(event.target.value))
                     ></textarea>
                 </label>
-                <p
-                    :hidden=$(error.get().is_empty())
-                    class="text-sm text-destructive"
-                >
+                <p :hidden=$(error.get().is_empty()) class="text-sm text-destructive">
                     $(error.get())
                 </p>
                 <div class="flex justify-center gap-3">
@@ -354,13 +353,21 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                 chat_inbox_content(revision: $(revision.get()))
             }
             card_footer(
-                attrs: attributes! { class="!px-3 !pt-2 !pb-2 justify-between flex-wrap gap-y-2" },
+                attrs: attributes! {
+                    class="!px-3 !pt-2 !pb-2 justify-between flex-wrap gap-y-2"
+                },
                 <div class="flex items-center gap-2">
                     <button
                         id="chat-pomodoro-focus"
                         type="button"
                         class=(outline_button.clone())
-                        :hidden=$(if pomo_active.get() { true } else if poll_form_open.get() { true } else { false })
+                        :hidden=$(if pomo_active.get() {
+                            true
+                        } else if poll_form_open.get() {
+                            true
+                        } else {
+                            false
+                        })
                         :disabled=$(pomo_pending.get())
                         @click=$(async |_event| {
                             pomo_pending.set(true);
@@ -396,7 +403,13 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                         id="chat-poll-start"
                         type="button"
                         class=(outline_button.clone())
-                        :hidden=$(if poll_visible.get() { true } else if poll_form_open.get() { true } else { false })
+                        :hidden=$(if poll_visible.get() {
+                            true
+                        } else if poll_form_open.get() {
+                            true
+                        } else {
+                            false
+                        })
                         @click=$(|_event| poll_form_open.set(!poll_form_open.get()))
                     >
                         "Poll"
@@ -422,7 +435,11 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                         id="chat-poll-clear"
                         type="button"
                         class=(outline_button.clone())
-                        :hidden=$(if poll_visible.get() { if poll_active.get() { true } else { false } } else { true })
+                        :hidden=$(if poll_visible.get() {
+                            if poll_active.get() { true } else { false }
+                        } else {
+                            true
+                        })
                         :disabled=$(poll_pending.get())
                         @click=$(async |_event| {
                             poll_pending.set(true);
@@ -621,32 +638,44 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
                     id="chat-poll-status"
                     class="flex min-h-0 flex-1 flex-col justify-center gap-4 px-2"
                 >
-                    <div class="text-center text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    <div
+                        class="text-center text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground"
+                    >
                         (if poll.is_active() { "Poll" } else { "Poll results" })
                     </div>
-                    <div class="text-center text-xl font-semibold">(poll.question.clone())</div>
+                    <div class="text-center text-xl font-semibold">
+                        (poll.question.clone())
+                    </div>
                     <div class="flex flex-col gap-2">
                         for option in poll.options.iter() {
-                            <div class=(if poll.stopped_at_unix_ms.is_some() && poll_max_votes > 0 && option.votes == poll_max_votes {
-                                "relative flex items-center justify-between gap-3 overflow-hidden rounded-md border border-green-500 px-3 py-2"
-                            } else {
-                                "relative flex items-center justify-between gap-3 overflow-hidden rounded-md border border-border px-3 py-2"
-                            })>
+                            <div
+                                class=(if poll.stopped_at_unix_ms.is_some()
+                                    && poll_max_votes > 0
+                                    && option.votes == poll_max_votes {
+                                    "relative flex items-center justify-between gap-3 overflow-hidden rounded-md border border-green-500 px-3 py-2"
+                                } else {
+                                    "relative flex items-center justify-between gap-3 overflow-hidden rounded-md border border-border px-3 py-2"
+                                })
+                            >
                                 if poll.stopped_at_unix_ms.is_some() {
                                     <div
                                         class="pointer-events-none absolute inset-y-0 left-0 bg-muted"
                                         style=(format!(
                                             "width: {}%",
-                                            poll_percent(option.votes, poll_total_votes)
+                                            poll_percent(option.votes, poll_total_votes),
                                         ))
                                         aria-hidden="true"
                                     ></div>
                                 }
                                 <span class="relative min-w-0 break-words">
-                                    <span class="mr-2 font-bold text-primary">(format!("{}.", option.number))</span>
+                                    <span class="mr-2 font-bold text-primary">
+                                        (format!("{}.", option.number))
+                                    </span>
                                     (option.label.clone())
                                 </span>
-                                <span class="relative shrink-0 font-semibold tabular-nums">(format!("{}", option.votes))</span>
+                                <span class="relative shrink-0 font-semibold tabular-nums">
+                                    (format!("{}", option.votes))
+                                </span>
                             </div>
                         }
                     </div>

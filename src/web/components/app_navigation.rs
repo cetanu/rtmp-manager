@@ -20,7 +20,9 @@ pub async fn app_navigation(active_page: &'static str) -> Result<impl View> {
         <header
             class="sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur-md"
         >
-            <div class="mx-auto flex w-full max-w-[1600px] items-center gap-3 px-4 py-2 sm:px-5">
+            <div
+                class="mx-auto flex w-full max-w-[1600px] items-center gap-3 px-4 py-2 sm:px-5"
+            >
                 <a
                     href="/preview"
                     data-app-link="preview"
@@ -34,10 +36,14 @@ pub async fn app_navigation(active_page: &'static str) -> Result<impl View> {
                         class="size-6 shrink-0 rounded-[3px] border border-border object-contain"
                     />
                     <span class="leading-none">
-                        <span class="block font-mono text-[12px] font-bold tracking-[0.14em] text-foreground">
+                        <span
+                            class="block font-mono text-[12px] font-bold tracking-[0.14em] text-foreground"
+                        >
                             "RTMP-MGR"
                         </span>
-                        <span class="mt-0.5 block font-mono text-[9px] tracking-[0.18em] text-muted-foreground uppercase">
+                        <span
+                            class="mt-0.5 block font-mono text-[9px] tracking-[0.18em] text-muted-foreground uppercase"
+                        >
                             (concat!("v", env!("CARGO_PKG_VERSION"), " // OPS"))
                         </span>
                     </span>
@@ -145,12 +151,20 @@ pub async fn app_navigation(active_page: &'static str) -> Result<impl View> {
                         "Export"
                     </a>
                 </nav>
-                <div class="hidden shrink-0 items-center gap-3 md:flex" aria-hidden="true">
-                    <span data-metrics-status="true" class="font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase">
+                <div
+                    class="hidden shrink-0 items-center gap-3 md:flex"
+                    aria-hidden="true"
+                >
+                    <span
+                        data-metrics-status="true"
+                        class="font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase"
+                    >
                         "SYS NOMINAL"
                     </span>
                     <span class="h-4 w-px bg-border"></span>
-                    <span class="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase">
+                    <span
+                        class="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase"
+                    >
                         <span class="hud-dot bg-signal text-signal"></span>
                         "CTL LINK"
                     </span>

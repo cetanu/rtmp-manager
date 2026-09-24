@@ -80,7 +80,11 @@ pub async fn server_settings(cx: &Cx) -> Result<impl View> {
                             attrs: attributes! {
                                 name="server[ingest_stream_key]"
                                 value=""
-                                placeholder=(if config.server.ingest_stream_key.is_empty() { "Required before streaming".to_string() } else { "Configured — leave blank to keep".to_string() })
+                                placeholder=(if config.server.ingest_stream_key.is_empty() {
+                                    "Required before streaming".to_string()
+                                } else {
+                                    "Configured — leave blank to keep".to_string()
+                                })
                                 autocomplete="new-password"
                             }
                         )

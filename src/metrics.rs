@@ -100,19 +100,13 @@ impl Metrics {
             .as_millis();
         let bytes = self.ingest_bytes.load(Ordering::Relaxed);
         let previous = self.last_sample_ingest_bytes.swap(bytes, Ordering::Relaxed);
-        let now_ms: u64 = timestamp_ms.try_into().unwrap_or_else(|_| {
-            crate::util::now_unix_ms()
-        });
-        let previous_timestamp_ms = self.last_sample_timestamp_ms.swap(
-            now_ms,
-            Ordering::Relaxed,
-        );
-        let ingest_bps = calculate_ingest_bps(
-            bytes,
-            previous,
-            previous_timestamp_ms,
-            now_ms,
-        );
+        let now_ms: u64 = timestamp_ms
+            .try_into()
+            .unwrap_or_else(|_| crate::util::now_unix_ms());
+        let previous_timestamp_ms = self
+            .last_sample_timestamp_ms
+            .swap(now_ms, Ordering::Relaxed);
+        let ingest_bps = calculate_ingest_bps(bytes, previous, previous_timestamp_ms, now_ms);
         self.ingest_bps.store(ingest_bps, Ordering::Relaxed);
         let sample = MetricsSample {
             timestamp_ms,
@@ -208,8 +202,7 @@ impl TargetBitrate {
         } else {
             total_size
         };
-        self.outbound_bytes
-            .fetch_add(delta, Ordering::Relaxed);
+        self.outbound_bytes.fetch_add(delta, Ordering::Relaxed);
         delta
     }
 }

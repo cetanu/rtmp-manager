@@ -102,7 +102,11 @@ impl NotificationDispatcher {
                 && !url.trim().is_empty()
                 && (url.starts_with("https://") || url.starts_with("http://"))
             {
-                links.push(format!("[{}]({})", escape_markdown(&target.name), url.trim()));
+                links.push(format!(
+                    "[{}]({})",
+                    escape_markdown(&target.name),
+                    url.trim()
+                ));
             }
         }
 

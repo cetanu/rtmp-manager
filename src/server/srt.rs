@@ -116,7 +116,8 @@ pub async fn run_srt_server(
                 let metrics = app.metrics.clone();
                 tokio::spawn(async move {
                     let _slot = slot;
-                    handle_srt_session(socket, internal_rtmp_addr, stream_key, client_ip, metrics).await;
+                    handle_srt_session(socket, internal_rtmp_addr, stream_key, client_ip, metrics)
+                        .await;
                 });
             }
             Err(error) => {

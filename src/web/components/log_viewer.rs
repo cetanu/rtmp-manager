@@ -13,7 +13,12 @@ pub async fn log_viewer() -> Result<impl View> {
             >
                 <span class="hud-dot bg-signal text-signal"></span>
                 <span class="hud-label">"SYS.LOG // TAIL -F"</span>
-                <span data-log-status-text="true" class="ml-auto hidden font-mono text-[10px] tracking-[0.16em] text-muted-foreground uppercase sm:inline">"Connecting…"</span>
+                <span
+                    data-log-status-text="true"
+                    class="ml-auto hidden font-mono text-[10px] tracking-[0.16em] text-muted-foreground uppercase sm:inline"
+                >
+                    "Connecting…"
+                </span>
             </div>
             <div
                 data-log-output="true"

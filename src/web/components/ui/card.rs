@@ -38,7 +38,13 @@ pub async fn card_title(
     #[default] child: Child<'_>,
 ) -> Result<impl View> {
     Ok(view! {
-        <h3 class=(class!("font-mono text-[11px] font-semibold tracking-[0.16em] text-foreground uppercase", attrs.remove("class"))) (attrs)>
+        <h3
+            class=(class!(
+                "font-mono text-[11px] font-semibold tracking-[0.16em] text-foreground uppercase",
+                attrs.remove("class"),
+            ))
+            (attrs)
+        >
             (child)
         </h3>
     })
@@ -53,7 +59,10 @@ pub async fn card_description(
 ) -> Result<impl View> {
     Ok(view! {
         <p
-            class=(class!("font-mono text-[11px] text-muted-foreground", attrs.remove("class")))
+            class=(class!(
+                "font-mono text-[11px] text-muted-foreground",
+                attrs.remove("class"),
+            ))
             (attrs)
         >
             (child)
@@ -67,7 +76,9 @@ pub async fn card_content(
     #[default] mut attrs: Attributes,
     #[default] child: Child<'_>,
 ) -> Result<impl View> {
-    Ok(view! { <div class=(class!("px-4 pb-4", attrs.remove("class"))) (attrs)>(child)</div> })
+    Ok(view! {
+        <div class=(class!("px-4 pb-4", attrs.remove("class"))) (attrs)>(child)</div>
+    })
 }
 
 /// The closing section of a [`card`], a horizontal row for actions.
@@ -78,7 +89,10 @@ pub async fn card_footer(
 ) -> Result<impl View> {
     Ok(view! {
         <div
-            class=(class!("flex items-center gap-2 border-t border-border px-4 pt-3 pb-3", attrs.remove("class")))
+            class=(class!(
+                "flex items-center gap-2 border-t border-border px-4 pt-3 pb-3",
+                attrs.remove("class"),
+            ))
             (attrs)
         >
             (child)

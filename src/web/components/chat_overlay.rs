@@ -302,7 +302,9 @@ pub async fn chat_overlay_messages(
                     >
                         for option in poll.options.iter() {
                             <div
-                                class=(if poll.stopped_at_unix_ms.is_some() && poll_max_votes > 0 && option.votes == poll_max_votes {
+                                class=(if poll.stopped_at_unix_ms.is_some()
+                                    && poll_max_votes > 0
+                                    && option.votes == poll_max_votes {
                                     "chat-overlay-poll-option relative overflow-hidden rounded-lg border border-green-500 bg-white/5 px-5 py-4"
                                 } else {
                                     "chat-overlay-poll-option relative overflow-hidden rounded-lg border border-white/10 bg-white/5 px-5 py-4"
@@ -315,7 +317,7 @@ pub async fn chat_overlay_messages(
                                             "width: {}%",
                                             crate::web::components::chat_inbox::poll_percent(
                                                 option.votes,
-                                                poll_total_votes
+                                                poll_total_votes,
                                             ),
                                         ))
                                         aria-hidden="true"

@@ -118,7 +118,11 @@ pub async fn target_item(index: usize, target: TargetConfig) -> Result<impl View
                                 name=(format!("targets[{index}][stream_key]"))
                                 value=""
                                 autocomplete="new-password"
-                                placeholder=(if target.stream_key.is_empty() { "Optional when already included in the RTMP URL".to_string() } else { "Configured — leave blank to keep".to_string() })
+                                placeholder=(if target.stream_key.is_empty() {
+                                    "Optional when already included in the RTMP URL".to_string()
+                                } else {
+                                    "Configured — leave blank to keep".to_string()
+                                })
                             }
                         )
                     )

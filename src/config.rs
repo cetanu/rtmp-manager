@@ -875,7 +875,9 @@ impl ConfigStore {
             use std::os::unix::fs::PermissionsExt;
             // Always enforce 0600, not just on creation: pre-existing files
             // may have been created with a permissive umask.
-            if let Err(error) = fs::set_permissions(&database_path, fs::Permissions::from_mode(0o600)) {
+            if let Err(error) =
+                fs::set_permissions(&database_path, fs::Permissions::from_mode(0o600))
+            {
                 tracing::warn!(%error, path = %database_path.display(), "Failed to secure config database permissions");
             }
         }
@@ -1108,11 +1110,9 @@ fn restore_redacted_secrets(current: &AppConfig, mut imported: AppConfig) -> App
         if imported_target.stream_key.is_empty() {
             // Match by stable identity, not position: reordered/added/removed
             // targets must never receive another target's key.
-            if let Some(current_target) = current
-                .targets
-                .iter()
-                .find(|current| current.name == imported_target.name && current.url == imported_target.url)
-            {
+            if let Some(current_target) = current.targets.iter().find(|current| {
+                current.name == imported_target.name && current.url == imported_target.url
+            }) {
                 imported_target.stream_key = current_target.stream_key.clone();
             }
         }

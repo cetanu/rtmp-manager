@@ -57,7 +57,11 @@ pub async fn publishing_controls(cx: &Cx, revision: f64) -> Result<impl View> {
                 })
             >
                 <span
-                    :class=$(if live.get() { "hud-dot bg-white text-white animate-rec" } else { "hud-dot bg-signal text-signal" })
+                    :class=$(if live.get() {
+                        "hud-dot bg-white text-white animate-rec"
+                    } else {
+                        "hud-dot bg-signal text-signal"
+                    })
                 ></span>
                 $(if live.get() { "● LIVE — CUT" } else { "○ GO LIVE" })
             </button>
