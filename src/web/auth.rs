@@ -38,6 +38,17 @@ fn has_overlay_access(cx: &Cx, app: &AppHandle) -> bool {
         return false;
     }
 
+    // Preferred: Authorization: Bearer <token> (not logged, not in history).
+    if let Some(bearer) = headers(cx)
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        && constant_time_eq(expected, bearer.trim().as_bytes()) {
+            return true;
+        }
+
+    // Legacy: ?key=... for OBS Browser Sources that can't set headers.
+    // Keep working, but prefer Bearer; never log the query value.
     parse_query_params::<OverlayAccessQuery>(cx)
         .ok()
         .and_then(|query| query.key)
@@ -49,6 +60,37 @@ async fn basic_auth(cx: &Cx, body: Body, next: Next<'_>) -> Result<Response> {
     let path = uri(cx).path();
     if is_public_path(path) {
         return next.run(cx, body).await;
+    }
+
+    // Basic CSRF guard: state-changing browser requests must be same-origin.
+    // Allows empty Origin (curl, non-browser) but rejects cross-site POSTs
+    // that browsers attach Origin/Referer to while auto-sending Basic auth.
+    if matches!(method(cx).as_str(), "POST" | "PUT" | "PATCH" | "DELETE")
+        && path.starts_with("/api/")
+        && let Some(origin) = headers(cx)
+            .get(header::ORIGIN)
+            .and_then(|value| value.to_str().ok())
+            .or_else(|| {
+                headers(cx)
+                    .get(header::REFERER)
+                    .and_then(|value| value.to_str().ok())
+            })
+    {
+        let host = headers(cx)
+            .get(header::HOST)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+        // Origin is `scheme://host[:port]`; require suffix match on Host.
+        let origin_host = origin
+            .split("://")
+            .last()
+            .unwrap_or(origin)
+            .split('/')
+            .next()
+            .unwrap_or_default();
+        if !origin_host.is_empty() && !host.is_empty() && origin_host != host {
+            return (StatusCode::FORBIDDEN, "Cross-origin request rejected").into_response(cx);
+        }
     }
 
     let app: &AppHandle = app_context(cx);
