@@ -38,7 +38,7 @@ pub fn redact_secrets(text: &str, secrets: &[String]) -> String {
         })
 }
 
-fn redact_urls(text: &str) -> String {
+pub(crate) fn redact_urls(text: &str) -> String {
     static URL_PATTERN: OnceLock<Option<Regex>> = OnceLock::new();
     let Some(pattern) = URL_PATTERN
         .get_or_init(|| Regex::new(r#"(?i)(rtmps?|srt)://[^\s"'<>]+"#).ok())

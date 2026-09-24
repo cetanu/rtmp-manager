@@ -58,6 +58,9 @@ impl LogBuffer {
     }
 
     fn push(&self, mut entry: LogEntry) {
+        // Best-effort URL redaction for the SSE log viewer: full secret
+        // redaction happens at the log call site via `redact_secrets`.
+        entry.message = crate::util::redact_urls(&entry.message);
         entry.id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut entries = self.entries.lock();
         if entries.len() == CAPACITY {
