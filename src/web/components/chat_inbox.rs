@@ -376,6 +376,23 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                         "Focus"
                     </button>
                     <button
+                        id="chat-pomodoro-stop"
+                        type="button"
+                        class=(destructive_button.clone())
+                        :hidden=$(if pomo_active.get() { false } else { true })
+                        :disabled=$(pomo_pending.get())
+                        @click=$(async |_event| {
+                            pomo_pending.set(true);
+                            let next_id = stop_pomodoro().await;
+                            current_id.set(next_id);
+                            pomo_active.set(false);
+                            pomo_pending.set(false);
+                            revision.set(revision.get() + 1.0);
+                        })
+                    >
+                        "Stop"
+                    </button>
+                    <button
                         id="chat-poll-start"
                         type="button"
                         class=(outline_button.clone())
@@ -418,23 +435,6 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                         })
                     >
                         "Clear results"
-                    </button>
-                    <button
-                        id="chat-pomodoro-stop"
-                        type="button"
-                        class=(destructive_button)
-                        :hidden=$(if pomo_active.get() { false } else { true })
-                        :disabled=$(pomo_pending.get())
-                        @click=$(async |_event| {
-                            pomo_pending.set(true);
-                            let next_id = stop_pomodoro().await;
-                            current_id.set(next_id);
-                            pomo_active.set(false);
-                            pomo_pending.set(false);
-                            revision.set(revision.get() + 1.0);
-                        })
-                    >
-                        "Stop"
                     </button>
                     <p
                         :hidden=$(pomo_error.get().is_empty())
