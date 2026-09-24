@@ -15,7 +15,7 @@ use std::net::SocketAddr;
 
 pub async fn run_rtmp_server(bind_addr: SocketAddr, app: AppHandle) -> Result<()> {
     let server_config = ServerConfig::default().bind(bind_addr);
-    let handler = ProxyHandler { app };
+    let handler = ProxyHandler::new(app);
     let server = RtmpServer::new(server_config, handler);
 
     server.run().await.context("RTMP server failed")?;
