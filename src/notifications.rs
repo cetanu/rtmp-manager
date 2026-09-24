@@ -67,25 +67,42 @@ impl NotificationDispatcher {
         info!("Sending Discord going-live webhook notification");
         let payload = self.discord_payload(targets);
 
-        if self
+        match self
             .http_client
             .post(webhook_url)
             .json(&payload)
             .send()
             .await
-            .is_err()
         {
-            warn!("Failed to send Discord webhook notification");
+            Ok(response) if response.status().is_success() => {}
+            Ok(response) => {
+                warn!(status = %response.status(), "Discord webhook returned non-success status");
+            }
+            Err(error) => {
+                warn!(%error, "Failed to send Discord webhook notification");
+            }
         }
     }
 
     fn discord_payload(&self, targets: &[NotificationTarget]) -> serde_json::Value {
+        fn escape_markdown(value: &str) -> String {
+            value
+                .replace('\\', "\\\\")
+                .replace('[', "\\[")
+                .replace(']', "\\]")
+                .replace('(', "\\(")
+                .replace(')', "\\)")
+                .chars()
+                .take(200)
+                .collect()
+        }
         let mut links = Vec::new();
         for target in targets {
             if let Some(url) = &target.public_url
                 && !url.trim().is_empty()
+                && (url.starts_with("https://") || url.starts_with("http://"))
             {
-                links.push(format!("[{}]({})", target.name, url.trim()));
+                links.push(format!("[{}]({})", escape_markdown(&target.name), url.trim()));
             }
         }
 
@@ -99,9 +116,9 @@ impl NotificationDispatcher {
         };
 
         serde_json::json!({
-            "content": self.live_message,
+            "content": self.live_message.chars().take(2000).collect::<String>(),
             "allowed_mentions": {
-                "parse": ["everyone", "roles", "users"]
+                "parse": []
             },
             "embeds": [
                 {
