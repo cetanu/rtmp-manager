@@ -947,7 +947,10 @@ impl ChatActor {
         {
             let outcome = self.inbox.record_poll_vote(&message, option_number).await?;
             if let PollVoteOutcome::Accepted { previous_option } = outcome {
-                let poll = self.state.poll.as_mut().expect("active poll disappeared");
+                let Some(poll) = self.state.poll.as_mut() else {
+                    tracing::warn!("Active poll disappeared while recording vote");
+                    return Ok(EnqueueOutcome::Accepted);
+                };
                 if let Some(previous_option) = previous_option
                     && let Some(previous) = poll
                         .options
