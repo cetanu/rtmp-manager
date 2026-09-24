@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 use regex::Regex;
 use reqwest::Client;
 use reqwest::header::{ACCEPT_LANGUAGE, USER_AGENT};
+use std::sync::LazyLock;
 use std::time::Duration;
 
 const DEFAULT_INNERTUBE_API_KEY: &str = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
@@ -25,6 +26,10 @@ const SHORT_URL_PATTERN: &str = r#"youtu\.be/([a-zA-Z0-9_-]{11})"#;
 
 const CHANNEL_ID_LENGTH: usize = 24;
 const VIDEO_ID_LENGTH: usize = 11;
+static WATCH_URL_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(WATCH_URL_PATTERN).expect("valid watch URL regex"));
+static SHORT_URL_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(SHORT_URL_PATTERN).expect("valid short URL regex"));
 const CHANNEL_RESOLUTION_INITIAL_DELAY: Duration = Duration::from_secs(30);
 const CHANNEL_RESOLUTION_MAX_DELAY: Duration = Duration::from_secs(300);
 const DIRECT_RESOLUTION_INITIAL_DELAY: Duration = Duration::from_secs(5);
@@ -269,10 +274,10 @@ pub fn normalize_channel_url(channel_input: &str) -> Result<String> {
 
 pub fn extract_video_id(input: &str) -> Option<String> {
     let trimmed = input.trim();
-    if let Some(captures) = Regex::new(WATCH_URL_PATTERN).ok()?.captures(trimmed) {
+    if let Some(captures) = WATCH_URL_REGEX.captures(trimmed) {
         return captures.get(1).map(|m| m.as_str().to_string());
     }
-    if let Some(captures) = Regex::new(SHORT_URL_PATTERN).ok()?.captures(trimmed) {
+    if let Some(captures) = SHORT_URL_REGEX.captures(trimmed) {
         return captures.get(1).map(|m| m.as_str().to_string());
     }
     if trimmed.len() == VIDEO_ID_LENGTH
