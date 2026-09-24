@@ -75,6 +75,9 @@ pub async fn run_web_server(
         .layer(topcoat::router::BodyLimit::max(MAX_CHAT_TEST_BODY_SIZE).at("/api/chat/test"))
         .layer(topcoat::router::BodyLimit::max(MAX_POMODORO_BODY_SIZE).at("/api/chat/pomodoro"))
         .layer(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE).at("/api/chat/poll"))
+        .layer(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE).at("/api/chat/acknowledge"))
+        .layer(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE).at("/api/chat/poll/clear"))
+        .layer(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE).at("/api/test-stream"))
         .app_context(app_handle)
         .build();
 
