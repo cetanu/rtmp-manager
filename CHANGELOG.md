@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0](https://github.com/cetanu/rtmp-manager/compare/v0.4.0...v0.5.0) - 2026-09-24
+
+### Added
+
+- *(metrics)* track and chart cumulative data transferred
+- *(metrics)* give targets their own section below stream ingest
+
+### Fixed
+
+- *(webhooks)* truncate audit payload rendering to 2K chars
+- *(web)* stop sending spurious chat_changed on SSE connect
+- *(web)* add body limits to acknowledge, poll-clear and test-stream routes
+- *(security)* stop rendering secret values into settings forms
+- *(auth)* accept bearer overlay tokens and guard API against CSRF
+- *(stream)* preview restart circuit breaker and cached playlist state
+- *(srt)* bound bridge resources and account ingest bytes
+- *(relay)* bound waits, release ffmpeg slots, calm reconnects
+- *(rtmp)* tear down abrupt disconnects and reject non-live apps
+- *(notifications)* harden Discord webhook delivery and formatting
+- *(metrics)* fall back to wall-clock time when system time is unavailable
+- *(logs)* redact URLs in SSE log viewer entries
+- *(config)* restore redacted stream keys matched by target identity
+- *(security)* always enforce 0600 permissions on the config database
+- *(chat)* tolerate poll disappearing while recording a vote
+- *(chat)* keep poll button in place when focus mode starts
+
+### Other
+
+- formatting
+- *(web)* reskin dashboard as control-room HUD
+- *(chat)* reuse compiled YouTube URL regexes
+
 ## [0.4.0](https://github.com/cetanu/rtmp-manager/compare/v0.3.20...v0.4.0) - 2026-09-23
 
 ### Added
