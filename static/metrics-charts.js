@@ -36,9 +36,9 @@
     const plotWidth = width - left - 8;
     const plotHeight = height - top - 28;
 
-    context.strokeStyle = "rgba(148, 163, 184, .18)";
+    context.strokeStyle = "rgba(148, 163, 184, .14)";
     context.fillStyle = "rgb(148, 163, 184)";
-    context.font = "11px Inter, sans-serif";
+    context.font = '10px "JetBrains Mono", monospace';
     for (let index = 0; index <= 3; index += 1) {
       const y = top + (plotHeight * index) / 3;
       context.beginPath();
@@ -83,9 +83,9 @@
     const plotWidth = width - left - 8;
     const plotHeight = height - top - 28;
 
-    context.strokeStyle = "rgba(148, 163, 184, .18)";
+    context.strokeStyle = "rgba(148, 163, 184, .14)";
     context.fillStyle = "rgb(148, 163, 184)";
-    context.font = "11px Inter, sans-serif";
+    context.font = '10px "JetBrains Mono", monospace';
     for (let index = 0; index <= 3; index += 1) {
       const y = top + (plotHeight * index) / 3;
       context.beginPath();
@@ -109,7 +109,7 @@
     });
 
     let legendX = left;
-    context.font = "11px Inter, sans-serif";
+    context.font = '10px "JetBrains Mono", monospace';
     series.forEach((entry) => {
       context.fillStyle = entry.color;
       context.fillRect(legendX, height - 10, 10, 3);
@@ -128,7 +128,7 @@
       draw(
         ingestCard.querySelector("canvas"),
         samples.map((sample) => sample.ingest_bps || 0),
-        "rgb(56, 189, 248)",
+        "rgb(74, 222, 128)",
         "Ingest",
         formatRate,
         1_000_000,
@@ -151,9 +151,9 @@
       drawMulti(
         transferCard.querySelector("canvas"),
         [
-          { values: inValues, color: "rgb(56, 189, 248)", label: "In" },
-          { values: outValues, color: "rgb(167, 139, 250)", label: "Out" },
-          { values: totalValues, color: "rgb(245, 158, 11)", label: "Total" },
+          { values: inValues, color: "rgb(74, 222, 128)", label: "In" },
+          { values: outValues, color: "rgb(56, 189, 248)", label: "Out" },
+          { values: totalValues, color: "rgb(251, 191, 36)", label: "Total" },
         ],
         formatBytes,
         1_000,
@@ -168,7 +168,7 @@
         card.querySelector("canvas"),
         samples.map((sample) =>
           sample.targets.find((target) => target.name === name)?.outbound_bps || 0),
-        "rgb(167, 139, 250)",
+        "rgb(56, 189, 248)",
         "Outbound",
         formatRate,
         1_000_000,
@@ -187,7 +187,7 @@
         1,
       );
     }
-    if (status) status.textContent = "Live · updated now";
+    if (status) status.textContent = "● LIVE // SYNC";
   }
 
   window.addEventListener("rtmp:metrics-history", (event) => {

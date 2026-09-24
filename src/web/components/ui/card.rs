@@ -3,10 +3,7 @@ use topcoat::{
     view::{Attributes, Child, StaticClass, View, class, component, view},
 };
 
-const CARD: StaticClass = class!(
-    "flex flex-col gap-5 rounded-xl border border-border bg-background py-6 \
-     text-foreground shadow-sm",
-);
+const CARD: StaticClass = class!("hud-panel");
 
 /// A bordered surface that stacks its child sections vertically.
 #[component]
@@ -26,7 +23,7 @@ pub async fn card_header(
 ) -> Result<impl View> {
     Ok(view! {
         <div
-            class=(class!("flex flex-col gap-1.5 px-6", attrs.remove("class")))
+            class=(class!("flex flex-col gap-1 px-4 pt-3", attrs.remove("class")))
             (attrs)
         >
             (child)
@@ -41,7 +38,7 @@ pub async fn card_title(
     #[default] child: Child<'_>,
 ) -> Result<impl View> {
     Ok(view! {
-        <h3 class=(class!("leading-none font-semibold", attrs.remove("class"))) (attrs)>
+        <h3 class=(class!("font-mono text-[11px] font-semibold tracking-[0.16em] text-foreground uppercase", attrs.remove("class"))) (attrs)>
             (child)
         </h3>
     })
@@ -56,7 +53,7 @@ pub async fn card_description(
 ) -> Result<impl View> {
     Ok(view! {
         <p
-            class=(class!("text-sm text-muted-foreground", attrs.remove("class")))
+            class=(class!("font-mono text-[11px] text-muted-foreground", attrs.remove("class")))
             (attrs)
         >
             (child)
@@ -70,7 +67,7 @@ pub async fn card_content(
     #[default] mut attrs: Attributes,
     #[default] child: Child<'_>,
 ) -> Result<impl View> {
-    Ok(view! { <div class=(class!("px-6", attrs.remove("class"))) (attrs)>(child)</div> })
+    Ok(view! { <div class=(class!("px-4 pb-4", attrs.remove("class"))) (attrs)>(child)</div> })
 }
 
 /// The closing section of a [`card`], a horizontal row for actions.
@@ -81,7 +78,7 @@ pub async fn card_footer(
 ) -> Result<impl View> {
     Ok(view! {
         <div
-            class=(class!("flex items-center gap-2 px-6", attrs.remove("class")))
+            class=(class!("flex items-center gap-2 border-t border-border px-4 pt-3 pb-3", attrs.remove("class")))
             (attrs)
         >
             (child)

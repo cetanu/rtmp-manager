@@ -4,7 +4,8 @@ use topcoat::{
 };
 
 const LABEL: StaticClass = class!(
-    "flex items-center gap-2 text-sm leading-none font-medium select-none \
+    "flex items-center gap-2 font-mono text-[10px] leading-none font-medium tracking-[0.16em] \
+     text-muted-foreground uppercase select-none \
      peer-disabled:pointer-events-none peer-disabled:opacity-50 \
      has-[:disabled]:pointer-events-none has-[:disabled]:opacity-50",
 );

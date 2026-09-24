@@ -138,8 +138,11 @@ async fn app_page(active_page: &'static str) -> Result<impl View> {
                     content="Configuration dashboard for the RTMP Stream Multiplexer."
                 />
                 <link rel="icon" type="image/png" href=(FAVICON) />
+                <meta name="theme-color" content="#0b0e14" />
+                <link rel="preconnect" href="https://fonts.googleapis.com" />
+                <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
                 <link
-                    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+                    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
                     rel="stylesheet"
                 />
                 <link rel="stylesheet" href=(TAILWIND_STYLESHEET) />
@@ -153,10 +156,14 @@ async fn app_page(active_page: &'static str) -> Result<impl View> {
                 <script src=(SECRET_FIELDS_SCRIPT) defer="defer"></script>
             </head>
             <body
-                class="min-h-screen bg-background text-foreground font-sans antialiased"
+                class="min-h-screen bg-background font-sans text-foreground antialiased selection:bg-signal/30"
             >
                 app_navigation(active_page: active_page)
-                <main class="mx-auto max-w-7xl px-3 py-3 sm:px-4 sm:py-4">
+                <main class="mx-auto w-full max-w-[1600px] px-4 py-4 sm:px-5">
+                    <div class="mb-3 flex items-center justify-between gap-3 font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase" aria-hidden="true">
+                        <span>"SYS // RTMP-MGR OPS"</span>
+                        <span class="hidden sm:inline">"SECURE // LOCALHOST // NO-STORE"</span>
+                    </div>
                     <section data-app-page="preview" hidden=(active_page != "preview")>
                         stream_preview()
                     </section>

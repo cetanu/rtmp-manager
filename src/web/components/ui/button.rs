@@ -26,22 +26,22 @@ impl ButtonVariant {
     fn classes(self) -> StaticClass {
         match self {
             Self::Primary => class!(
-                "border-transparent bg-primary text-primary-foreground shadow-xs \
-                 hover:bg-primary/90 active:bg-primary/80",
+                "border-signal/40 bg-primary text-primary-foreground shadow-xs \
+                 hover:bg-signal/90 active:bg-signal/80",
             ),
             Self::Secondary => class!(
-                "border-transparent bg-foreground/5 text-foreground shadow-xs \
-                 hover:bg-foreground/10 active:bg-foreground/15",
+                "border-white/10 bg-white/5 text-foreground shadow-xs \
+                 hover:bg-white/10 active:bg-white/15",
             ),
             Self::Outline => class!(
-                "border-border text-foreground shadow-xs hover:bg-foreground/5 \
-                 active:bg-foreground/10",
+                "border-border bg-transparent text-foreground shadow-xs \
+                 hover:border-signal/50 hover:text-signal active:bg-white/5",
             ),
             Self::Ghost => class!(
-                "border-transparent text-foreground hover:bg-foreground/5 active:bg-foreground/10",
+                "border-transparent text-muted-foreground hover:bg-white/5 hover:text-foreground active:bg-white/10",
             ),
             Self::Destructive => class!(
-                "border-transparent bg-destructive text-destructive-foreground shadow-xs \
+                "border-live/40 bg-destructive text-destructive-foreground shadow-xs \
                  hover:bg-destructive/90 active:bg-destructive/80",
             ),
         }
@@ -68,17 +68,17 @@ pub enum ButtonSize {
 impl ButtonSize {
     fn classes(self) -> StaticClass {
         match self {
-            Self::Sm => class!("h-8 rounded-md px-3 text-xs gap-1.5"),
-            Self::Md => class!("h-9 rounded-lg px-4 text-sm gap-2"),
-            Self::Lg => class!("h-10 rounded-lg px-5 text-sm gap-2"),
-            Self::Icon => class!("size-9 rounded-lg"),
+            Self::Sm => class!("h-7 rounded-sm px-2.5 text-[11px] gap-1.5"),
+            Self::Md => class!("h-8 rounded-sm px-3 text-[11px] gap-2"),
+            Self::Lg => class!("h-9 rounded-sm px-4 text-[12px] gap-2"),
+            Self::Icon => class!("size-8 rounded-sm"),
         }
     }
 }
 
 const BASE: StaticClass = class!(
-    "inline-flex shrink-0 items-center justify-center border \
-     font-medium whitespace-nowrap transition-colors outline-none select-none \
+    "inline-flex shrink-0 cursor-pointer items-center justify-center border \
+     font-mono font-semibold tracking-[0.12em] uppercase whitespace-nowrap transition-colors outline-none select-none \
      focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 \
      focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
 );

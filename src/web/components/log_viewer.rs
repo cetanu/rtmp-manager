@@ -6,20 +6,22 @@ use topcoat::{
 #[component]
 pub async fn log_viewer() -> Result<impl View> {
     Ok(view! {
-        <div class="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+        <div class="hud-panel !gap-0 overflow-hidden">
             <div
                 data-log-status="true"
-                class="border-b border-border px-4 py-2 text-xs text-muted-foreground"
+                class="flex items-center gap-2 border-b border-border px-4 py-2"
             >
-                "Connecting…"
+                <span class="hud-dot bg-signal text-signal"></span>
+                <span class="hud-label">"SYS.LOG // TAIL -F"</span>
+                <span data-log-status-text="true" class="ml-auto hidden font-mono text-[10px] tracking-[0.16em] text-muted-foreground uppercase sm:inline">"Connecting…"</span>
             </div>
             <div
                 data-log-output="true"
                 role="log"
                 aria-live="polite"
-                class="h-[65vh] overflow-auto bg-black p-4 font-mono text-xs leading-5 text-zinc-200"
+                class="hud-scanlines h-[65vh] overflow-auto bg-black/80 p-4 font-mono text-[11px] leading-5 text-signal/80"
             >
-                <div class="text-zinc-500">"Waiting for log entries…"</div>
+                <div class="text-muted-foreground">"// Waiting for log entries…"</div>
             </div>
         </div>
     })

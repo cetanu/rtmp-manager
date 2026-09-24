@@ -346,7 +346,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
     Ok(view! {
         card(
             attrs: attributes! {
-                class="mb-1 h-[calc(100dvh-3.5rem)] max-h-[calc(100dvh-3.5rem)] min-h-[18rem] !gap-2 !py-3"
+                class="mb-1 h-[calc(100dvh-6.5rem)] max-h-[calc(100dvh-6.5rem)] min-h-[18rem] !gap-2 !py-0"
             },
             if poll_form_open.get() {
                 poll_setup(signals: poll_setup_signals.clone())
@@ -354,7 +354,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                 chat_inbox_content(revision: $(revision.get()))
             }
             card_footer(
-                attrs: attributes! { class="!px-3 justify-between flex-wrap gap-y-2" },
+                attrs: attributes! { class="!px-3 !pt-2 !pb-2 justify-between flex-wrap gap-y-2" },
                 <div class="flex items-center gap-2">
                     <button
                         id="chat-pomodoro-focus"
@@ -490,10 +490,10 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
             )
         )
         card(
-            attrs: attributes! { class="mb-2 !gap-0 !py-2" },
+            attrs: attributes! { class="mb-2 !gap-0 !py-1" },
             card_content(
                 attrs: attributes! {
-                    class="!px-3 flex items-center justify-between gap-3 flex-wrap"
+                    class="!px-3 !pt-2 !pb-2 flex items-center justify-between gap-3 flex-wrap"
                 },
                 <div class="flex items-center gap-4">
                     if youtube_configured {
@@ -584,7 +584,7 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
 
     Ok(view! {
         card_content(
-            attrs: attributes! { class="!px-3 flex min-h-0 flex-1 flex-col gap-1" },
+            attrs: attributes! { class="!px-3 !pb-2 flex min-h-0 flex-1 flex-col gap-1" },
             if let Some((message, ends_at, remaining)) = pomodoro {
                 <div
                     id="chat-pomodoro-status"

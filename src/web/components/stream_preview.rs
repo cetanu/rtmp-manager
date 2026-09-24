@@ -36,7 +36,7 @@ pub async fn stream_preview(cx: &Cx) -> Result<impl View> {
 pub async fn stream_preview_player(#[default] child: Child<'_>) -> Result<impl View> {
     Ok(view! {
         <div
-            class="relative mx-auto h-[calc(100dvh-10rem)] max-h-[56.25vw] max-w-full aspect-video overflow-hidden bg-black"
+            class="hud-well hud-scanlines relative mx-auto h-[calc(100dvh-10rem)] max-h-[56.25vw] max-w-full aspect-video bg-black"
         >
             <video
                 id="stream-preview-video"
@@ -46,6 +46,27 @@ pub async fn stream_preview_player(#[default] child: Child<'_>) -> Result<impl V
                 muted="muted"
                 playsinline="playsinline"
             ></video>
+            <span class="hud-corner hud-corner-tl"></span>
+            <span class="hud-corner hud-corner-tr"></span>
+            <span class="hud-corner hud-corner-bl"></span>
+            <span class="hud-corner hud-corner-br"></span>
+            <div class="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between gap-2 px-4 pt-3" aria-hidden="true">
+                <span class="flex items-center gap-1.5 rounded-[3px] border border-white/10 bg-black/60 px-2 py-1 font-mono text-[10px] tracking-[0.18em] text-white/80 uppercase backdrop-blur">
+                    <span data-preview-rec-dot="true" class="hud-dot bg-white/30 text-white/30"></span>
+                    <span data-preview-rec-label="true">"STBY"</span>
+                </span>
+                <span class="rounded-[3px] border border-white/10 bg-black/60 px-2 py-1 font-mono text-[10px] tracking-[0.18em] text-white/80 uppercase backdrop-blur">
+                    "PROGRAM // PREVIEW"
+                </span>
+            </div>
+            <div class="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 px-4 pb-3" aria-hidden="true">
+                <span data-preview-bitrate="true" class="rounded-[3px] border border-white/10 bg-black/60 px-2 py-1 font-mono text-[10px] tracking-[0.14em] text-white/70 tabular-nums backdrop-blur">
+                    "-- Mbps"
+                </span>
+                <span class="rounded-[3px] border border-white/10 bg-black/60 px-2 py-1 font-mono text-[10px] tracking-[0.14em] text-white/70 tabular-nums backdrop-blur">
+                    "SAFE // 16:9"
+                </span>
+            </div>
             (child)
         </div>
     })
@@ -56,12 +77,17 @@ pub async fn stream_preview_placeholder(cx: &Cx, revision: f64) -> Result<impl V
     let _ = revision;
     let app: &AppHandle = app_context(cx);
     let status = app.stream.status();
-    let message = status.state.to_string();
+    let message = if status.state.to_string().is_empty() {
+        "// NO SIGNAL".to_string()
+    } else {
+        format!("// {}", status.state.to_string().to_uppercase())
+    };
     Ok(view! {
         <div
-            class="absolute inset-0 flex items-center justify-center text-center text-sm text-white/70"
+            class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center"
         >
-            (message)
+            <span class="font-mono text-[11px] tracking-[0.24em] text-white/50 uppercase">(message)</span>
+            <span class="font-mono text-[10px] tracking-[0.18em] text-white/25 uppercase">"awaiting ingest // rtmp"</span>
         </div>
     })
 }

@@ -71,6 +71,17 @@
       statusRefresh?.click();
     }
 
+    const recDot = document.querySelector('[data-preview-rec-dot]');
+    const recLabel = document.querySelector('[data-preview-rec-label]');
+    const bitrate = document.querySelector('[data-preview-bitrate]');
+    const isLive = status.state === "live";
+    if (recDot) recDot.className = 'hud-dot ' + (isLive ? 'bg-red-500 text-red-500 animate-rec' : previewReady ? 'hud-dot bg-emerald-400 text-emerald-400' : 'hud-dot bg-white/30 text-white/30');
+    if (recLabel) recLabel.textContent = isLive ? 'REC' : previewReady ? 'READY' : 'STBY';
+    if (bitrate && typeof status.ingest_bps === 'number') {
+      const mbps = status.ingest_bps / 1000000;
+      bitrate.textContent = mbps >= 1 ? mbps.toFixed(2) + ' Mbps' : Math.round(status.ingest_bps / 1000) + ' Kbps';
+    }
+
     previewReady = status.state === "preview_ready" || status.state === "live";
     const previewFailed = status.state === "preview_failed";
     if (!previewReady || previewFailed) {

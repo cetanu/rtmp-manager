@@ -4,12 +4,12 @@ use topcoat::{
 };
 
 const INPUT: StaticClass = class!(
-    "h-9 w-full min-w-0 rounded-lg border border-border bg-background px-3 \
-     text-sm shadow-xs transition-colors outline-none \
-     placeholder:text-muted-foreground \
-     file:mr-3 file:h-full file:border-0 file:bg-transparent file:text-sm file:font-medium \
-     focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 \
-     focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
+    "h-8 w-full min-w-0 rounded-sm border border-border bg-black/50 px-2.5 \
+     font-mono text-xs tabular-nums shadow-xs transition-colors outline-none \
+     placeholder:text-muted-foreground placeholder:font-sans \
+     file:mr-3 file:h-full file:border-0 file:bg-transparent file:text-xs file:font-medium \
+     hover:border-white/15 focus-visible:border-signal/60 focus-visible:ring-1 \
+     focus-visible:ring-signal/40 disabled:pointer-events-none disabled:opacity-50",
 );
 
 /// A styled text input that forwards its attributes and custom classes.

@@ -47,14 +47,13 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
 
     Ok(view! {
         <section aria-labelledby="ingest-heading">
-            <div class="mb-2 flex items-end justify-between gap-4">
-                <div>
-                    <h2 id="ingest-heading" class="text-base font-semibold">
-                        "Stream ingest"
-                    </h2>
-                </div>
-                <span data-metrics-status="true" class="text-xs text-muted-foreground">
-                    "Live"
+            <div class="mb-2 flex items-center justify-between gap-4">
+                <h2 id="ingest-heading" class="hud-label flex items-center gap-2">
+                    <span class="hud-dot bg-signal text-signal"></span>
+                    "STREAM INGEST"
+                </h2>
+                <span data-metrics-status="true" class="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                    "LIVE"
                 </span>
             </div>
             <div
@@ -63,26 +62,26 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
             >
                 card(
                     attrs: attributes! {
-                        class="!gap-3 !rounded-lg !py-3"
+                        class="!gap-2 !py-3"
                         data-ingest-metric="true"
                     },
                     card_header(
                         attrs: attributes! { class="!px-3" },
                         <div class="flex items-center justify-between gap-3">
                             card_title("Streamer ingest")
-                            <span class="text-xs text-muted-foreground">"Inbound"</span>
+                            <span class="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">"Inbound"</span>
                         </div>
                     )
                     card_content(
                         attrs: attributes! { class="!px-3" },
                         <div class="mb-2">
                             <div
-                                class="text-xs uppercase tracking-wide text-muted-foreground"
+                                class="text-xs uppercase tracking-[0.18em] text-muted-foreground font-mono"
                             >
                                 "Ingest bitrate"
                             </div>
                             <div
-                                class="text-base font-semibold"
+                                class="hud-value text-xl"
                                 data-ingest-bitrate="true"
                             >
                                 (format_bitrate(ingest_bps))
@@ -97,14 +96,14 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
                 )
                 card(
                     attrs: attributes! {
-                        class="!gap-3 !rounded-lg !py-3"
+                        class="!gap-2 !py-3"
                         data-transfer-metric="true"
                     },
                     card_header(
                         attrs: attributes! { class="!px-3" },
                         <div class="flex items-center justify-between gap-3">
                             card_title("Data transferred")
-                            <span class="text-xs text-muted-foreground">"In / Out"</span>
+                            <span class="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">"In / Out"</span>
                         </div>
                     )
                     card_content(
@@ -112,12 +111,12 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
                         <div class="mb-2 grid grid-cols-3 gap-2">
                             <div>
                                 <div
-                                    class="text-xs uppercase tracking-wide text-muted-foreground"
+                                    class="text-xs uppercase tracking-[0.18em] text-muted-foreground font-mono"
                                 >
                                     "In"
                                 </div>
                                 <div
-                                    class="text-base font-semibold"
+                                    class="hud-value text-xl"
                                     data-transfer-in="true"
                                 >
                                     (format_bytes(ingest_bytes))
@@ -125,12 +124,12 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
                             </div>
                             <div>
                                 <div
-                                    class="text-xs uppercase tracking-wide text-muted-foreground"
+                                    class="text-xs uppercase tracking-[0.18em] text-muted-foreground font-mono"
                                 >
                                     "Out"
                                 </div>
                                 <div
-                                    class="text-base font-semibold"
+                                    class="hud-value text-xl"
                                     data-transfer-out="true"
                                 >
                                     (format_bytes(egress_bytes))
@@ -138,12 +137,12 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
                             </div>
                             <div>
                                 <div
-                                    class="text-xs uppercase tracking-wide text-muted-foreground"
+                                    class="text-xs uppercase tracking-[0.18em] text-muted-foreground font-mono"
                                 >
                                     "Total"
                                 </div>
                                 <div
-                                    class="text-base font-semibold"
+                                    class="hud-value text-xl"
                                     data-transfer-total="true"
                                 >
                                     (format_bytes(total_bytes))
@@ -160,12 +159,11 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
             </div>
         </section>
         <section aria-labelledby="targets-heading" class="mt-6">
-            <div class="mb-2 flex items-end justify-between gap-4">
-                <div>
-                    <h2 id="targets-heading" class="text-base font-semibold">
-                        "Targets"
-                    </h2>
-                </div>
+            <div class="mb-2 flex items-center justify-between gap-4">
+                <h2 id="targets-heading" class="hud-label flex items-center gap-2">
+                    <span class="hud-dot bg-info text-info"></span>
+                    "TARGETS"
+                </h2>
             </div>
             <div
                 class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
@@ -176,14 +174,14 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
                     let outbound = sample.map_or(0, |value| value.outbound_bps);
                     card(
                         attrs: attributes! {
-                            class="!gap-3 !rounded-lg !py-3"
+                            class="!gap-2 !py-3"
                             data-target-metric=(target.name.clone())
                         },
                         card_header(
                             attrs: attributes! { class="!px-3" },
                             <div class="flex items-center justify-between gap-3">
                                 card_title((target.name.clone()))
-                                <span class="text-xs text-muted-foreground">
+                                <span class="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                                     (if sample.is_some() { "Relaying" } else { "Idle" })
                                 </span>
                             </div>
@@ -193,12 +191,12 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
                             <div class="mb-2">
                                 <div>
                                     <div
-                                        class="text-xs uppercase tracking-wide text-muted-foreground"
+                                        class="text-xs uppercase tracking-[0.18em] text-muted-foreground font-mono"
                                     >
                                         "Outbound bitrate"
                                     </div>
                                     <div
-                                        class="text-base font-semibold"
+                                        class="hud-value text-xl"
                                         data-bitrate-out="true"
                                     >
                                         (format_bitrate(outbound))
@@ -219,24 +217,23 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
             }
         </section>
         <section aria-labelledby="chat-messages-heading" class="mt-6">
-            <div class="mb-2 flex items-end justify-between gap-4">
-                <div>
-                    <h2 id="chat-messages-heading" class="text-base font-semibold">
-                        "Chat"
-                    </h2>
-                </div>
+            <div class="mb-2 flex items-center justify-between gap-4">
+                <h2 id="chat-messages-heading" class="hud-label flex items-center gap-2">
+                    <span class="hud-dot bg-warn text-warn"></span>
+                    "CHAT"
+                </h2>
             </div>
             <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 card(
                     attrs: attributes! {
-                        class="!gap-3 !rounded-lg !py-3"
+                        class="!gap-2 !py-3"
                         data-chat-messages-metric="true"
                     },
                     card_header(
                         attrs: attributes! { class="!px-3" },
                         <div class="flex items-center justify-between gap-3">
                             card_title("Messages received")
-                            <span class="text-xs text-muted-foreground">
+                            <span class="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                                 "All sources"
                             </span>
                         </div>
@@ -245,12 +242,12 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
                         attrs: attributes! { class="!px-3" },
                         <div class="mb-2">
                             <div
-                                class="text-xs uppercase tracking-wide text-muted-foreground"
+                                class="text-xs uppercase tracking-[0.18em] text-muted-foreground font-mono"
                             >
                                 "Total messages"
                             </div>
                             <div
-                                class="text-base font-semibold"
+                                class="hud-value text-xl"
                                 data-chat-messages-received="true"
                             >
                                 (chat_messages_received.to_string())

@@ -1,5 +1,5 @@
-/* Neutral theme tokens. Components use these variables so the palette can be
-   changed in one place. Geist is provided separately by topcoat-font. */
+/* Ops / control-room theme. Dark-first, terminal-chic HUD.
+   Geist + JetBrains Mono are loaded in <head>; tokens exposed as Tailwind utilities. */
 
 @import "tailwindcss";
 
@@ -7,61 +7,175 @@
 @source "./src/**/*.rs";
 
 /* Dark mode is opted into by putting the `dark` class on an ancestor,
-   typically <html>. */
+   typically <html>. The dashboard is dark-first: :root already carries
+   the ops palette so bare markup still renders as control-room. */
 @custom-variant dark (&:is(.dark *));
 
 /* Expose the tokens as Tailwind utilities. */
 @theme inline {
-  --font-sans: "Geist", sans-serif;
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
   --color-background: var(--background);
+  --color-panel: var(--panel);
   --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  --color-edge: var(--border);
   --color-ring: var(--ring);
+  --color-signal: var(--signal);
+  --color-live: var(--live);
+  --color-warn: var(--warn);
+  --color-info: var(--info);
+
   --shadow-xs: var(--shadow-xs);
   --shadow-sm: var(--shadow-sm);
+
+  --animate-blink: blink 1.1s steps(2, start) infinite;
+  --animate-rec: rec-pulse 1.6s ease-in-out infinite;
 }
 
 :root {
-  --background: oklch(0.995 0.003 260);
-  --foreground: oklch(0.24 0.012 260);
-  --muted-foreground: oklch(0.51 0.014 260);
-  --primary: oklch(0.31 0.02 260);
-  --primary-foreground: oklch(0.985 0.003 260);
-  --destructive: oklch(0.55 0.2 27);
-  --destructive-foreground: oklch(0.99 0.012 27);
-  --border: oklch(0.9 0.008 260);
-  --ring: oklch(0.62 0.06 260);
-  --shadow-xs: 0 1px 2px oklch(0.24 0.02 260 / 12%);
-  --shadow-sm:
-    0 1px 2px oklch(0.24 0.02 260 / 10%),
-    0 2px 8px -2px oklch(0.24 0.02 260 / 9%);
+  --background: oklch(0.13 0.01 260);
+  --panel: oklch(0.17 0.012 260);
+  --muted: oklch(0.22 0.014 260);
+  --foreground: oklch(0.92 0.01 260);
+  --muted-foreground: oklch(0.62 0.015 260);
+  --primary: oklch(0.86 0.22 145);
+  --primary-foreground: oklch(0.14 0.02 145);
+  --signal: oklch(0.86 0.22 145);
+  --live: oklch(0.65 0.24 25);
+  --warn: oklch(0.85 0.18 85);
+  --info: oklch(0.82 0.12 200);
+  --destructive: oklch(0.65 0.24 25);
+  --destructive-foreground: oklch(0.97 0.01 25);
+  --border: oklch(1 0 0 / 9%);
+  --ring: oklch(0.86 0.22 145 / 60%);
+  --shadow-xs: 0 1px 0 oklch(1 0 0 / 4%) inset, 0 1px 2px oklch(0 0 0 / 40%);
+  --shadow-sm: 0 1px 0 oklch(1 0 0 / 5%) inset, 0 8px 24px -12px oklch(0 0 0 / 60%);
 }
 
 .dark {
-  --background: oklch(0.17 0.012 260);
-  --foreground: oklch(0.93 0.006 260);
-  --muted-foreground: oklch(0.68 0.012 260);
-  --primary: oklch(0.92 0.008 260);
-  --primary-foreground: oklch(0.21 0.015 260);
-  --destructive: oklch(0.66 0.18 25);
-  --destructive-foreground: oklch(0.14 0.02 25);
-  --border: oklch(0.3 0.012 260);
-  --ring: oklch(0.6 0.05 260);
-  /* Light-mode shadows disappear on a dark background, so these are deeper. */
-  --shadow-xs: 0 1px 2px oklch(0 0 0 / 35%);
-  --shadow-sm: 0 1px 2px oklch(0 0 0 / 35%), 0 2px 8px -2px oklch(0 0 0 / 30%);
+  --background: oklch(0.13 0.01 260);
+  --panel: oklch(0.17 0.012 260);
+  --muted: oklch(0.22 0.014 260);
+  --foreground: oklch(0.92 0.01 260);
+  --muted-foreground: oklch(0.62 0.015 260);
+  --primary: oklch(0.86 0.22 145);
+  --primary-foreground: oklch(0.14 0.02 145);
+  --signal: oklch(0.86 0.22 145);
+  --live: oklch(0.65 0.24 25);
+  --warn: oklch(0.85 0.18 85);
+  --info: oklch(0.82 0.12 200);
+  --destructive: oklch(0.65 0.24 25);
+  --destructive-foreground: oklch(0.97 0.01 25);
+  --border: oklch(1 0 0 / 9%);
+  --ring: oklch(0.86 0.22 145 / 60%);
+  --shadow-xs: 0 1px 0 oklch(1 0 0 / 4%) inset, 0 1px 2px oklch(0 0 0 / 40%);
+  --shadow-sm: 0 1px 0 oklch(1 0 0 / 5%) inset, 0 8px 24px -12px oklch(0 0 0 / 60%);
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+@keyframes rec-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 oklch(0.65 0.24 25 / 55%); }
+  50% { opacity: 0.75; box-shadow: 0 0 0 5px oklch(0.65 0.24 25 / 0%); }
 }
 
 @layer base {
   body {
-    @apply bg-background font-sans text-foreground;
+    @apply bg-background font-sans text-foreground antialiased;
+    background-image:
+      radial-gradient(oklch(1 0 0 / 4.5%) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+
+  ::selection {
+    background: oklch(0.86 0.22 145 / 30%);
+  }
+
+  canvas {
+    @apply font-mono;
   }
 }
 
 @layer components {
+  /* Raised control-room surface: flat hairline, tiny radius, inset top light. */
+  .hud-panel {
+    @apply flex flex-col gap-3 rounded-sm border border-border bg-panel/90 text-foreground shadow-sm backdrop-blur;
+    box-shadow:
+      0 1px 0 oklch(1 0 0 / 5%) inset,
+      0 12px 32px -20px oklch(0 0 0 / 70%);
+  }
+
+  /* 10px uppercase mono eyebrow used for every section header. */
+  .hud-label {
+    @apply font-mono text-[10px] font-medium tracking-[0.18em] text-muted-foreground uppercase;
+  }
+
+  /* Big readout: bitrates, counts, timecodes. Always tabular. */
+  .hud-value {
+    @apply font-mono font-semibold tracking-tight tabular-nums;
+  }
+
+  /* Segmented command-bar container for nav tabs. */
+  .hud-tabs {
+    @apply flex items-center gap-0.5 rounded-sm border border-border bg-black/40 p-0.5;
+  }
+
+  /* Fine hairline divider. */
+  .hud-rule {
+    @apply h-px w-full bg-border;
+  }
+
+  /* Terminal scanlines overlaid on video / dark wells. */
+  .hud-scanlines {
+    position: relative;
+  }
+  .hud-scanlines::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      transparent 0px,
+      transparent 2px,
+      oklch(0 0 0 / 22%) 3px
+    );
+    mix-blend-mode: overlay;
+  }
+
+  /* Viewfinder corner brackets. Wrap a relative container, add 4 spans. */
+  .hud-corner {
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    border-color: oklch(1 0 0 / 35%);
+    border-style: solid;
+    border-width: 0;
+    pointer-events: none;
+  }
+  .hud-corner-tl { top: 10px; left: 10px; border-top-width: 2px; border-left-width: 2px; }
+  .hud-corner-tr { top: 10px; right: 10px; border-top-width: 2px; border-right-width: 2px; }
+  .hud-corner-bl { bottom: 10px; left: 10px; border-bottom-width: 2px; border-left-width: 2px; }
+  .hud-corner-br { bottom: 10px; right: 10px; border-bottom-width: 2px; border-right-width: 2px; }
+
+  /* Status dot: 6px round + glow. Color via bg-signal / bg-live / bg-warn. */
+  .hud-dot {
+    @apply inline-block size-1.5 shrink-0 rounded-full;
+    box-shadow: 0 0 8px 0 currentColor;
+  }
+
+  /* Dark well for terminals, logs, video letterbox. */
+  .hud-well {
+    @apply overflow-hidden rounded-sm border border-border bg-black/70;
+  }
 }
