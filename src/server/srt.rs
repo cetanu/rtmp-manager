@@ -83,9 +83,10 @@ pub async fn run_srt_server(
         let stream_id = request.stream_id().map(|s| s.as_str()).unwrap_or_default();
         let expected_stream_key = app.config.get().server.ingest_stream_key.clone();
 
+        // Never log the raw stream_id: it carries the secret stream key.
         info!(
             client_ip = %client_ip,
-            stream_id = %stream_id,
+            has_stream_id = !stream_id.is_empty(),
             "Client connecting to SRT Ingest"
         );
 
@@ -103,9 +104,19 @@ pub async fn run_srt_server(
         match request.accept(None).await {
             Ok(socket) => {
                 info!(client_ip = %client_ip, "SRT stream accepted from client");
+                // Bound concurrent bridges with the same limiter as RTMP relays.
+                let slot = match super::relay::FFMPEG_SLOTS.clone().acquire_owned().await {
+                    Ok(slot) => slot,
+                    Err(error) => {
+                        warn!(%error, client_ip = %client_ip, "Rejecting SRT ingest: server overloaded");
+                        continue;
+                    }
+                };
                 let stream_key = expected_stream_key.clone();
+                let metrics = app.metrics.clone();
                 tokio::spawn(async move {
-                    handle_srt_session(socket, internal_rtmp_addr, stream_key, client_ip).await;
+                    let _slot = slot;
+                    handle_srt_session(socket, internal_rtmp_addr, stream_key, client_ip, metrics).await;
                 });
             }
             Err(error) => {
@@ -114,6 +125,7 @@ pub async fn run_srt_server(
         }
     }
 
+    warn!("SRT ingest listener stream ended; SRT ingest is no longer accepting connections");
     Ok(())
 }
 
@@ -123,8 +135,12 @@ async fn handle_srt_session(
     internal_rtmp_addr: SocketAddr,
     stream_key: String,
     client_ip: SocketAddr,
+    metrics: std::sync::Arc<crate::metrics::Metrics>,
 ) {
     info!(client_ip = %client_ip, "Starting SRT ingest session bridge");
+    // Note: the stream key appears in the ffmpeg argv (visible via `ps`).
+    // This is a known limitation of the internal RTMP bridge; the key is
+    // redacted from all logs via `redact_secrets`.
     let rtmp_target = format!("rtmp://{internal_rtmp_addr}/live/{stream_key}");
     let mut bridge_child = match tokio::process::Command::new("ffmpeg")
         .args([
@@ -167,11 +183,20 @@ async fn handle_srt_session(
         let secrets = secrets.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let detail = redact_secrets(&line, &secrets);
-                let trimmed = detail.trim();
-                if !trimmed.is_empty() {
-                    tracing::warn!(detail = %trimmed, "SRT bridge FFmpeg diagnostic");
+            loop {
+                match lines.next_line().await {
+                    Ok(Some(line)) => {
+                        let detail = redact_secrets(&line, &secrets);
+                        let trimmed = detail.trim();
+                        if !trimmed.is_empty() {
+                            tracing::warn!(detail = %trimmed, "SRT bridge FFmpeg diagnostic");
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(error) => {
+                        tracing::warn!(%error, "SRT bridge FFmpeg stderr read error");
+                        break;
+                    }
                 }
             }
         })
@@ -182,9 +207,13 @@ async fn handle_srt_session(
         match packet {
             Ok((_instant, bytes)) => {
                 total_bytes = total_bytes.saturating_add(bytes.len() as u64);
+                metrics.add_ingest_bytes(bytes.len() as u64);
 
-                if let Err(error) = stdin.write_all(&bytes).await {
-                    tracing::warn!(%error, "SRT bridge stdin pipe closed");
+                // Bound stdin backpressure so a stalled ffmpeg can't stall SRT forever.
+                if let Err(error) =
+                    tokio::time::timeout(Duration::from_secs(5), stdin.write_all(&bytes)).await
+                {
+                    tracing::warn!(%error, "SRT bridge stdin write timed out or closed");
                     break;
                 }
             }
@@ -202,12 +231,27 @@ async fn handle_srt_session(
         "SRT client stream stopped publishing"
     );
 
+    // Graceful shutdown first, then kill, both bounded so the task can't leak.
     let _ = tokio::time::timeout(Duration::from_secs(3), bridge_child.wait()).await;
     let _ = bridge_child.start_kill();
-    let _ = bridge_child.wait().await;
+    match tokio::time::timeout(Duration::from_secs(5), bridge_child.wait()).await {
+        Ok(_) => {}
+        Err(_) => {
+            warn!("SRT bridge FFmpeg did not exit after kill; dropping (kill_on_drop)");
+        }
+    }
 
     if let Some(task) = stderr_task {
-        let _ = task.await;
+        // Bound stderr drain so a hung pipe can't leak the bridge task.
+        match tokio::time::timeout(Duration::from_secs(5), task).await {
+            Ok(Ok(())) => {}
+            Ok(Err(join_error)) => {
+                warn!(%join_error, "SRT bridge stderr task failed");
+            }
+            Err(_) => {
+                warn!("SRT bridge stderr drain timed out");
+            }
+        }
     }
 
     info!(client_ip = %client_ip, "SRT ingest session ended");
