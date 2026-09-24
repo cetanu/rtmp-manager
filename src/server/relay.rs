@@ -12,7 +12,7 @@ use tokio::task::JoinHandle;
 
 const MAX_CONCURRENT_FFMPEG_PROCESSES: usize = MAX_TARGET_COUNT;
 // Deployment-level CPU and memory cgroup limits remain a follow-up under GOAL-302.
-static FFMPEG_SLOTS: LazyLock<Arc<Semaphore>> =
+pub(crate) static FFMPEG_SLOTS: LazyLock<Arc<Semaphore>> =
     LazyLock::new(|| Arc::new(Semaphore::new(MAX_CONCURRENT_FFMPEG_PROCESSES)));
 
 pub struct RelayProcess {
@@ -33,17 +33,27 @@ pub fn spawn_relay(
 pub async fn cancel_relays(relays: Vec<RelayProcess>) {
     for relay in relays {
         let _ = relay.cancel.send(true);
-        let _ = relay.task.await;
+        // Never hold up the actor loop on a hung ffmpeg: give it 5s then abort.
+        match tokio::time::timeout(Duration::from_secs(5), relay.task).await {
+            Ok(Ok(())) => {}
+            Ok(Err(join_error)) => {
+                tracing::warn!(%join_error, "Relay task ended with join error during cancel");
+            }
+            Err(_) => {
+                tracing::warn!("Relay task did not stop within 5s of cancel; leaving it to abort on drop");
+            }
+        }
     }
 }
 
 pub fn target_destination(target: &TargetConfig) -> String {
-    if target.stream_key.is_empty() {
-        target.url.clone()
+    let key = target.stream_key.trim();
+    if key.is_empty() {
+        target.url.trim().to_string()
     } else if target.url.ends_with('/') {
-        format!("{}{}", target.url, target.stream_key)
+        format!("{}{}", target.url.trim_end(), key)
     } else {
-        format!("{}/{}", target.url, target.stream_key)
+        format!("{}/{}", target.url.trim_end_matches('/'), key)
     }
 }
 
@@ -168,31 +178,40 @@ pub fn run_direct_test(
                         let mut current_speed = String::new();
                         let mut last_progress_log = tokio::time::Instant::now();
 
-                        while let Ok(Some(line)) = lines.next_line().await {
-                            if let Some(value) = line.strip_prefix("bitrate=") {
-                                if let Some(bps) = parse_ffmpeg_bitrate(value) {
-                                    current_bitrate_bps = bps;
-                                    bitrate.update_from_ffmpeg(bps);
+                        loop {
+                            match lines.next_line().await {
+                                Ok(Some(line)) => {
+                                    if let Some(value) = line.strip_prefix("bitrate=") {
+                                        if let Some(bps) = parse_ffmpeg_bitrate(value) {
+                                            current_bitrate_bps = bps;
+                                            bitrate.update_from_ffmpeg(bps);
+                                        }
+                                    } else if let Some(value) = line.strip_prefix("total_size=") {
+                                        if let Some(bytes) = parse_ffmpeg_total_size(value) {
+                                            current_total_bytes = bytes;
+                                        }
+                                    } else if let Some(value) = line.strip_prefix("speed=") {
+                                        current_speed = value.trim().to_string();
+                                    } else if let Some(value) = line.strip_prefix("progress=") {
+                                        let progress = value.trim();
+                                        if progress == "continue"
+                                            && last_progress_log.elapsed() >= Duration::from_secs(3)
+                                        {
+                                            tracing::info!(
+                                                name = %target_name,
+                                                bitrate = %format_bitrate_display(current_bitrate_bps),
+                                                sent = %format_bytes_display(current_total_bytes),
+                                                speed = %current_speed,
+                                                "Direct test stream progress"
+                                            );
+                                            last_progress_log = tokio::time::Instant::now();
+                                        }
+                                    }
                                 }
-                            } else if let Some(value) = line.strip_prefix("total_size=") {
-                                if let Some(bytes) = parse_ffmpeg_total_size(value) {
-                                    current_total_bytes = bytes;
-                                }
-                            } else if let Some(value) = line.strip_prefix("speed=") {
-                                current_speed = value.trim().to_string();
-                            } else if let Some(value) = line.strip_prefix("progress=") {
-                                let progress = value.trim();
-                                if progress == "continue"
-                                    && last_progress_log.elapsed() >= Duration::from_secs(3)
-                                {
-                                    tracing::info!(
-                                        name = %target_name,
-                                        bitrate = %format_bitrate_display(current_bitrate_bps),
-                                        sent = %format_bytes_display(current_total_bytes),
-                                        speed = %current_speed,
-                                        "Direct test stream progress"
-                                    );
-                                    last_progress_log = tokio::time::Instant::now();
+                                Ok(None) => break,
+                                Err(error) => {
+                                    tracing::warn!(name = %target_name, %error, "Direct test stdout read error");
+                                    break;
                                 }
                             }
                         }
@@ -205,20 +224,34 @@ pub fn run_direct_test(
                     let secrets = secrets.clone();
                     tokio::spawn(async move {
                         let mut lines = BufReader::new(stderr).lines();
-                        let mut captured_stderr = Vec::new();
-                        while let Ok(Some(line)) = lines.next_line().await {
-                            let detail = redact_secrets(&line, &secrets);
-                            let trimmed = detail.trim();
-                            if !trimmed.is_empty() {
-                                tracing::warn!(
-                                    name = %target_name,
-                                    detail = %trimmed,
-                                    "Direct test FFmpeg diagnostic"
-                                );
-                                captured_stderr.push(trimmed.to_string());
+                        // Ring buffer: keep only the tail for failure diagnostics.
+                        let mut captured_stderr: std::collections::VecDeque<String> =
+                            std::collections::VecDeque::with_capacity(50);
+                        loop {
+                            match lines.next_line().await {
+                                Ok(Some(line)) => {
+                                    let detail = redact_secrets(&line, &secrets);
+                                    let trimmed = detail.trim();
+                                    if !trimmed.is_empty() {
+                                        tracing::warn!(
+                                            name = %target_name,
+                                            detail = %trimmed,
+                                            "Direct test FFmpeg diagnostic"
+                                        );
+                                        if captured_stderr.len() >= 50 {
+                                            captured_stderr.pop_front();
+                                        }
+                                        captured_stderr.push_back(trimmed.to_string());
+                                    }
+                                }
+                                Ok(None) => break,
+                                Err(error) => {
+                                    tracing::warn!(name = %target_name, %error, "Direct test stderr read error");
+                                    break;
+                                }
                             }
                         }
-                        captured_stderr.join("\n")
+                        captured_stderr.into_iter().collect::<Vec<_>>().join("\n")
                     })
                 });
 
@@ -233,20 +266,39 @@ pub fn run_direct_test(
                                 "Direct target test timed out; terminating FFmpeg"
                             );
                             let _ = child.start_kill();
-                            (child.wait().await, true)
+                            // Bound the second wait so a hung ffmpeg can't hold the slot forever.
+                            match tokio::time::timeout(Duration::from_secs(5), child.wait()).await {
+                                Ok(status) => (status, true),
+                                Err(_) => {
+                                    let _ = child.kill().await;
+                                    (child.wait().await, true)
+                                }
+                            }
                         }
                     };
                 bitrate.update_from_ffmpeg(0);
                 metrics.unregister_target(&target.name);
 
                 let total_bytes = if let Some(task) = stdout_task {
-                    task.await.unwrap_or_default()
+                    match task.await {
+                        Ok(bytes) => bytes,
+                        Err(join_error) => {
+                            tracing::warn!(name = %target.name, %join_error, "Direct test stdout task failed");
+                            0
+                        }
+                    }
                 } else {
                     0
                 };
 
                 let captured_stderr = if let Some(task) = stderr_task {
-                    task.await.unwrap_or_default()
+                    match task.await {
+                        Ok(output) => output,
+                        Err(join_error) => {
+                            tracing::warn!(name = %target.name, %join_error, "Direct test stderr task failed");
+                            String::new()
+                        }
+                    }
                 } else {
                     String::new()
                 };
@@ -327,8 +379,8 @@ async fn supervise_relay(
         if *cancel.borrow() {
             break;
         }
-        attempt += 1;
-        let _ffmpeg_slot = match FFMPEG_SLOTS.clone().acquire_owned().await {
+        attempt = attempt.saturating_add(1);
+        let ffmpeg_slot = match FFMPEG_SLOTS.clone().acquire_owned().await {
             Ok(slot) => slot,
             Err(error) => {
                 tracing::error!(%error, "FFmpeg process limiter closed");
@@ -375,17 +427,26 @@ async fn supervise_relay(
             let metrics = Arc::clone(&metrics);
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    if let Some(value) = line.strip_prefix("bitrate=")
-                        && let Some(bps) = parse_ffmpeg_bitrate(value)
-                    {
-                        bitrate.update_from_ffmpeg(bps);
-                    } else if let Some(value) = line.strip_prefix("total_size=")
-                        && let Some(total) = parse_ffmpeg_total_size(value)
-                    {
-                        let delta = bitrate.update_total_bytes(total);
-                        if delta > 0 {
-                            metrics.add_egress_bytes(delta);
+                loop {
+                    match lines.next_line().await {
+                        Ok(Some(line)) => {
+                            if let Some(value) = line.strip_prefix("bitrate=")
+                                && let Some(bps) = parse_ffmpeg_bitrate(value)
+                            {
+                                bitrate.update_from_ffmpeg(bps);
+                            } else if let Some(value) = line.strip_prefix("total_size=")
+                                && let Some(total) = parse_ffmpeg_total_size(value)
+                            {
+                                let delta = bitrate.update_total_bytes(total);
+                                if delta > 0 {
+                                    metrics.add_egress_bytes(delta);
+                                }
+                            }
+                        }
+                        Ok(None) => break,
+                        Err(error) => {
+                            tracing::warn!(%error, "Relay FFmpeg stdout read error; stopping bitrate drain");
+                            break;
                         }
                     }
                 }
@@ -396,10 +457,19 @@ async fn supervise_relay(
             let secrets = secrets.clone();
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    let detail = redact_secrets(&line, &secrets);
-                    if !detail.trim().is_empty() {
-                        tracing::warn!(name = %target_name, %detail, "Relay FFmpeg diagnostic");
+                loop {
+                    match lines.next_line().await {
+                        Ok(Some(line)) => {
+                            let detail = redact_secrets(&line, &secrets);
+                            if !detail.trim().is_empty() {
+                                tracing::warn!(name = %target_name, %detail, "Relay FFmpeg diagnostic");
+                            }
+                        }
+                        Ok(None) => break,
+                        Err(error) => {
+                            tracing::warn!(name = %target_name, %error, "Relay FFmpeg stderr read error");
+                            break;
+                        }
                     }
                 }
             })
@@ -407,26 +477,35 @@ async fn supervise_relay(
 
         let exit = tokio::select! {
             changed = cancel.changed() => {
-                let _ = child.kill().await;
                 let _ = changed;
+                let _ = child.kill().await;
+                // Bound the wait so a hung ffmpeg can't hold the slot forever.
+                let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
                 None
             }
             result = child.wait() => Some(result),
         };
         bitrate.update_from_ffmpeg(0);
-        if let Some(task) = stdout_task {
-            let _ = task.await;
-        }
-        if let Some(task) = stderr_task {
-            let _ = task.await;
-        }
+        if let Some(task) = stdout_task
+            && let Err(join_error) = task.await {
+                tracing::warn!(name = %target.name, %join_error, "Relay stdout drain task failed");
+            }
+        if let Some(task) = stderr_task
+            && let Err(join_error) = task.await {
+                tracing::warn!(name = %target.name, %join_error, "Relay stderr drain task failed");
+            }
+        // Release the ffmpeg slot before the reconnect backoff sleep.
+        drop(ffmpeg_slot);
 
         let Some(exit) = exit else {
             break;
         };
         match exit {
+            Ok(status) if status.success() => {
+                tracing::warn!(name = %target.name, %status, "Stream target relay exited")
+            }
             Ok(status) => {
-                tracing::error!(name = %target.name, %status, "Stream target relay disconnected")
+                tracing::warn!(name = %target.name, %status, "Stream target relay disconnected")
             }
             Err(error) => {
                 tracing::error!(name = %target.name, %error, "Failed while waiting for target relay")
@@ -447,9 +526,15 @@ async fn supervise_relay(
 }
 
 async fn wait_for_retry(cancel: &mut watch::Receiver<bool>, seconds: u64) -> bool {
+    // Mark any pending cancel as seen so `changed()` doesn't return stale readiness,
+    // then wait for either the backoff or a fresh cancel.
+    let _ = cancel.borrow_and_update();
+    // Add small jitter so multiple targets don't retry in lockstep.
+    let jitter = (tokio::time::Instant::now().elapsed().as_nanos() % 500) as u64;
+    let backoff = Duration::from_secs(seconds).saturating_add(Duration::from_millis(jitter));
     tokio::select! {
-        _ = tokio::time::sleep(Duration::from_secs(seconds)) => false,
-        _ = cancel.changed() => true,
+        _ = tokio::time::sleep(backoff) => *cancel.borrow(),
+        result = cancel.changed() => result.is_err() || *cancel.borrow(),
     }
 }
 
