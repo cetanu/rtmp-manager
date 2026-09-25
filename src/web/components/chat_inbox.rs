@@ -39,12 +39,12 @@ async fn chat_toggle(
     let error = error.clone();
 
     Ok(view! {
-        <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+        <div class="flex items-center">
             <button
                 type="button"
                 role="switch"
                 aria-label=(format!("Toggle {label}"))
-                class="group relative inline-flex h-4.5 w-8 shrink-0 rounded-full bg-foreground/20 shadow-xs transition-colors outline-none data-[checked]:bg-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50"
+                class="group inline-flex h-8 cursor-pointer items-center gap-2 rounded-sm border border-border bg-white/5 px-3 font-mono text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase shadow-xs transition-colors outline-none hover:border-signal/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 data-[checked=true]:border-signal/50 data-[checked=true]:bg-signal/10 data-[checked=true]:text-signal"
                 :aria-checked=$(if enabled.get() { "true" } else { "false" })
                 :data-checked=$(enabled.get())
                 :disabled=$(pending.get())
@@ -61,10 +61,10 @@ async fn chat_toggle(
                 })
             >
                 <span
-                    class="pointer-events-none absolute top-1/2 left-0.5 size-3.5 -translate-y-1/2 rounded-full bg-background shadow-xs transition-transform group-data-[checked]:translate-x-3.5"
+                    class="hud-dot bg-white/30 text-white/30 group-data-[checked=true]:bg-signal group-data-[checked=true]:text-signal"
                 ></span>
+                <span>(label)</span>
             </button>
-            <span>(label)</span>
         </div>
     })
 }
@@ -345,7 +345,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
     Ok(view! {
         card(
             attrs: attributes! {
-                class="mb-1 h-[calc(100dvh-6.5rem)] max-h-[calc(100dvh-6.5rem)] min-h-[18rem] !gap-2 !py-0"
+                class="mb-2 h-full min-h-[18rem] !gap-2 !py-0"
             },
             if poll_form_open.get() {
                 poll_setup(signals: poll_setup_signals.clone())
@@ -512,7 +512,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                 attrs: attributes! {
                     class="!px-3 !pt-2 !pb-2 flex items-center justify-between gap-3 flex-wrap"
                 },
-                <div class="flex items-center gap-4">
+                <div class="flex flex-wrap items-center gap-2">
                     if youtube_configured {
                         chat_toggle(
                             label: "YouTube polling",
@@ -547,7 +547,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                     href=(format!("/overlay/chat?key={overlay_token}"))
                     target="_blank"
                     rel="noopener noreferrer"
-                    class="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                    class=(button_variants(ButtonVariant::Outline, ButtonSize::Md))
                     title="Open OBS browser source overlay in a new tab"
                 >
                     <svg
@@ -692,10 +692,12 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
             }
             if show_chat {
                 <div class="min-h-0 flex-1 overflow-y-auto pr-1">
-                    <div class="flex flex-col gap-2">
-                        if snapshot.messages.is_empty() {
-                            "No chat messages waiting."
-                        } else {
+                    if snapshot.messages.is_empty() {
+                        <div class="flex h-full min-h-32 items-center justify-center border border-border bg-black/30 px-4 text-center font-mono text-[11px] text-muted-foreground">
+                            "// No chat messages waiting."
+                        </div>
+                    } else {
+                        <div class="flex flex-col gap-2">
                             for (index, message) in snapshot
                                 .messages
                                 .into_iter()
@@ -705,17 +707,19 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
                                     highlighted: index == 0
                                 )
                             }
-                        }
-                    </div>
+                        </div>
+                    }
                 </div>
             }
             if show_chat {
-                <div class="mt-1 mb-1 flex justify-end gap-4 text-right">
-                    <span class="text-sm font-medium">
-                        (format!("{} queued", snapshot.queued))
+                <div class="mt-1 flex justify-end gap-4 border-t border-border pt-2 pb-1 font-mono text-[10px] tracking-[0.12em] uppercase">
+                    <span class="text-muted-foreground">
+                        <span class="font-semibold text-foreground tabular-nums">(snapshot.queued)</span>
+                        " queued"
                     </span>
-                    <span class="text-sm text-muted-foreground">
-                        (format!("{} dropped", snapshot.dropped))
+                    <span class="text-muted-foreground">
+                        <span class="font-semibold text-foreground tabular-nums">(snapshot.dropped)</span>
+                        " dropped"
                     </span>
                 </div>
             }

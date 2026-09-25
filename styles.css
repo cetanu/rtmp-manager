@@ -97,6 +97,23 @@
     background-size: 22px 22px;
   }
 
+  /* The message panel fills the chat viewport; source controls follow below. */
+  body:has([data-app-page="chat"]:not([hidden])) {
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  body:has([data-app-page="chat"]:not([hidden])) > main {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  [data-app-page="chat"]:not([hidden]) {
+    height: 100%;
+  }
+
   ::selection {
     background: oklch(0.86 0.22 145 / 30%);
   }
