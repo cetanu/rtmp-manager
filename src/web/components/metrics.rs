@@ -47,17 +47,11 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
 
     Ok(view! {
         <section aria-labelledby="ingest-heading">
-            <div class="mb-2 flex items-center justify-between gap-4">
+            <div class="mb-2 flex items-center gap-4">
                 <h2 id="ingest-heading" class="hud-label flex items-center gap-2">
                     <span class="hud-dot bg-signal text-signal"></span>
                     "STREAM INGEST"
                 </h2>
-                <span
-                    data-metrics-status="true"
-                    class="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground"
-                >
-                    "LIVE"
-                </span>
             </div>
             <div
                 class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"

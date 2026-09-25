@@ -66,7 +66,7 @@ pub async fn stream_preview_player(#[default] child: Child<'_>) -> Result<impl V
                 <span
                     class="rounded-[3px] border border-white/10 bg-black/60 px-2 py-1 font-mono text-[10px] tracking-[0.18em] text-white/80 uppercase backdrop-blur"
                 >
-                    "PROGRAM // PREVIEW"
+                    "// PREVIEW"
                 </span>
             </div>
             <div
@@ -82,7 +82,7 @@ pub async fn stream_preview_player(#[default] child: Child<'_>) -> Result<impl V
                 <span
                     class="rounded-[3px] border border-white/10 bg-black/60 px-2 py-1 font-mono text-[10px] tracking-[0.14em] text-white/70 tabular-nums backdrop-blur"
                 >
-                    "SAFE // 16:9"
+                    "16:9"
                 </span>
             </div>
             (child)

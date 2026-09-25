@@ -164,15 +164,6 @@ async fn app_page(active_page: &'static str) -> Result<impl View> {
             >
                 app_navigation(active_page: active_page)
                 <main class="mx-auto w-full max-w-[1600px] px-4 py-4 sm:px-5">
-                    <div
-                        class="mb-3 flex items-center justify-between gap-3 font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase"
-                        aria-hidden="true"
-                    >
-                        <span>"SYS // RTMP-MGR OPS"</span>
-                        <span class="hidden sm:inline">
-                            "SECURE // LOCALHOST // NO-STORE"
-                        </span>
-                    </div>
                     <section data-app-page="preview" hidden=(active_page != "preview")>
                         stream_preview()
                     </section>

@@ -22,6 +22,7 @@ pub async fn config_transfer(cx: &Cx) -> Result<impl View> {
     Ok(view! {
         card(
             card_content(
+                attrs: attributes! { class="pt-4" },
                 <div class="flex flex-wrap gap-3">
                     <button
                         type="button"

@@ -31,7 +31,7 @@ pub async fn publishing_controls(cx: &Cx, revision: f64) -> Result<impl View> {
             status.state,
             StreamState::Preparing | StreamState::PreviewReady | StreamState::PreviewFailed
         );
-    let toggle_class = "inline-flex h-8 cursor-pointer items-center justify-center gap-2 rounded-sm border border-border bg-white/5 px-3 font-mono text-[11px] font-semibold tracking-[0.14em] text-muted-foreground uppercase shadow-xs transition-colors outline-none hover:border-signal/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:bg-white/10 disabled:pointer-events-none disabled:opacity-50 data-[live=true]:border-live/50 data-[live=true]:bg-live data-[live=true]:text-white data-[live=true]:hover:bg-live/90 data-[live=true]:active:bg-live/80";
+    let toggle_class = "inline-flex h-8 cursor-pointer items-center justify-center gap-2 rounded-sm border border-border bg-white/5 px-3 font-mono text-[11px] font-semibold tracking-[0.14em] text-muted-foreground uppercase shadow-xs transition-colors outline-none hover:border-signal/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:bg-white/10 disabled:pointer-events-none disabled:opacity-50 data-[live=true]:border-live/50 data-[live=true]:bg-live/10 data-[live=true]:text-live data-[live=true]:hover:bg-live/20 data-[live=true]:active:bg-live/30";
 
     let pending = signal(cx, || false);
     let action_error = signal(cx, String::new);
@@ -40,7 +40,7 @@ pub async fn publishing_controls(cx: &Cx, revision: f64) -> Result<impl View> {
 
     Ok(view! {
         <div class="flex flex-wrap items-center gap-2">
-            <span class="hud-label hidden sm:inline">"TX CTRL //"</span>
+            <span class="hud-label hidden sm:inline">"TRANSMISSION CONTROL //"</span>
             <button
                 type="button"
                 class=(toggle_class)
@@ -58,12 +58,14 @@ pub async fn publishing_controls(cx: &Cx, revision: f64) -> Result<impl View> {
             >
                 <span
                     :class=$(if live.get() {
-                        "hud-dot bg-white text-white animate-rec"
-                    } else {
+                        "hud-dot bg-live text-live animate-rec"
+                    } else if can_toggle.get() {
                         "hud-dot bg-signal text-signal"
+                    } else {
+                        "hud-dot bg-white/30 text-white/30"
                     })
                 ></span>
-                $(if live.get() { "● LIVE — CUT" } else { "○ GO LIVE" })
+                $(if live.get() { "LIVE" } else if can_toggle.get() { "PUBLISH" } else { "INACTIVE" })
             </button>
             <p
                 :hidden=$(action_error.get().is_empty())

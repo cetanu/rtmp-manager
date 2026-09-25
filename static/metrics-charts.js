@@ -121,7 +121,6 @@
   }
 
   function render() {
-    const status = document.querySelector("[data-metrics-status]");
     if (ingestCard) {
       const latest = samples.at(-1)?.ingest_bps || 0;
       ingestCard.querySelector("[data-ingest-bitrate]").textContent = formatRate(latest);
@@ -187,7 +186,6 @@
         1,
       );
     }
-    if (status) status.textContent = "● LIVE // SYNC";
   }
 
   window.addEventListener("rtmp:metrics-history", (event) => {
