@@ -10,6 +10,15 @@
   let previewReady = false;
   let retryTimer = null;
 
+  function renderBitrate(bps) {
+    if (typeof bps !== "number") return;
+    const bitrate = document.querySelector('[data-preview-bitrate]');
+    if (!bitrate) return;
+    if (bps >= 1_000_000) bitrate.textContent = `${(bps / 1_000_000).toFixed(2)} Mbps`;
+    else if (bps >= 1_000) bitrate.textContent = `${Math.round(bps / 1_000)} Kbps`;
+    else bitrate.textContent = `${bps} bps`;
+  }
+
   function detachPreview() {
     if (retryTimer) {
       clearTimeout(retryTimer);
@@ -73,14 +82,9 @@
 
     const recDot = document.querySelector('[data-preview-rec-dot]');
     const recLabel = document.querySelector('[data-preview-rec-label]');
-    const bitrate = document.querySelector('[data-preview-bitrate]');
     const isLive = status.state === "live";
     if (recDot) recDot.className = 'hud-dot ' + (isLive ? 'bg-red-500 text-red-500 animate-rec' : previewReady ? 'hud-dot bg-emerald-400 text-emerald-400' : 'hud-dot bg-white/30 text-white/30');
     if (recLabel) recLabel.textContent = isLive ? 'REC' : previewReady ? 'READY' : 'STBY';
-    if (bitrate && typeof status.ingest_bps === 'number') {
-      const mbps = status.ingest_bps / 1000000;
-      bitrate.textContent = mbps >= 1 ? mbps.toFixed(2) + ' Mbps' : Math.round(status.ingest_bps / 1000) + ' Kbps';
-    }
 
     previewReady = status.state === "preview_ready" || status.state === "live";
     const previewFailed = status.state === "preview_failed";
@@ -107,6 +111,12 @@
   }
 
   window.addEventListener("rtmp:stream-status", (event) => render(event.detail));
+  window.addEventListener("rtmp:metrics-history", (event) => {
+    renderBitrate(event.detail.at(-1)?.ingest_bps);
+  });
+  window.addEventListener("rtmp:metrics-sample", (event) => {
+    renderBitrate(event.detail?.ingest_bps);
+  });
   refresh();
   if (!window.EventSource) window.setInterval(refresh, 1000);
 })();
