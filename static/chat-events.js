@@ -18,10 +18,22 @@
 
 (() => {
   // Topcoat serves the SSE stream; its browser runtime has no EventSource binding yet.
-  if (!window.EventSource) return;
+  const linkDot = document.querySelector("[data-control-link-dot]");
+  const linkLabel = document.querySelector("[data-control-link-label]");
+  const setLinkStatus = (label, color) => {
+    if (linkDot) linkDot.className = `hud-dot ${color}`;
+    if (linkLabel) linkLabel.textContent = label;
+  };
+
+  if (!window.EventSource) {
+    setLinkStatus("BROKEN", "bg-white/30 text-white/30");
+    return;
+  }
 
   const query = window.location.search || "";
   const events = new EventSource(`/api/events${query}`);
+  events.addEventListener("open", () => setLinkStatus("LINKED", "bg-signal text-signal"));
+  events.addEventListener("error", () => setLinkStatus("RETRYING", "bg-warn text-warn"));
   events.addEventListener("stream_status", (event) => {
     try {
       window.dispatchEvent(new CustomEvent("rtmp:stream-status", { detail: JSON.parse(event.data) }));

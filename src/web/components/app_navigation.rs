@@ -44,7 +44,7 @@ pub async fn app_navigation(active_page: &'static str) -> Result<impl View> {
                         <span
                             class="mt-0.5 block font-mono text-[9px] tracking-[0.18em] text-muted-foreground uppercase"
                         >
-                            (concat!("v", env!("CARGO_PKG_VERSION"), " // OPS"))
+                            (env!("CARGO_PKG_VERSION"))
                         </span>
                     </span>
                 </a>
@@ -153,20 +153,14 @@ pub async fn app_navigation(active_page: &'static str) -> Result<impl View> {
                 </nav>
                 <div
                     class="hidden shrink-0 items-center gap-3 md:flex"
-                    aria-hidden="true"
                 >
                     <span
-                        data-metrics-status="true"
-                        class="font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase"
-                    >
-                        "SYS NOMINAL"
-                    </span>
-                    <span class="h-4 w-px bg-border"></span>
-                    <span
                         class="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase"
+                        role="status"
+                        aria-live="polite"
                     >
-                        <span class="hud-dot bg-signal text-signal"></span>
-                        "CTL LINK"
+                        <span data-control-link-dot="true" class="hud-dot bg-white/30 text-white/30" aria-hidden="true"></span>
+                        <span data-control-link-label="true">"CONNECTING"</span>
                     </span>
                 </div>
             </div>
