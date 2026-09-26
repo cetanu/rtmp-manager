@@ -5,8 +5,7 @@
 //! cargo run --bin migrate -- migration apply
 //! ```
 //!
-//! `CONFIG_PATH` selects the database, with `.json` paths mapped to a sibling
-//! `.sqlite3` file.
+//! `CONFIG_PATH` selects the SQLite database.
 
 use std::path::PathBuf;
 
@@ -14,14 +13,10 @@ use std::path::PathBuf;
 async fn main() -> anyhow::Result<()> {
     let config = toasty_cli::Config::load()?;
 
-    let config_path = std::env::var_os("CONFIG_PATH")
+    let db_path = std::env::var_os("CONFIG_PATH")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("config.json"));
-    let db_path = if config_path.extension().is_some_and(|ext| ext == "json") {
-        config_path.with_extension("sqlite3")
-    } else {
-        config_path
-    };
+        .unwrap_or_else(|| PathBuf::from("config.sqlite3"));
+    let db_path = rtmp_proxy::config::ConfigStore::database_path(db_path)?;
 
     let db = rtmp_proxy::db::connect(&db_path).await?;
 

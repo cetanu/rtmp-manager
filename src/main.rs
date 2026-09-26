@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use rtmp_proxy::config::ConfigHandle;
+use rtmp_proxy::config::{ConfigHandle, ConfigStore};
 use rtmp_proxy::metrics::Metrics;
 use rtmp_proxy::server::{run_rtmp_server, state::AppHandle};
 use std::fs;
@@ -15,8 +15,8 @@ const SYSTEMD_UNIT_TEMPLATE: &str = include_str!("../systemd/rtmp-proxy.service"
 #[derive(Parser, Debug)]
 #[command(author, version, about = "RTMP Stream Multiplexer powered by rtmp-rs", long_about = None)]
 struct CliArgs {
-    /// Path to the SQLite database; a `.json` suffix maps to a `.sqlite3` path
-    #[arg(short, long, env = "CONFIG_PATH", default_value = "config.json")]
+    /// Path to the SQLite database
+    #[arg(short, long, env = "CONFIG_PATH", default_value = "config.sqlite3")]
     config: PathBuf,
 
     #[command(subcommand)]
@@ -29,7 +29,7 @@ enum Commands {
         #[arg(long, default_value = "/opt/rtmp-proxy")]
         work_dir: PathBuf,
 
-        #[arg(long, default_value = "/opt/rtmp-proxy/config.json")]
+        #[arg(long, default_value = "/opt/rtmp-proxy/config.sqlite3")]
         config_path: PathBuf,
     },
 }
@@ -102,7 +102,16 @@ async fn main() -> Result<()> {
     }
 
     info!(path = ?cli.config, "Loading configuration");
-    let (config_handle, config) = ConfigHandle::open(&cli.config).await?;
+    let database_path = ConfigStore::database_path(&cli.config)?;
+    if !database_path.exists() && std::env::var_os("TOPCOAT_DEV_URL").is_none() {
+        anyhow::bail!(
+            "Configuration database '{}' does not exist",
+            database_path.display()
+        );
+    }
+    let database = rtmp_proxy::db::connect(&database_path).await?;
+    rtmp_proxy::db::run_migrations(&database).await?;
+    let (config_handle, config) = ConfigHandle::open_with_database(&cli.config, database).await?;
 
     let metrics = Arc::new(Metrics::default());
     let http_client = reqwest::Client::builder()

@@ -16,9 +16,7 @@ rtmp-proxy.service:
     - enable: true
     - watch:
       - archive: /opt/apps/rtmp-proxy/current
-      - file: /etc/rtmp-proxy.env
       - file: /etc/systemd/system/rtmp-proxy.service
     - require:
       - file: /usr/local/bin/ffmpeg
-      - file: /opt/apps/rtmp-proxy/shared/config.json
       - cmd: reload-systemd-for-rtmp-proxy

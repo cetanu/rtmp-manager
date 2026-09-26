@@ -28,8 +28,8 @@ impl AppHandle {
         listen_port: u16,
     ) -> Result<Self> {
         let initial_config = config_handle.get();
-        let chat = ChatHandle::spawn(
-            config_handle.path(),
+        let chat = ChatHandle::spawn_with_database(
+            config_handle.database().clone(),
             initial_config.chat.queue_capacity,
             initial_config.chat.poll_results_seconds,
             http_client.clone(),

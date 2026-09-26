@@ -6,7 +6,7 @@ fn topcoat_bundle_is_loadable_by_startup() {
     let test_dir =
         std::env::temp_dir().join(format!("rtmp-proxy-startup-assets-{}", std::process::id()));
     let executable = test_dir.join("rtmp-proxy");
-    let missing_config = test_dir.join("missing-config.json");
+    let missing_config = test_dir.join("missing-config.sqlite3");
 
     fs::create_dir_all(&test_dir).unwrap();
     fs::copy(env!("CARGO_BIN_EXE_rtmp-proxy"), &executable).unwrap();

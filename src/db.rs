@@ -63,6 +63,12 @@ async fn bridge_legacy_database(db: &toasty::Db) -> Result<()> {
     add_column_if_missing(&mut conn, "chat_messages", "emoji_data TEXT").await?;
 
     // Safety net for partial databases (e.g. a store that never ran).
+    // Replace the pre-0.11 non-unique deduplication index before the bridge
+    // stamps the new unique migration as applied.
+    toasty::sql::statement("DROP INDEX IF EXISTS \"index_chat_seen_by_source_and_external_id\"")
+        .exec(&mut conn)
+        .await
+        .context("Failed to replace legacy chat_seen index")?;
     for ddl in LEGACY_TABLE_DDL {
         toasty::sql::statement(*ddl)
             .exec(&mut conn)
@@ -140,7 +146,7 @@ const LEGACY_TABLE_DDL: &[&str] = &[
     )"#,
     r#"CREATE UNIQUE INDEX IF NOT EXISTS "index_chat_poll_votes_by_poll_and_voter"
         ON "chat_poll_votes" ("poll_id", "voter_key")"#,
-    r#"CREATE INDEX IF NOT EXISTS "index_chat_seen_by_source_and_external_id" ON "chat_seen" ("source", "external_id")"#,
+    r#"CREATE UNIQUE INDEX IF NOT EXISTS "index_chat_seen_by_source_and_external_id" ON "chat_seen" ("source", "external_id")"#,
 ];
 
 async fn add_column_if_missing(

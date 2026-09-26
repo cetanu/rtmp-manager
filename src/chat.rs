@@ -126,7 +126,11 @@ struct StoredChatMessage {
 
 #[derive(Debug, toasty::Model)]
 #[table = "chat_seen"]
-#[index(source, external_id)]
+#[unique(
+    name = "index_chat_seen_by_source_and_external_id",
+    source,
+    external_id
+)]
 struct StoredChatSeen {
     #[key]
     #[auto]
@@ -254,16 +258,12 @@ impl ChatInbox {
         // Full model registry: this file is shared with the config store
         // (see `crate::db::connect`).
         let database = crate::db::connect(path).await?;
+        crate::db::run_migrations(&database).await?;
         Self::from_database(database, capacity).await
     }
 
     async fn from_database(database: toasty::Db, capacity: usize) -> Result<Self> {
         let mut database = database.clone();
-        // Embedded migrations run on every open so redeploys against an
-        // existing SQLite file pick up schema changes instead of crashing.
-        crate::db::run_migrations(&database)
-            .await
-            .context("Failed to migrate chat inbox database")?;
         let state = StoredChatState::filter(StoredChatState::fields().id().eq(1_u64))
             .first()
             .exec(&mut database)
@@ -1224,6 +1224,26 @@ impl ChatHandle {
         metrics: Arc<Metrics>,
     ) -> Result<Self> {
         let inbox = ChatInbox::open(path, capacity).await?;
+        Self::spawn_with_inbox(inbox, poll_results_secs, http_client, metrics).await
+    }
+
+    pub async fn spawn_with_database(
+        database: toasty::Db,
+        capacity: usize,
+        poll_results_secs: u64,
+        http_client: Client,
+        metrics: Arc<Metrics>,
+    ) -> Result<Self> {
+        let inbox = ChatInbox::from_database(database, capacity).await?;
+        Self::spawn_with_inbox(inbox, poll_results_secs, http_client, metrics).await
+    }
+
+    async fn spawn_with_inbox(
+        inbox: ChatInbox,
+        poll_results_secs: u64,
+        http_client: Client,
+        metrics: Arc<Metrics>,
+    ) -> Result<Self> {
         let (state_tx, state_rx) = watch::channel(ChatState::default());
         let (sender, receiver) = mpsc::channel(ACTOR_COMMAND_CAPACITY);
 

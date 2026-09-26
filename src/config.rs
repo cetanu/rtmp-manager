@@ -849,27 +849,40 @@ pub struct ConfigStore {
 }
 
 impl ConfigStore {
+    pub fn database_path<P: AsRef<Path>>(database_path: P) -> Result<PathBuf> {
+        let database_path = database_path.as_ref();
+        Ok(database_path.to_path_buf())
+    }
+
     pub async fn open<P: AsRef<Path>>(config_path: P) -> Result<(Self, AppConfig)> {
         let config_path = config_path.as_ref();
-        let is_json = config_path.extension().is_some_and(|ext| ext == "json");
-        let database_path = if is_json {
-            config_path.with_extension("sqlite3")
-        } else {
-            config_path.to_path_buf()
-        };
+        let database_path = Self::database_path(config_path)?;
+        let database = crate::db::connect(&database_path).await?;
+        crate::db::run_migrations(&database)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to migrate config database '{}'",
+                    database_path.display()
+                )
+            })?;
+        Self::open_with_database(config_path, database).await
+    }
+
+    pub async fn open_with_database<P: AsRef<Path>>(
+        config_path: P,
+        database: toasty::Db,
+    ) -> Result<(Self, AppConfig)> {
+        let config_path = config_path.as_ref();
+        let database_path = Self::database_path(config_path)?;
         let running_under_topcoat_dev = std::env::var_os("TOPCOAT_DEV_URL").is_some();
-        if is_json && !config_path.exists() && !database_path.exists() && !running_under_topcoat_dev
-        {
+        if !database_path.exists() && !running_under_topcoat_dev {
             bail!(
-                "Configuration database '{}' (from '{}') does not exist",
-                database_path.display(),
-                config_path.display()
+                "Configuration database '{}' does not exist",
+                database_path.display()
             );
         }
 
-        // Full model registry: this file is shared with the chat inbox, so
-        // both openers must agree on the schema (see `crate::db::connect`).
-        let database = crate::db::connect(&database_path).await?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -881,16 +894,6 @@ impl ConfigStore {
                 tracing::warn!(%error, path = %database_path.display(), "Failed to secure config database permissions");
             }
         }
-        // Embedded migrations run on every open so redeploys against an
-        // existing SQLite file pick up schema changes instead of crashing.
-        crate::db::run_migrations(&database)
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to migrate config database '{}'",
-                    database_path.display()
-                )
-            })?;
         let store = Self {
             path: database_path,
             database,
@@ -909,6 +912,10 @@ impl ConfigStore {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    pub fn database(&self) -> &toasty::Db {
+        &self.database
     }
 
     pub async fn load(&self) -> Result<Option<AppConfig>> {
@@ -956,6 +963,18 @@ pub struct ConfigHandle {
 impl ConfigHandle {
     pub async fn open<P: AsRef<Path>>(config_path: P) -> Result<(Self, Arc<AppConfig>)> {
         let (store, config) = ConfigStore::open(config_path).await?;
+        Self::from_store(store, config)
+    }
+
+    pub async fn open_with_database<P: AsRef<Path>>(
+        config_path: P,
+        database: toasty::Db,
+    ) -> Result<(Self, Arc<AppConfig>)> {
+        let (store, config) = ConfigStore::open_with_database(config_path, database).await?;
+        Self::from_store(store, config)
+    }
+
+    fn from_store(store: ConfigStore, config: AppConfig) -> Result<(Self, Arc<AppConfig>)> {
         config.validate()?;
         let config_arc = Arc::new(config);
         let (current, _) = watch::channel(Arc::clone(&config_arc));
@@ -968,6 +987,10 @@ impl ConfigHandle {
             },
             config_arc,
         ))
+    }
+
+    pub fn database(&self) -> &toasty::Db {
+        self.store.database()
     }
 
     /// Returns the current configuration snapshot with zero lock contention.

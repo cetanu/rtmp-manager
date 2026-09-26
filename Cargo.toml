@@ -23,8 +23,8 @@ sha2 = "0.10.9"
 time = { version = "0.3.54", features = ["parsing"] }
 topcoat = { version = "0.8.0", features = ["ui", "tailwind", "asset", "multipart", "runtime", "sse"] }
 serde_qs = "1.1.2"
-toasty = { version = "0.10", features = ["sqlite", "migration"] }
-toasty-cli = { version = "0.10" }
+toasty = { version = "0.11", features = ["sqlite", "migration"] }
+toasty-cli = { version = "0.11" }
 base64 = "0.22.1"
 futures-util = "0.3"
 regex = "1.10"
