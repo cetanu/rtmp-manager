@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/cetanu/rtmp-manager/compare/v0.5.0...v0.6.0) - 2026-09-26
+
+### Added
+
+- *(config)* [**breaking**] make SQLite the only disk config store
+- *(web)* show control link connection status
+
+### Fixed
+
+- *(web)* update preview bitrate from metrics events
+
+### Other
+
+- *(web)* refine dashboard labels and controls
+- *(chat)* expand inbox and refresh controls
+
 ## [0.5.0](https://github.com/cetanu/rtmp-manager/compare/v0.4.0...v0.5.0) - 2026-09-24
 
 ### Added
