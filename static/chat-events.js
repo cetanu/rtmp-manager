@@ -17,6 +17,32 @@
 })();
 
 (() => {
+  let chatScroll = null;
+  const scrollToLatest = () => {
+    const current = document.querySelector("[data-chat-scroll]");
+    if (!current) {
+      chatScroll = null;
+      return;
+    }
+    if (current !== chatScroll) chatScroll = current;
+    chatScroll.scrollTop = chatScroll.scrollHeight;
+  };
+
+  const observer = new MutationObserver((mutations) => {
+    const changed = mutations.some((mutation) => {
+      if (mutation.target instanceof Element && mutation.target.closest("[data-chat-scroll]")) return true;
+      return Array.from(mutation.addedNodes).some((node) =>
+        node instanceof Element && (node.matches("[data-chat-scroll]") || node.querySelector("[data-chat-scroll]")),
+      );
+    });
+    if (changed) window.requestAnimationFrame(scrollToLatest);
+  });
+
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+  window.requestAnimationFrame(scrollToLatest);
+})();
+
+(() => {
   // Topcoat serves the SSE stream; its browser runtime has no EventSource binding yet.
   const linkDot = document.querySelector("[data-control-link-dot]");
   const linkLabel = document.querySelector("[data-control-link-label]");

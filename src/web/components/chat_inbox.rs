@@ -26,6 +26,13 @@ async fn acknowledge_chat(cx: &Cx, displayed_id: String) -> Result<String> {
     Ok(first_message_id(&app.chat.snapshot().await?))
 }
 
+#[procedure]
+async fn clear_chat_messages(cx: &Cx) -> Result<String> {
+    let app: &AppHandle = app_context(cx);
+    app.chat.clear_messages().await?;
+    Ok(first_message_id(&app.chat.snapshot().await?))
+}
+
 #[component]
 async fn chat_toggle(
     label: &'static str,
@@ -294,6 +301,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
     let overlay_token = app.config.get().web_auth.overlay_token.clone();
     let initial_snapshot = app.chat.snapshot().await?;
     let initial_id = first_message_id(&initial_snapshot);
+    let queue_mode = app.config.get().chat.queue_mode;
     let initial_pomodoro_active = initial_snapshot.pomodoro.is_some();
     let initial_poll_visible = initial_snapshot.poll.is_some();
     let initial_poll_active = initial_snapshot
@@ -479,7 +487,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                     <button
                         id="chat-refresh-button"
                         type="button"
-                        class=(outline_button)
+                        class=(outline_button.clone())
                         @click=$(async |_event| {
                             let refreshed_id = refresh_chat().await;
                             current_id.set(refreshed_id);
@@ -493,7 +501,20 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                     </button>
                     <button
                         type="button"
+                        class=(outline_button.clone())
+                        :hidden=$(if queue_mode { true } else { false })
+                        @click=$(async |_event| {
+                            let next_id = clear_chat_messages().await;
+                            current_id.set(next_id);
+                            revision.set(revision.get() + 1.0);
+                        })
+                    >
+                        "Clear all"
+                    </button>
+                    <button
+                        type="button"
                         class=(primary_button)
+                        :hidden=$(if queue_mode { false } else { true })
                         :disabled=$(current_id.get().is_empty())
                         @click=$(async |_event| {
                             let next_id = acknowledge_chat(current_id.get()).await;
@@ -578,6 +599,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
 pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
     let _ = revision;
     let app: &AppHandle = app_context(cx);
+    let queue_mode = app.config.get().chat.queue_mode;
     let snapshot = app.chat.snapshot().await?;
     let now = now_unix_ms();
     let pomodoro = snapshot
@@ -691,7 +713,7 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
                 </div>
             }
             if show_chat {
-                <div class="min-h-0 flex-1 overflow-y-auto pr-1">
+                <div data-chat-scroll="true" class="min-h-0 flex-1 overflow-y-auto pr-1">
                     if snapshot.messages.is_empty() {
                         <div class="flex h-full min-h-32 items-center justify-center border border-border bg-black/30 px-4 text-center font-mono text-[11px] text-muted-foreground">
                             "// No chat messages waiting."
@@ -713,14 +735,21 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
             }
             if show_chat {
                 <div class="mt-1 flex justify-end gap-4 border-t border-border pt-2 pb-1 font-mono text-[10px] tracking-[0.12em] uppercase">
-                    <span class="text-muted-foreground">
-                        <span class="font-semibold text-foreground tabular-nums">(snapshot.queued)</span>
-                        " queued"
-                    </span>
-                    <span class="text-muted-foreground">
-                        <span class="font-semibold text-foreground tabular-nums">(snapshot.dropped)</span>
-                        " dropped"
-                    </span>
+                    if queue_mode {
+                        <span class="text-muted-foreground">
+                            <span class="font-semibold text-foreground tabular-nums">(snapshot.queued)</span>
+                            " queued"
+                        </span>
+                        <span class="text-muted-foreground">
+                            <span class="font-semibold text-foreground tabular-nums">(snapshot.dropped)</span>
+                            " dropped"
+                        </span>
+                    } else {
+                        <span class="text-muted-foreground">
+                            <span class="font-semibold text-foreground tabular-nums">(snapshot.queued)</span>
+                            " messages"
+                        </span>
+                    }
                 </div>
             }
         )

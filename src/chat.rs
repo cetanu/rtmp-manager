@@ -249,6 +249,7 @@ pub fn validate_poll(
 /// SQLite-backed persistent chat inbox with bounded queue capacity and deduplication.
 pub struct ChatInbox {
     capacity: usize,
+    queue_mode: bool,
     database: toasty::Db,
 }
 
@@ -275,7 +276,11 @@ impl ChatInbox {
                 .await?;
         }
 
-        let mut inbox = Self { capacity, database };
+        let mut inbox = Self {
+            capacity,
+            queue_mode: true,
+            database,
+        };
         inbox.trim_to_capacity().await?;
         Ok(inbox)
     }
@@ -314,7 +319,7 @@ impl ChatInbox {
         .await?;
 
         let message_count = count_messages(&mut transaction).await?;
-        if message_count >= self.capacity {
+        if self.queue_mode && message_count >= self.capacity {
             increment_dropped(&mut transaction, 1).await?;
             if self.capacity == 1 {
                 transaction.commit().await?;
@@ -355,10 +360,23 @@ impl ChatInbox {
         Ok(true)
     }
 
+    pub async fn clear_messages(&mut self) -> Result<()> {
+        let mut database = self.database.clone();
+        toasty::sql::statement("DELETE FROM \"chat_messages\"")
+            .exec(&mut database)
+            .await?;
+        Ok(())
+    }
+
     pub async fn snapshot(&self) -> Result<ChatInboxSnapshot> {
         let mut database = self.database.clone();
-        let messages = ordered_messages(&mut database, INBOX_PREVIEW_LIMIT).await?;
         let queued = count_messages(&mut database).await?;
+        let message_limit = if self.queue_mode {
+            INBOX_PREVIEW_LIMIT
+        } else {
+            queued
+        };
+        let messages = ordered_messages(&mut database, message_limit).await?;
         let messages = messages
             .iter()
             .map(chat_message_from_model)
@@ -377,7 +395,18 @@ impl ChatInbox {
     pub async fn resize(&mut self, capacity: usize) -> Result<()> {
         anyhow::ensure!(capacity > 0, "chat queue capacity must be positive");
         self.capacity = capacity;
-        self.trim_to_capacity().await
+        if self.queue_mode {
+            self.trim_to_capacity().await?;
+        }
+        Ok(())
+    }
+
+    pub async fn set_queue_mode(&mut self, enabled: bool) -> Result<()> {
+        self.queue_mode = enabled;
+        if enabled {
+            self.trim_to_capacity().await?;
+        }
+        Ok(())
     }
 
     /// Loads the persisted pomodoro, deleting it if already expired.
@@ -747,6 +776,9 @@ enum ChatCommand {
         expected_id: u64,
         respond_to: oneshot::Sender<Result<bool>>,
     },
+    ClearMessages {
+        respond_to: oneshot::Sender<Result<()>>,
+    },
     Snapshot {
         respond_to: oneshot::Sender<Result<ChatInboxSnapshot>>,
     },
@@ -826,6 +858,13 @@ impl ChatActor {
                         self.notify_changed();
                     }
                     let _ = respond_to.send(acknowledged);
+                }
+                ChatCommand::ClearMessages { respond_to } => {
+                    let result = self.inbox.clear_messages().await;
+                    if result.is_ok() {
+                        self.notify_changed();
+                    }
+                    let _ = respond_to.send(result);
                 }
                 ChatCommand::Snapshot { respond_to } => {
                     let response = self.inbox.snapshot().await.map(|mut snapshot| {
@@ -1121,6 +1160,7 @@ impl ChatActor {
             self.poll_results_secs = chat.poll_results_seconds;
         }
         self.inbox.resize(chat.queue_capacity).await?;
+        self.inbox.set_queue_mode(chat.queue_mode).await?;
 
         if let Some(task) = self.twitch_task.take() {
             task.abort();
@@ -1365,6 +1405,14 @@ impl ChatHandle {
                 respond_to,
             },
             "Chat actor dropped acknowledge response",
+        )
+        .await
+    }
+
+    pub async fn clear_messages(&self) -> Result<()> {
+        self.call(
+            |respond_to| ChatCommand::ClearMessages { respond_to },
+            "Chat actor dropped clear_messages response",
         )
         .await
     }
