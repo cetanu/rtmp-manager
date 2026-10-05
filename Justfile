@@ -35,3 +35,9 @@ test-stream-integration:
 # Run the dashboard and a local RTMP target until interrupted.
 test-stream-dashboard:
     ./scripts/test-stream-dashboard.sh
+
+# Check chat viewport sizing and scrolling in Chromium.
+test-chat-layout:
+    cargo build --locked --bins
+    topcoat asset bundle --bin rtmp-proxy
+    python3 tests/browser/chat_layout.py

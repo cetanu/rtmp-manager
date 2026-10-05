@@ -377,6 +377,7 @@ async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
     Ok(view! {
         card(
             attrs: attributes! {
+                data-chat-inbox="true"
                 class="mb-2 h-full min-h-[18rem] !gap-2 !py-0"
             },
             if poll_form_open.get() {
@@ -730,6 +731,7 @@ async fn inbox_messages(cx: &Cx) -> Result<impl View> {
             }
             if show_chat {
                 <div
+                    data-chat-messages="true"
                     class="flex min-h-0 flex-1 flex-col-reverse overflow-y-auto pr-1"
                 >
                     if snapshot.messages.is_empty() {

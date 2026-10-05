@@ -97,6 +97,20 @@ jobs:
       - name: Build release binary and assets
         run: topcoat asset bundle --release --bin rtmp-proxy
       - run: cargo test --release --all-targets --all-features --locked
+      - uses: actions/setup-python@v6
+        if: matrix.arch == 'x86_64'
+        with:
+          python-version: '3.13'
+      - name: Install browser test dependencies
+        if: matrix.arch == 'x86_64'
+        run: |
+          python -m pip install -r tests/browser/requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: Check chat viewport layout
+        if: matrix.arch == 'x86_64'
+        run: |
+          cargo build --release --locked --bin migrate
+          python tests/browser/chat_layout.py --profile release
       - name: Test FFmpeg publishing to RTMP
         run: cargo test --release --locked server::relay::tests::direct_test_publishes_to_local_rtmp_server -- --ignored --exact
       - name: Package tested release
