@@ -2,7 +2,7 @@
 name = "rtmp-proxy"
 version = "0.6.0"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.98"
 authors = ["Vasilios Syrakis <syrakis@pm.me>"]
 description = "Self-hosted RTMP multiplexer and management dashboard"
 repository = "https://github.com/cetanu/rtmp-manager"
@@ -21,7 +21,7 @@ serde_valid = "2.0"
 hmac = "0.12.1"
 sha2 = "0.10.9"
 time = { version = "0.3.54", features = ["parsing"] }
-topcoat = { version = "0.8.0", features = ["ui", "tailwind", "asset", "multipart", "runtime", "sse"] }
+topcoat = { version = "0.10.0", features = ["anyhow", "ui", "tailwind", "asset", "multipart", "runtime", "sse"] }
 serde_qs = "1.1.2"
 toasty = { version = "0.11", features = ["sqlite", "migration"] }
 toasty-cli = { version = "0.11" }
@@ -33,11 +33,11 @@ aws-lc-rs = "1.17.3"
 srt-tokio = "0.4.4"
 
 [build-dependencies]
-topcoat = { version = "0.8.0", default-features = false, features = ["tailwind"] }
+topcoat = { version = "0.10.0", default-features = false, features = ["tailwind"] }
 
 [dev-dependencies]
 bytes = "1.0"
-topcoat-asset = { version = "0.8.0", features = ["bundler"] }
+topcoat-asset = { version = "0.10.0", features = ["bundler"] }
 
 [profile.release]
 opt-level = "z"

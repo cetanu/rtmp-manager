@@ -14,23 +14,41 @@ use topcoat::{
 #[procedure]
 async fn acknowledge_chat(cx: &Cx, displayed_id: String) -> Result<String> {
     let app: &AppHandle = app_context(cx);
-    let displayed_id = displayed_id
-        .parse()
-        .map_err(|error| anyhow::anyhow!("Invalid displayed chat message ID: {error}"))?;
-    if !app.chat.acknowledge(displayed_id).await? {
-        return Err(anyhow::anyhow!(
-            "The displayed message changed before it could be acknowledged"
+    let displayed_id = displayed_id.parse().map_err(|error| {
+        topcoat::router::error::bad_request(format!("Invalid displayed chat message ID: {error}"))
+    })?;
+    if !app
+        .chat
+        .acknowledge(displayed_id)
+        .await
+        .map_err(topcoat::Error::from_anyhow)?
+    {
+        return Err(topcoat::router::error::bad_request(
+            "The displayed message changed before it could be acknowledged",
         )
         .into());
     }
-    Ok(first_message_id(&app.chat.snapshot().await?))
+    Ok(first_message_id(
+        &app.chat
+            .snapshot()
+            .await
+            .map_err(topcoat::Error::from_anyhow)?,
+    ))
 }
 
 #[procedure]
 async fn clear_chat_messages(cx: &Cx) -> Result<String> {
     let app: &AppHandle = app_context(cx);
-    app.chat.clear_messages().await?;
-    Ok(first_message_id(&app.chat.snapshot().await?))
+    app.chat
+        .clear_messages()
+        .await
+        .map_err(topcoat::Error::from_anyhow)?;
+    Ok(first_message_id(
+        &app.chat
+            .snapshot()
+            .await
+            .map_err(topcoat::Error::from_anyhow)?,
+    ))
 }
 
 #[component]
@@ -76,27 +94,53 @@ async fn chat_toggle(
     })
 }
 
-#[procedure]
+#[procedure("/api/chat/test-message")]
 async fn send_test_chat(cx: &Cx) -> Result<String> {
     let app: &AppHandle = app_context(cx);
-    app.chat.enqueue_test(None).await?;
-    Ok(first_message_id(&app.chat.snapshot().await?))
+    app.chat
+        .enqueue_test(None)
+        .await
+        .map_err(topcoat::Error::from_anyhow)?;
+    Ok(first_message_id(
+        &app.chat
+            .snapshot()
+            .await
+            .map_err(topcoat::Error::from_anyhow)?,
+    ))
 }
 
 #[procedure]
 async fn refresh_chat(cx: &Cx) -> Result<String> {
     let app: &AppHandle = app_context(cx);
-    Ok(first_message_id(&app.chat.snapshot().await?))
+    Ok(first_message_id(
+        &app.chat
+            .snapshot()
+            .await
+            .map_err(topcoat::Error::from_anyhow)?,
+    ))
 }
 
 #[procedure]
 async fn set_chat_toggle(cx: &Cx, platform: String, enabled: bool) -> Result<String> {
     let app: &AppHandle = app_context(cx);
     match platform.as_str() {
-        "youtube" => app.set_youtube_polling(enabled).await?,
-        "x" => app.set_x_webhook(enabled).await?,
-        "kick" => app.set_kick_webhook(enabled).await?,
-        _ => return Err(anyhow::anyhow!("Unsupported chat toggle platform").into()),
+        "youtube" => app
+            .set_youtube_polling(enabled)
+            .await
+            .map_err(topcoat::Error::from_anyhow)?,
+        "x" => app
+            .set_x_webhook(enabled)
+            .await
+            .map_err(topcoat::Error::from_anyhow)?,
+        "kick" => app
+            .set_kick_webhook(enabled)
+            .await
+            .map_err(topcoat::Error::from_anyhow)?,
+        _ => {
+            return Err(
+                topcoat::router::error::bad_request("Unsupported chat toggle platform").into(),
+            );
+        }
     }
     Ok(String::new())
 }
@@ -121,13 +165,24 @@ async fn start_pomodoro(cx: &Cx) -> Result<String> {
 #[procedure]
 async fn stop_pomodoro(cx: &Cx) -> Result<String> {
     let app: &AppHandle = app_context(cx);
-    Ok(first_message_id(&app.chat.stop_pomodoro().await?))
+    Ok(first_message_id(
+        &app.chat
+            .stop_pomodoro()
+            .await
+            .map_err(topcoat::Error::from_anyhow)?,
+    ))
 }
 
 #[procedure]
 async fn pomodoro_active(cx: &Cx) -> Result<bool> {
     let app: &AppHandle = app_context(cx);
-    Ok(app.chat.snapshot().await?.pomodoro.is_some())
+    Ok(app
+        .chat
+        .snapshot()
+        .await
+        .map_err(topcoat::Error::from_anyhow)?
+        .pomodoro
+        .is_some())
 }
 
 #[procedure]
@@ -156,13 +211,23 @@ async fn start_poll(cx: &Cx, question: String, options_text: String) -> Result<S
 #[procedure]
 async fn stop_poll(cx: &Cx) -> Result<String> {
     let app: &AppHandle = app_context(cx);
-    Ok(first_message_id(&app.chat.stop_poll().await?))
+    Ok(first_message_id(
+        &app.chat
+            .stop_poll()
+            .await
+            .map_err(topcoat::Error::from_anyhow)?,
+    ))
 }
 
 #[procedure]
 async fn clear_poll(cx: &Cx) -> Result<String> {
     let app: &AppHandle = app_context(cx);
-    Ok(first_message_id(&app.chat.clear_poll().await?))
+    Ok(first_message_id(
+        &app.chat
+            .clear_poll()
+            .await
+            .map_err(topcoat::Error::from_anyhow)?,
+    ))
 }
 
 pub(crate) fn poll_percent(votes: u64, total: u64) -> u64 {
@@ -175,7 +240,13 @@ pub(crate) fn poll_percent(votes: u64, total: u64) -> u64 {
 #[procedure]
 async fn poll_is_visible(cx: &Cx) -> Result<bool> {
     let app: &AppHandle = app_context(cx);
-    Ok(app.chat.snapshot().await?.poll.is_some())
+    Ok(app
+        .chat
+        .snapshot()
+        .await
+        .map_err(topcoat::Error::from_anyhow)?
+        .poll
+        .is_some())
 }
 
 #[procedure]
@@ -184,7 +255,8 @@ async fn poll_is_active(cx: &Cx) -> Result<bool> {
     Ok(app
         .chat
         .snapshot()
-        .await?
+        .await
+        .map_err(topcoat::Error::from_anyhow)?
         .poll
         .is_some_and(|poll| poll.is_active()))
 }
@@ -299,7 +371,11 @@ fn first_message_id(snapshot: &crate::chat::ChatInboxSnapshot) -> String {
 pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
     let app: &AppHandle = app_context(cx);
     let overlay_token = app.config.get().web_auth.overlay_token.clone();
-    let initial_snapshot = app.chat.snapshot().await?;
+    let initial_snapshot = app
+        .chat
+        .snapshot()
+        .await
+        .map_err(topcoat::Error::from_anyhow)?;
     let initial_id = first_message_id(&initial_snapshot);
     let queue_mode = app.config.get().chat.queue_mode;
     let initial_pomodoro_active = initial_snapshot.pomodoro.is_some();
@@ -600,7 +676,11 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
     let _ = revision;
     let app: &AppHandle = app_context(cx);
     let queue_mode = app.config.get().chat.queue_mode;
-    let snapshot = app.chat.snapshot().await?;
+    let snapshot = app
+        .chat
+        .snapshot()
+        .await
+        .map_err(topcoat::Error::from_anyhow)?;
     let now = now_unix_ms();
     let pomodoro = snapshot
         .pomodoro

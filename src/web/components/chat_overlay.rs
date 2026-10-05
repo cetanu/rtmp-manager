@@ -217,7 +217,11 @@ pub async fn chat_overlay_page() -> Result<impl View> {
 #[component]
 pub async fn chat_overlay(cx: &Cx) -> Result<impl View> {
     let app: &AppHandle = app_context(cx);
-    let snapshot = app.chat.snapshot().await?;
+    let snapshot = app
+        .chat
+        .snapshot()
+        .await
+        .map_err(topcoat::Error::from_anyhow)?;
 
     Ok(view! {
         <div id="chat-overlay-wrapper" class="flex flex-col w-full">

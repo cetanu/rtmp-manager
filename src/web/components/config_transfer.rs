@@ -59,7 +59,11 @@ pub async fn config_transfer(cx: &Cx) -> Result<impl View> {
 pub async fn exported_config(cx: &Cx, open: bool) -> Result<impl View> {
     let app: &AppHandle = app_context(cx);
     let config_json = if open {
-        Some(app.config.export_json()?)
+        Some(
+            app.config
+                .export_json()
+                .map_err(topcoat::Error::from_anyhow)?,
+        )
     } else {
         None
     };

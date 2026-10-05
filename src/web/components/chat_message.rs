@@ -65,5 +65,6 @@ pub(crate) async fn chat_message_card(
                 chat_message_parts(parts: parts, text_class: text_class)
             </p>
         </article>
-    })
+    }
+    .boxed())
 }

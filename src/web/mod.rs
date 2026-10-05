@@ -66,7 +66,6 @@ pub async fn run_web_server(
     let mut stream_status = app_handle.stream.subscribe_status();
     let app = Router::builder()
         .discover()
-        .runtime()
         .assets(AssetBundle::load()?)
         .layer(topcoat::router::BodyLimit::max(MAX_WEBHOOK_SIZE).at("/api/webhook"))
         .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config"))
@@ -79,6 +78,7 @@ pub async fn run_web_server(
         .layer(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE).at("/api/chat/poll/clear"))
         .layer(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE).at("/api/test-stream"))
         .app_context(app_handle)
+        .runtime()
         .build();
 
     tokio::spawn(async move {
@@ -320,7 +320,7 @@ async fn update_config(cx: &Cx, body: Bytes) -> Result<Response> {
 
     if chat_changed && let Err(error) = app.apply_chat_config().await {
         tracing::error!("Failed to apply chat configuration: {error:#}");
-        return Err(internal_server_error(error).into());
+        return Err(internal_server_error(topcoat::Error::from_anyhow(error)).into());
     }
 
     redirect.into_response(cx)
@@ -360,7 +360,7 @@ async fn import_config(cx: &Cx, body: Bytes) -> Result<Response> {
     };
 
     if chat_changed && let Err(error) = app.apply_chat_config().await {
-        return Err(internal_server_error(error).into());
+        return Err(internal_server_error(topcoat::Error::from_anyhow(error)).into());
     }
 
     topcoat::router::StatusCode::NO_CONTENT.into_response(cx)
@@ -386,7 +386,7 @@ async fn import_config_file(cx: &Cx, mut multipart: Multipart) -> Result<Respons
     };
 
     if chat_changed && let Err(error) = app.apply_chat_config().await {
-        return Err(internal_server_error(error).into());
+        return Err(internal_server_error(topcoat::Error::from_anyhow(error)).into());
     }
 
     redirect_to(cx, "/export")
@@ -403,7 +403,11 @@ fn redirect_to(cx: &Cx, location: &'static str) -> Result<Response> {
 #[route(GET "/api/chat")]
 async fn get_chat_inbox(cx: &Cx) -> Result<Response> {
     let app: &AppHandle = app_context(cx);
-    let snapshot = app.chat.snapshot().await?;
+    let snapshot = app
+        .chat
+        .snapshot()
+        .await
+        .map_err(topcoat::Error::from_anyhow)?;
     (
         [(topcoat::router::header::CACHE_CONTROL, "no-store")],
         Json(snapshot),
@@ -417,7 +421,12 @@ async fn acknowledge_chat_message(
     Json(request): Json<AcknowledgeChatMessage>,
 ) -> Result<Response> {
     let app: &AppHandle = app_context(cx);
-    if !app.chat.acknowledge(request.id).await? {
+    if !app
+        .chat
+        .acknowledge(request.id)
+        .await
+        .map_err(topcoat::Error::from_anyhow)?
+    {
         return (
             topcoat::router::StatusCode::CONFLICT,
             "The displayed chat message has already changed",
@@ -425,7 +434,13 @@ async fn acknowledge_chat_message(
             .into_response(cx);
     }
 
-    Json(app.chat.snapshot().await?).into_response(cx)
+    Json(
+        app.chat
+            .snapshot()
+            .await
+            .map_err(topcoat::Error::from_anyhow)?,
+    )
+    .into_response(cx)
 }
 
 #[route(POST "/api/chat/test")]
@@ -442,8 +457,15 @@ async fn send_test_chat_message(cx: &Cx, body: Bytes) -> Result<Response> {
     app.chat
         .enqueue_test(request)
         .await
+        .map_err(topcoat::Error::from_anyhow)
         .map_err(internal_server_error)?;
-    Json(app.chat.snapshot().await?).into_response(cx)
+    Json(
+        app.chat
+            .snapshot()
+            .await
+            .map_err(topcoat::Error::from_anyhow)?,
+    )
+    .into_response(cx)
 }
 
 #[derive(Debug, Deserialize)]
@@ -489,7 +511,13 @@ async fn start_chat_pomodoro(cx: &Cx, body: Bytes) -> Result<Response> {
 #[route(DELETE "/api/chat/pomodoro")]
 async fn stop_chat_pomodoro(cx: &Cx) -> Result<Response> {
     let app: &AppHandle = app_context(cx);
-    Json(app.chat.stop_pomodoro().await?).into_response(cx)
+    Json(
+        app.chat
+            .stop_pomodoro()
+            .await
+            .map_err(topcoat::Error::from_anyhow)?,
+    )
+    .into_response(cx)
 }
 
 #[derive(Debug, Deserialize)]
@@ -517,13 +545,25 @@ async fn start_chat_poll(cx: &Cx, Json(request): Json<StartPollRequest>) -> Resu
 #[route(DELETE "/api/chat/poll")]
 async fn stop_chat_poll(cx: &Cx) -> Result<Response> {
     let app: &AppHandle = app_context(cx);
-    Json(app.chat.stop_poll().await?).into_response(cx)
+    Json(
+        app.chat
+            .stop_poll()
+            .await
+            .map_err(topcoat::Error::from_anyhow)?,
+    )
+    .into_response(cx)
 }
 
 #[route(DELETE "/api/chat/poll/clear")]
 async fn clear_chat_poll(cx: &Cx) -> Result<Response> {
     let app: &AppHandle = app_context(cx);
-    Json(app.chat.clear_poll().await?).into_response(cx)
+    Json(
+        app.chat
+            .clear_poll()
+            .await
+            .map_err(topcoat::Error::from_anyhow)?,
+    )
+    .into_response(cx)
 }
 
 #[route(GET "/api/events")]
@@ -653,7 +693,7 @@ async fn overlay_events(
 async fn service_logs(
     _cx: &Cx,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<SseEvent>> + use<>>> {
-    let logs = crate::log_buffer::global()?;
+    let logs = crate::log_buffer::global().map_err(topcoat::Error::from_anyhow)?;
     let receiver = logs.subscribe();
     let initial = futures_util::stream::iter(
         logs.snapshot()
@@ -722,6 +762,7 @@ async fn receive_webhook(cx: &Cx, body: Bytes) -> Result<Response> {
             .chat
             .enqueue(message)
             .await
+            .map_err(topcoat::Error::from_anyhow)
             .map_err(internal_server_error)?;
         match outcome {
             crate::chat::EnqueueOutcome::Accepted | crate::chat::EnqueueOutcome::Dropped => {
@@ -796,8 +837,9 @@ async fn verify_webhook_crc(cx: &Cx) -> Result<Response> {
         .as_deref()
         .filter(|secret| !secret.is_empty())
         .ok_or_else(|| bad_request("X API secret key is not configured"))?;
-    let response_token =
-        crate::chat::x::response_token(&query.crc_token, secret).map_err(internal_server_error)?;
+    let response_token = crate::chat::x::response_token(&query.crc_token, secret)
+        .map_err(topcoat::Error::from_anyhow)
+        .map_err(internal_server_error)?;
     Json(WebhookCrcResponse { response_token }).into_response(cx)
 }
 
@@ -847,7 +889,6 @@ mod tests {
 
         let app = Router::builder()
             .discover()
-            .runtime()
             .assets(test_asset_bundle())
             .layer(topcoat::router::BodyLimit::max(MAX_WEBHOOK_SIZE).at("/api/webhook"))
             .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config"))
@@ -858,6 +899,7 @@ mod tests {
             .layer(topcoat::router::BodyLimit::max(MAX_CHAT_TEST_BODY_SIZE).at("/api/chat/test"))
             .layer(topcoat::router::BodyLimit::max(MAX_POMODORO_BODY_SIZE).at("/api/chat/pomodoro"))
             .app_context(app_handle.clone())
+            .runtime()
             .build();
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1001,7 +1043,6 @@ mod tests {
 
         let app = Router::builder()
             .discover()
-            .runtime()
             .assets(test_asset_bundle())
             .layer(topcoat::router::BodyLimit::max(MAX_WEBHOOK_SIZE).at("/api/webhook"))
             .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config"))
@@ -1012,6 +1053,7 @@ mod tests {
             .layer(topcoat::router::BodyLimit::max(MAX_CHAT_TEST_BODY_SIZE).at("/api/chat/test"))
             .layer(topcoat::router::BodyLimit::max(MAX_POMODORO_BODY_SIZE).at("/api/chat/pomodoro"))
             .app_context(app_handle.clone())
+            .runtime()
             .build();
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1079,7 +1121,6 @@ mod tests {
 
         let app = Router::builder()
             .discover()
-            .runtime()
             .assets(test_asset_bundle())
             .layer(topcoat::router::BodyLimit::max(MAX_WEBHOOK_SIZE).at("/api/webhook"))
             .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config"))
@@ -1090,6 +1131,7 @@ mod tests {
             .layer(topcoat::router::BodyLimit::max(MAX_CHAT_TEST_BODY_SIZE).at("/api/chat/test"))
             .layer(topcoat::router::BodyLimit::max(MAX_POMODORO_BODY_SIZE).at("/api/chat/pomodoro"))
             .app_context(app_handle.clone())
+            .runtime()
             .build();
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1121,19 +1163,8 @@ mod tests {
             .await
             .unwrap();
 
-        let proc_id = html_content
-            .split("chat-test-button")
-            .nth(1)
-            .unwrap()
-            .split("Procedure")
-            .nth(1)
-            .unwrap()
-            .split("&quot;id&quot;:&quot;")
-            .nth(1)
-            .unwrap()
-            .split("&quot;")
-            .next()
-            .unwrap();
+        assert!(html_content.contains("chat-test-button"));
+        assert!(html_content.contains("/api/chat/test-message"));
         let resp = client
             .post(format!("http://{local_addr}/api/chat/test"))
             .send()
@@ -1169,11 +1200,9 @@ mod tests {
         assert_eq!(snapshot_after_ack.messages[0].text, "Testing custom text");
 
         let proc_resp = client
-            .post(format!(
-                "http://{local_addr}/_topcoat/runtime/procedures/{proc_id}"
-            ))
+            .post(format!("http://{local_addr}/api/chat/test-message"))
             .header("Content-Type", "application/json")
-            .body("null")
+            .body("[]")
             .send()
             .await
             .unwrap();
