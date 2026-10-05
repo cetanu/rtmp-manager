@@ -21,6 +21,7 @@ pub async fn targets(cx: &Cx) -> Result<impl View> {
             card_content(
                 if !targets.is_empty() {
                     <div id="targetsContainer">
+                        #[key(index)]
                         for (index, target) in targets.into_iter().enumerate() {
                             target_item(index: index, target: target)
                         }
