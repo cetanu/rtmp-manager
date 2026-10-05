@@ -60,7 +60,10 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --check
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: topcoat-cli@0.10.0
+      - run: topcoat fmt --check --rustfmt src build.rs tests
       - run: cargo clippy --all-targets --all-features -- -D warnings
 
   test:

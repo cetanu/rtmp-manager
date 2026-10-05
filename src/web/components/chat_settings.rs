@@ -20,7 +20,12 @@ pub async fn chat_settings(cx: &Cx) -> Result<impl View> {
             card_content(
                 <div class="flex flex-col gap-6">
                     <label class="flex items-center gap-2 text-sm">
-                        <input type="checkbox" name="chat[queue_mode]" value="true" checked=(chat.queue_mode) />
+                        <input
+                            type="checkbox"
+                            name="chat[queue_mode]"
+                            value="true"
+                            checked=(chat.queue_mode)
+                        />
                         <span>"Queue chat messages for manual acknowledgement"</span>
                     </label>
                     <div class="grid gap-6 md:grid-cols-2">

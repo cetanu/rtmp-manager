@@ -2,6 +2,7 @@
 name = "rtmp-proxy"
 version = "0.6.0"
 edition = "2024"
+default-run = "rtmp-proxy"
 rust-version = "1.98"
 authors = ["Vasilios Syrakis <syrakis@pm.me>"]
 description = "Self-hosted RTMP multiplexer and management dashboard"

@@ -150,6 +150,7 @@ async fn app_page(active_page: &'static str) -> Result<impl View> {
                     rel="stylesheet"
                 />
                 <link rel="stylesheet" href=(TAILWIND_STYLESHEET) />
+                topcoat::dev::script()
                 topcoat::runtime::script()
                 <script src=(HLS_PLAYER_SCRIPT) defer="defer"></script>
                 <script src=(STREAM_PREVIEW_SCRIPT) defer="defer"></script>

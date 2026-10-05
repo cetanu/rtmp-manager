@@ -6,6 +6,12 @@ default:
 build:
     topcoat asset bundle
 
+dev:
+    topcoat dev
+
+fmt:
+    topcoat fmt --rustfmt src build.rs tests
+
 check:
     cargo check
 
