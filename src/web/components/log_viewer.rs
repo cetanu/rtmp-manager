@@ -18,11 +18,7 @@ pub async fn log_viewer(cx: &Cx) -> Result<impl View> {
                     <div
                         class="flex items-center gap-2 border-b border-border px-4 py-2"
                     >
-                        <span class="hud-dot bg-signal text-signal"></span>
                         <span class="hud-label">"SYSTEM LOG //"</span>
-                        <span class="ml-auto hidden font-mono text-[10px] tracking-[0.16em] text-muted-foreground uppercase sm:inline">
-                            (if connected(cx) { "● LIVE // FOLLOWING" } else { "CONNECTING…" })
-                        </span>
                     </div>
                     <div
                         role="log"
