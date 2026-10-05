@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+set -eu
+
+printf '%s\n' 'Checking Rust formatting...'
+cargo fmt --check
+
+printf '%s\n' 'Running Clippy...'
+cargo clippy --all-targets --all-features -- -D warnings
+
+printf '%s\n' 'Running Rust tests...'
+cargo test --all-targets --all-features --locked
