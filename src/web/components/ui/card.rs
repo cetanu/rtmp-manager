@@ -14,8 +14,7 @@ pub async fn card(
     Ok(view! { <div class=(class!(CARD, attrs.remove("class"))) (attrs)>(child)</div> })
 }
 
-/// The opening section of a [`card`], stacking a [`card_title`] and an
-/// optional [`card_description`].
+/// The opening section of a [`card`], containing a [`card_title`].
 #[component]
 pub async fn card_header(
     #[default] mut attrs: Attributes,
@@ -47,26 +46,6 @@ pub async fn card_title(
         >
             (child)
         </h3>
-    })
-}
-
-/// The supporting text under a [`card_title`].
-#[component]
-#[allow(dead_code)]
-pub async fn card_description(
-    #[default] mut attrs: Attributes,
-    #[default] child: Child<'_>,
-) -> Result<impl View> {
-    Ok(view! {
-        <p
-            class=(class!(
-                "font-mono text-[11px] text-muted-foreground",
-                attrs.remove("class"),
-            ))
-            (attrs)
-        >
-            (child)
-        </p>
     })
 }
 

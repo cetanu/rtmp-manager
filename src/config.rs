@@ -303,7 +303,7 @@ impl AppConfig {
     }
 
     /// Parses imported configuration JSON bytes.
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn parse_imported(body: &[u8]) -> Result<Self> {
         let config = Self::parse_imported_unvalidated(body)?;
         config.validate()?;

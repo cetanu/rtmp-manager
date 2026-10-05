@@ -28,14 +28,6 @@ test-stream ip key="teststream":
 test-file ip file key="teststream":
     ffmpeg -re -i "{{file}}" -c copy -f flv "rtmp://{{ip}}:1935/live/{{key}}"
 
-# Run the production test-stream path against a disposable local RTMP server.
-test-stream-integration:
-    ./scripts/test-stream-integration.sh
-
-# Run the dashboard and a local RTMP target until interrupted.
-test-stream-dashboard:
-    ./scripts/test-stream-dashboard.sh
-
 # Check chat viewport sizing and scrolling in Chromium.
 test-chat-layout:
     cargo build --locked --bins

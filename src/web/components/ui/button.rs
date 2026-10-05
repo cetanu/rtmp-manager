@@ -7,7 +7,6 @@ use topcoat::{
 ///
 /// [`Default`] is `ButtonVariant::Primary`, used when no variant is given.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum ButtonVariant {
     /// The primary-filled button for the main action.
     #[default]
@@ -16,8 +15,6 @@ pub enum ButtonVariant {
     Secondary,
     /// A hairline-bordered button on the page background.
     Outline,
-    /// No fill until hovered, for toolbars and inline actions.
-    Ghost,
     /// A destructive-filled button for actions such as deleting data.
     Destructive,
 }
@@ -37,9 +34,6 @@ impl ButtonVariant {
                 "border-border bg-transparent text-foreground shadow-xs \
                  hover:border-signal/50 hover:text-signal active:bg-white/5",
             ),
-            Self::Ghost => class!(
-                "border-transparent text-muted-foreground hover:bg-white/5 hover:text-foreground active:bg-white/10",
-            ),
             Self::Destructive => class!(
                 "border-live/40 bg-destructive text-destructive-foreground shadow-xs \
                  hover:bg-destructive/90 active:bg-destructive/80",
@@ -52,15 +46,10 @@ impl ButtonVariant {
 ///
 /// [`Default`] is `ButtonSize::Md`, used when no size is given.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum ButtonSize {
-    /// A compact button.
-    Sm,
     /// The default size.
     #[default]
     Md,
-    /// A prominent button.
-    Lg,
     /// A square button sized to fit an icon, matching [`ButtonSize::Md`].
     Icon,
 }
@@ -68,9 +57,7 @@ pub enum ButtonSize {
 impl ButtonSize {
     fn classes(self) -> StaticClass {
         match self {
-            Self::Sm => class!("h-7 rounded-sm px-2.5 text-[11px] gap-1.5"),
             Self::Md => class!("h-8 rounded-sm px-3 text-[11px] gap-2"),
-            Self::Lg => class!("h-9 rounded-sm px-4 text-[12px] gap-2"),
             Self::Icon => class!("size-8 rounded-sm"),
         }
     }

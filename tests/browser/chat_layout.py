@@ -41,7 +41,7 @@ def dashboard(profile):
             check=True,
             capture_output=True,
         )
-        config = json.loads((ROOT / "scripts/test-stream-dashboard.json").read_text())
+        config = json.loads((ROOT / "tests/browser/config.json").read_text())
         web_port = unused_port()
         ingest_port = unused_port()
         while ingest_port == web_port:
