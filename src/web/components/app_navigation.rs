@@ -2,8 +2,8 @@ use topcoat::{
     Result,
     context::Cx,
     router::href,
-    runtime::{link_attrs, prefetch_mode},
-    view::{View, component, view},
+    runtime::{connected, link_attrs, prefetch_mode, shard},
+    view::{View, component, emit, live, view},
 };
 
 const ACTIVE_LINK: &str = "rounded-[3px] bg-foreground px-2.5 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-background transition-colors";
@@ -152,7 +152,46 @@ pub async fn app_navigation(cx: &Cx, active_page: &'static str) -> Result<impl V
                         "Export"
                     </a>
                 </nav>
+                <div class="hidden shrink-0 md:block">connection_status()</div>
             </div>
         </header>
+    })
+}
+
+#[shard]
+async fn connection_status(cx: &Cx) -> Result<impl View> {
+    Ok(live! {
+        loop {
+            let linked = connected(cx);
+            let token = emit! {
+                <rtmp-connection
+                    data-heartbeat=(if linked {
+                        Some(crate::util::now_unix_ms().to_string())
+                    } else {
+                        None
+                    })
+                    class="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase"
+                    role="status"
+                    aria-live="polite"
+                >
+                    <span
+                        data-control-link-dot="true"
+                        class=(if linked {
+                            "hud-dot bg-signal text-signal"
+                        } else {
+                            "hud-dot bg-white/30 text-white/30"
+                        })
+                        aria-hidden="true"
+                    ></span>
+                    <span data-control-link-label="true">
+                        (if linked { "LINKED" } else { "CONNECTING" })
+                    </span>
+                </rtmp-connection>
+            }?;
+            if !linked {
+                break Ok(token);
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
     })
 }
