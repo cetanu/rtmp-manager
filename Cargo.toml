@@ -1,6 +1,6 @@
 [package]
 name = "rtmp-proxy"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 default-run = "rtmp-proxy"
 rust-version = "1.98"

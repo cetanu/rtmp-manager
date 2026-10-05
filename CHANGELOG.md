@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0](https://github.com/cetanu/rtmp-manager/compare/v0.6.0...v0.7.0) - 2026-10-05
+
+### Added
+
+- *(web)* replace custom navigation with Topcoat links
+- *(web)* stream live panels through connected Topcoat shards
+- *(metrics)* split data transfer charts
+- *(chat)* make inbox queue mode configurable
+
+### Fixed
+
+- *(web)* restore global connection status with WebSocket heartbeats
+- *(chat)* restore inbox viewport height after native navigation
+- *(targets)* key repeated controls to prevent ambiguous identities
+
+### Other
+
+- remove unused UI code and local test scripts
+- *(logs)* remove redundant panel connection status
+- *(chat)* cover viewport filling and scrolling in Chromium
+- *(web)* use Topcoat signals for password visibility
+- *(dev)* add Topcoat development and formatting commands
+- *(deps)* upgrade Topcoat to 0.10 and require Rust 1.98
+- clean up goals.md
+- add git hooks
+
 ## [0.6.0](https://github.com/cetanu/rtmp-manager/compare/v0.5.0...v0.6.0) - 2026-09-26
 
 ### Added
