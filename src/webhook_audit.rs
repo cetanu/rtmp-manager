@@ -18,6 +18,7 @@ pub struct WebhookAuditEntry {
 pub struct WebhookAudit {
     entries: Mutex<VecDeque<WebhookAuditEntry>>,
     next_id: AtomicU64,
+    changed: tokio::sync::watch::Sender<()>,
 }
 
 impl Default for WebhookAudit {
@@ -31,6 +32,7 @@ impl WebhookAudit {
         Self {
             entries: Mutex::new(VecDeque::with_capacity(CAPACITY)),
             next_id: AtomicU64::new(1),
+            changed: tokio::sync::watch::channel(()).0,
         }
     }
 
@@ -52,6 +54,12 @@ impl WebhookAudit {
             entries.pop_front();
         }
         entries.push_back(entry);
+        drop(entries);
+        self.changed.send_replace(());
+    }
+
+    pub fn subscribe(&self) -> tokio::sync::watch::Receiver<()> {
+        self.changed.subscribe()
     }
 
     pub fn snapshot(&self) -> Vec<WebhookAuditEntry> {

@@ -44,12 +44,10 @@ use components::{
 
 pub(crate) const TAILWIND_STYLESHEET: Asset = stylesheet!();
 pub(crate) const FAVICON: Asset = asset!("rtmp.png");
-pub(crate) const CHAT_EVENTS_SCRIPT: Asset = asset!("static/chat-events.js");
 pub(crate) const OVERLAY_EVENTS_SCRIPT: Asset = asset!("static/overlay-events.js");
 pub(crate) const HLS_PLAYER_SCRIPT: Asset = asset!("static/hls.min.js");
 pub(crate) const STREAM_PREVIEW_SCRIPT: Asset = asset!("static/stream-preview.js");
 pub(crate) const APP_NAVIGATION_SCRIPT: Asset = asset!("static/app-navigation.js");
-pub(crate) const LOG_VIEWER_SCRIPT: Asset = asset!("static/log-viewer.js");
 pub(crate) const METRICS_CHARTS_SCRIPT: Asset = asset!("static/metrics-charts.js");
 pub(crate) const SECRET_FIELDS_SCRIPT: Asset = asset!("static/secret-fields.js");
 const MAX_WEBHOOK_SIZE: usize = 128 * 1024;
@@ -155,9 +153,7 @@ async fn app_page(active_page: &'static str) -> Result<impl View> {
                 <script src=(HLS_PLAYER_SCRIPT) defer="defer"></script>
                 <script src=(STREAM_PREVIEW_SCRIPT) defer="defer"></script>
                 <script src=(METRICS_CHARTS_SCRIPT) defer="defer"></script>
-                <script src=(CHAT_EVENTS_SCRIPT) defer="defer"></script>
                 <script src=(APP_NAVIGATION_SCRIPT) defer="defer"></script>
-                <script src=(LOG_VIEWER_SCRIPT) defer="defer"></script>
                 <script src=(SECRET_FIELDS_SCRIPT) defer="defer"></script>
             </head>
             <body
@@ -567,77 +563,27 @@ async fn clear_chat_poll(cx: &Cx) -> Result<Response> {
     .into_response(cx)
 }
 
-#[route(GET "/api/events")]
-async fn server_events(
+#[route(GET "/api/metrics/events")]
+async fn metrics_events(
     cx: &Cx,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<SseEvent>> + use<>>> {
     let app: &AppHandle = app_context(cx);
-    let status_rx = app.stream.subscribe_status();
-    let chat_changes = app.chat.subscribe_changes();
-    let initial_chat_revision = chat_changes.borrow().revision;
-    let metric_samples = app.metrics.subscribe();
-
-    let initial_status = SseEvent::new()
-        .event("stream_status")
-        .json_data(&*status_rx.borrow())?;
-    let initial_events = futures_util::stream::iter([
-        Ok(initial_status),
+    let samples = app.metrics.subscribe();
+    let initial = futures_util::stream::once(std::future::ready(
         SseEvent::new()
             .event("metrics_history")
             .json_data(&app.metrics.history()),
-    ]);
-
-    let changes = futures_util::stream::unfold(
-        (
-            status_rx,
-            chat_changes,
-            metric_samples,
-            initial_chat_revision,
-        ),
-        |(mut status_rx, mut chat_changes, mut metric_samples, mut last_chat_revision)| async move {
-            loop {
-                tokio::select! {
-                    changed = status_rx.changed() => {
-                        if changed.is_err() {
-                            return None;
-                        }
-                        let status = *status_rx.borrow();
-                        let event = SseEvent::new()
-                            .event("stream_status")
-                            .json_data(&status);
-                        return Some((event, (status_rx, chat_changes, metric_samples, last_chat_revision)));
-                    }
-                    changed = chat_changes.changed() => {
-                        if changed.is_err() {
-                            return None;
-                        }
-                        let revision = chat_changes.borrow().revision;
-                        if revision == last_chat_revision {
-                            continue;
-                        }
-                        last_chat_revision = revision;
-                        return Some((
-                            Ok(SseEvent::new().event("chat_changed").data("changed")),
-                            (status_rx, chat_changes, metric_samples, last_chat_revision),
-                        ));
-                    }
-                    changed = metric_samples.changed() => {
-                        if changed.is_err() {
-                            return None;
-                        }
-                        let event = metric_samples
-                            .borrow()
-                            .as_ref()
-                            .map(|sample| SseEvent::new().event("metrics_sample").json_data(sample))
-                            .unwrap_or_else(|| Ok(SseEvent::new().event("metrics_sample").data("null")));
-                        return Some((event, (status_rx, chat_changes, metric_samples, last_chat_revision)));
-                    }
-                }
-            }
-        },
-    );
-
-    Ok(Sse::new(initial_events.chain(changes)).keep_alive(KeepAlive::new()))
+    ));
+    let changes = futures_util::stream::unfold(samples, |mut samples| async move {
+        samples.changed().await.ok()?;
+        let event = samples
+            .borrow_and_update()
+            .as_ref()
+            .map(|sample| SseEvent::new().event("metrics_sample").json_data(sample))
+            .unwrap_or_else(|| Ok(SseEvent::new().event("metrics_sample").data("null")));
+        Some((event, samples))
+    });
+    Ok(Sse::new(initial.chain(changes)).keep_alive(KeepAlive::new()))
 }
 
 #[route(GET "/api/overlay/events")]
@@ -688,31 +634,6 @@ async fn overlay_events(
     );
 
     Ok(Sse::new(changes).keep_alive(KeepAlive::new()))
-}
-
-#[route(GET "/api/logs")]
-async fn service_logs(
-    _cx: &Cx,
-) -> Result<Sse<impl futures_util::Stream<Item = Result<SseEvent>> + use<>>> {
-    let logs = crate::log_buffer::global().map_err(topcoat::Error::from_anyhow)?;
-    let receiver = logs.subscribe();
-    let initial = futures_util::stream::iter(
-        logs.snapshot()
-            .into_iter()
-            .map(|entry| SseEvent::new().event("log").json_data(&entry)),
-    );
-    let live = futures_util::stream::unfold(receiver, |mut receiver| async move {
-        loop {
-            match receiver.recv().await {
-                Ok(entry) => {
-                    return Some((SseEvent::new().event("log").json_data(&entry), receiver));
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
-            }
-        }
-    });
-    Ok(Sse::new(initial.chain(live)).keep_alive(KeepAlive::new()))
 }
 
 #[route(POST "/api/webhook")]
@@ -1004,7 +925,7 @@ mod tests {
 
         let shared_events = client
             .get(format!(
-                "http://{local_addr}/api/events?key=overlay-token-for-tests"
+                "http://{local_addr}/api/metrics/events?key=overlay-token-for-tests"
             ))
             .send()
             .await

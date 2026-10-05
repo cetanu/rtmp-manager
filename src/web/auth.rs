@@ -153,7 +153,7 @@ mod tests {
         assert!(!is_public_path("/overlay/chat"));
         assert!(!is_public_path("/api/overlay/events"));
         assert!(!is_public_path("/api/chat"));
-        assert!(!is_public_path("/api/events"));
+        assert!(!is_public_path("/api/metrics/events"));
         assert!(!is_public_path("/assets/tailwind-123.css"));
         assert!(!is_public_path("/_topcoat/runtime/shards/chat"));
         assert!(!is_public_path("/"));

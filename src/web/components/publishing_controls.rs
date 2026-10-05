@@ -2,8 +2,8 @@ use crate::server::state::{AppHandle, StreamState};
 use topcoat::{
     Result,
     context::{Cx, app_context},
-    runtime::{Event, procedure, shard, signal},
-    view::{View, view},
+    runtime::{Event, connected, procedure, shard, signal},
+    view::{View, component, emit, live, view},
 };
 
 #[procedure]
@@ -21,8 +21,21 @@ async fn toggle_publishing(cx: &Cx, is_live: bool) -> Result<String> {
 }
 
 #[shard]
-pub async fn publishing_controls(cx: &Cx, revision: f64) -> Result<impl View> {
-    let _ = revision;
+pub async fn publishing_controls(cx: &Cx) -> Result<impl View> {
+    Ok(live! {
+        let app: &AppHandle = app_context(cx);
+        let mut changed = app.stream.subscribe_status();
+        loop {
+            let token = emit! { publishing_buttons() }?;
+            if !connected(cx) || changed.changed().await.is_err() {
+                break Ok(token);
+            }
+        }
+    })
+}
+
+#[component]
+async fn publishing_buttons(cx: &Cx) -> Result<impl View> {
     let app: &AppHandle = app_context(cx);
     let status = app.stream.status();
     let is_live = status.state == StreamState::Live;
@@ -35,8 +48,6 @@ pub async fn publishing_controls(cx: &Cx, revision: f64) -> Result<impl View> {
 
     let pending = signal(cx, || false);
     let action_error = signal(cx, String::new);
-    let live = signal(cx, || is_live);
-    let can_toggle = signal(cx, || toggle_available);
 
     Ok(view! {
         <div class="flex flex-wrap items-center gap-2">
@@ -44,28 +55,31 @@ pub async fn publishing_controls(cx: &Cx, revision: f64) -> Result<impl View> {
             <button
                 type="button"
                 class=(toggle_class)
-                :data-live=$(live.get())
-                :disabled=$(if pending.get() { true } else { !can_toggle.get() })
+                :data-live=$(is_live)
+                :disabled=$(if pending.get() { true } else { !toggle_available })
                 @click=$(async |_event: Event| {
                     pending.set(true);
-                    let error = toggle_publishing(live.get()).await;
-                    if error.is_empty() {
-                        live.set(!live.get());
-                    }
+                    let error = toggle_publishing(is_live).await;
                     action_error.set(error);
                     pending.set(false);
                 })
             >
                 <span
-                    :class=$(if live.get() {
+                    :class=$(if is_live {
                         "hud-dot bg-live text-live animate-rec"
-                    } else if can_toggle.get() {
+                    } else if toggle_available {
                         "hud-dot bg-signal text-signal"
                     } else {
                         "hud-dot bg-white/30 text-white/30"
                     })
                 ></span>
-                $(if live.get() { "LIVE" } else if can_toggle.get() { "PUBLISH" } else { "INACTIVE" })
+                $(if is_live {
+                    "LIVE"
+                } else if toggle_available {
+                    "PUBLISH"
+                } else {
+                    "INACTIVE"
+                })
             </button>
             <p
                 :hidden=$(action_error.get().is_empty())

@@ -7,12 +7,12 @@ use crate::web::components::ui::card::{card, card_content, card_footer};
 use topcoat::{
     Result,
     context::{Cx, app_context},
-    runtime::{Event, procedure, shard, signal},
-    view::{View, attributes, component, view},
+    runtime::{Event, connected, procedure, record, shard, signal},
+    view::{View, attributes, component, emit, live, view},
 };
 
 #[procedure]
-async fn acknowledge_chat(cx: &Cx, displayed_id: String) -> Result<String> {
+async fn acknowledge_chat(cx: &Cx, displayed_id: String) -> Result<()> {
     let app: &AppHandle = app_context(cx);
     let displayed_id = displayed_id.parse().map_err(|error| {
         topcoat::router::error::bad_request(format!("Invalid displayed chat message ID: {error}"))
@@ -28,27 +28,17 @@ async fn acknowledge_chat(cx: &Cx, displayed_id: String) -> Result<String> {
         )
         .into());
     }
-    Ok(first_message_id(
-        &app.chat
-            .snapshot()
-            .await
-            .map_err(topcoat::Error::from_anyhow)?,
-    ))
+    Ok(())
 }
 
 #[procedure]
-async fn clear_chat_messages(cx: &Cx) -> Result<String> {
+async fn clear_chat_messages(cx: &Cx) -> Result<()> {
     let app: &AppHandle = app_context(cx);
     app.chat
         .clear_messages()
         .await
         .map_err(topcoat::Error::from_anyhow)?;
-    Ok(first_message_id(
-        &app.chat
-            .snapshot()
-            .await
-            .map_err(topcoat::Error::from_anyhow)?,
-    ))
+    Ok(())
 }
 
 #[component]
@@ -95,29 +85,13 @@ async fn chat_toggle(
 }
 
 #[procedure("/api/chat/test-message")]
-async fn send_test_chat(cx: &Cx) -> Result<String> {
+async fn send_test_chat(cx: &Cx) -> Result<()> {
     let app: &AppHandle = app_context(cx);
     app.chat
         .enqueue_test(None)
         .await
         .map_err(topcoat::Error::from_anyhow)?;
-    Ok(first_message_id(
-        &app.chat
-            .snapshot()
-            .await
-            .map_err(topcoat::Error::from_anyhow)?,
-    ))
-}
-
-#[procedure]
-async fn refresh_chat(cx: &Cx) -> Result<String> {
-    let app: &AppHandle = app_context(cx);
-    Ok(first_message_id(
-        &app.chat
-            .snapshot()
-            .await
-            .map_err(topcoat::Error::from_anyhow)?,
-    ))
+    Ok(())
 }
 
 #[procedure]
@@ -163,26 +137,13 @@ async fn start_pomodoro(cx: &Cx) -> Result<String> {
 }
 
 #[procedure]
-async fn stop_pomodoro(cx: &Cx) -> Result<String> {
+async fn stop_pomodoro(cx: &Cx) -> Result<()> {
     let app: &AppHandle = app_context(cx);
-    Ok(first_message_id(
-        &app.chat
-            .stop_pomodoro()
-            .await
-            .map_err(topcoat::Error::from_anyhow)?,
-    ))
-}
-
-#[procedure]
-async fn pomodoro_active(cx: &Cx) -> Result<bool> {
-    let app: &AppHandle = app_context(cx);
-    Ok(app
-        .chat
-        .snapshot()
+    app.chat
+        .stop_pomodoro()
         .await
-        .map_err(topcoat::Error::from_anyhow)?
-        .pomodoro
-        .is_some())
+        .map_err(topcoat::Error::from_anyhow)?;
+    Ok(())
 }
 
 #[procedure]
@@ -209,25 +170,23 @@ async fn start_poll(cx: &Cx, question: String, options_text: String) -> Result<S
 }
 
 #[procedure]
-async fn stop_poll(cx: &Cx) -> Result<String> {
+async fn stop_poll(cx: &Cx) -> Result<()> {
     let app: &AppHandle = app_context(cx);
-    Ok(first_message_id(
-        &app.chat
-            .stop_poll()
-            .await
-            .map_err(topcoat::Error::from_anyhow)?,
-    ))
+    app.chat
+        .stop_poll()
+        .await
+        .map_err(topcoat::Error::from_anyhow)?;
+    Ok(())
 }
 
 #[procedure]
-async fn clear_poll(cx: &Cx) -> Result<String> {
+async fn clear_poll(cx: &Cx) -> Result<()> {
     let app: &AppHandle = app_context(cx);
-    Ok(first_message_id(
-        &app.chat
-            .clear_poll()
-            .await
-            .map_err(topcoat::Error::from_anyhow)?,
-    ))
+    app.chat
+        .clear_poll()
+        .await
+        .map_err(topcoat::Error::from_anyhow)?;
+    Ok(())
 }
 
 pub(crate) fn poll_percent(votes: u64, total: u64) -> u64 {
@@ -237,30 +196,6 @@ pub(crate) fn poll_percent(votes: u64, total: u64) -> u64 {
         .unwrap_or(0)
 }
 
-#[procedure]
-async fn poll_is_visible(cx: &Cx) -> Result<bool> {
-    let app: &AppHandle = app_context(cx);
-    Ok(app
-        .chat
-        .snapshot()
-        .await
-        .map_err(topcoat::Error::from_anyhow)?
-        .poll
-        .is_some())
-}
-
-#[procedure]
-async fn poll_is_active(cx: &Cx) -> Result<bool> {
-    let app: &AppHandle = app_context(cx);
-    Ok(app
-        .chat
-        .snapshot()
-        .await
-        .map_err(topcoat::Error::from_anyhow)?
-        .poll
-        .is_some_and(|poll| poll.is_active()))
-}
-
 #[derive(Clone)]
 struct PollSetupSignals {
     question: topcoat::runtime::Signal<String>,
@@ -268,9 +203,6 @@ struct PollSetupSignals {
     pending: topcoat::runtime::Signal<bool>,
     error: topcoat::runtime::Signal<String>,
     form_open: topcoat::runtime::Signal<bool>,
-    visible: topcoat::runtime::Signal<bool>,
-    active: topcoat::runtime::Signal<bool>,
-    revision: topcoat::runtime::Signal<f64>,
 }
 
 #[component]
@@ -281,9 +213,6 @@ async fn poll_setup(signals: PollSetupSignals) -> Result<impl View> {
         pending,
         error,
         form_open,
-        visible,
-        active,
-        revision,
     } = signals;
 
     Ok(view! {
@@ -343,12 +272,9 @@ async fn poll_setup(signals: PollSetupSignals) -> Result<impl View> {
                             let next_error = start_poll(question.get(), options.get()).await;
                             error.set(next_error);
                             if error.get().is_empty() {
-                                visible.set(true);
-                                active.set(true);
                                 form_open.set(false);
                             }
                             pending.set(false);
-                            revision.set(revision.get() + 1.0);
                         })
                     >
                         "Start"
@@ -367,8 +293,36 @@ fn first_message_id(snapshot: &crate::chat::ChatInboxSnapshot) -> String {
         .unwrap_or_default()
 }
 
-#[component]
+#[record]
+#[derive(Clone)]
+struct InboxControls {
+    current_id: String,
+    pomodoro_active: bool,
+    poll_visible: bool,
+    poll_active: bool,
+}
+
+#[shard]
 pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
+    Ok(live! {
+        let app: &AppHandle = app_context(cx);
+        let mut changed = app.chat.subscribe_changes();
+        let mut config_changed = app.config.subscribe();
+        loop {
+            let token = emit! { chat_inbox_panel() }?;
+            if !connected(cx) {
+                break Ok(token);
+            }
+            tokio::select! {
+                result = changed.changed() => if result.is_err() { break Ok(token); },
+                result = config_changed.changed() => if result.is_err() { break Ok(token); },
+            }
+        }
+    })
+}
+
+#[component]
+async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
     let app: &AppHandle = app_context(cx);
     let overlay_token = app.config.get().web_auth.overlay_token.clone();
     let initial_snapshot = app
@@ -376,14 +330,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
         .snapshot()
         .await
         .map_err(topcoat::Error::from_anyhow)?;
-    let initial_id = first_message_id(&initial_snapshot);
     let queue_mode = app.config.get().chat.queue_mode;
-    let initial_pomodoro_active = initial_snapshot.pomodoro.is_some();
-    let initial_poll_visible = initial_snapshot.poll.is_some();
-    let initial_poll_active = initial_snapshot
-        .poll
-        .as_ref()
-        .is_some_and(|poll| poll.is_active());
     let chat = app.config.get().chat.clone();
     let youtube_configured = [
         &chat.youtube_live_chat_id,
@@ -395,8 +342,15 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
     let outline_button = button_variants(ButtonVariant::Outline, ButtonSize::Md);
     let primary_button = button_variants(ButtonVariant::Primary, ButtonSize::Md);
 
-    let current_id = signal(cx, || initial_id);
-    let revision = signal(cx, || 0.0);
+    let controls = InboxControls {
+        current_id: first_message_id(&initial_snapshot),
+        pomodoro_active: initial_snapshot.pomodoro.is_some(),
+        poll_visible: initial_snapshot.poll.is_some(),
+        poll_active: initial_snapshot
+            .poll
+            .as_ref()
+            .is_some_and(|poll| poll.is_active()),
+    };
     let youtube_polling_enabled = signal(cx, || chat.youtube_polling_enabled);
     let youtube_toggle_pending = signal(cx, || false);
     let x_webhook_enabled = signal(cx, || chat.x_webhook_enabled);
@@ -404,11 +358,8 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
     let kick_webhook_enabled = signal(cx, || chat.kick_webhook_enabled);
     let kick_toggle_pending = signal(cx, || false);
     let polling_error = signal(cx, String::new);
-    let pomo_active = signal(cx, || initial_pomodoro_active);
     let pomo_error = signal(cx, String::new);
     let pomo_pending = signal(cx, || false);
-    let poll_visible = signal(cx, || initial_poll_visible);
-    let poll_active = signal(cx, || initial_poll_active);
     let poll_form_open = signal(cx, || false);
     let poll_question = signal(cx, String::new);
     let poll_options = signal(cx, String::new);
@@ -421,9 +372,6 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
         pending: poll_pending.clone(),
         error: poll_error,
         form_open: poll_form_open.clone(),
-        visible: poll_visible.clone(),
-        active: poll_active.clone(),
-        revision: revision.clone(),
     };
 
     Ok(view! {
@@ -434,7 +382,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
             if poll_form_open.get() {
                 poll_setup(signals: poll_setup_signals.clone())
             } else {
-                chat_inbox_content(revision: $(revision.get()))
+                chat_inbox_content()
             }
             card_footer(
                 attrs: attributes! {
@@ -445,7 +393,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                         id="chat-pomodoro-focus"
                         type="button"
                         class=(outline_button.clone())
-                        :hidden=$(if pomo_active.get() {
+                        :hidden=$(if controls.pomodoro_active {
                             true
                         } else if poll_form_open.get() {
                             true
@@ -457,11 +405,8 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                             pomo_pending.set(true);
                             let error = start_pomodoro().await;
                             pomo_error.set(error);
-                            if pomo_error.get().is_empty() {
-                                pomo_active.set(true);
-                            }
+                            if pomo_error.get().is_empty() {}
                             pomo_pending.set(false);
-                            revision.set(revision.get() + 1.0);
                         })
                     >
                         "Focus"
@@ -470,15 +415,13 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                         id="chat-pomodoro-stop"
                         type="button"
                         class=(destructive_button.clone())
-                        :hidden=$(if pomo_active.get() { false } else { true })
+                        :hidden=$(if controls.pomodoro_active { false } else { true })
                         :disabled=$(pomo_pending.get())
                         @click=$(async |_event| {
                             pomo_pending.set(true);
-                            let next_id = stop_pomodoro().await;
-                            current_id.set(next_id);
-                            pomo_active.set(false);
+                            stop_pomodoro().await;
+
                             pomo_pending.set(false);
-                            revision.set(revision.get() + 1.0);
                         })
                     >
                         "Stop"
@@ -487,7 +430,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                         id="chat-poll-start"
                         type="button"
                         class=(outline_button.clone())
-                        :hidden=$(if poll_visible.get() {
+                        :hidden=$(if controls.poll_visible {
                             true
                         } else if poll_form_open.get() {
                             true
@@ -502,15 +445,13 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                         id="chat-poll-stop"
                         type="button"
                         class=(destructive_button.clone())
-                        :hidden=$(if poll_active.get() { false } else { true })
+                        :hidden=$(if controls.poll_active { false } else { true })
                         :disabled=$(poll_pending.get())
                         @click=$(async |_event| {
                             poll_pending.set(true);
-                            let next_id = stop_poll().await;
-                            current_id.set(next_id);
-                            poll_active.set(false);
+                            stop_poll().await;
+
                             poll_pending.set(false);
-                            revision.set(revision.get() + 1.0);
                         })
                     >
                         "Stop poll"
@@ -519,20 +460,17 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                         id="chat-poll-clear"
                         type="button"
                         class=(outline_button.clone())
-                        :hidden=$(if poll_visible.get() {
-                            if poll_active.get() { true } else { false }
+                        :hidden=$(if controls.poll_visible {
+                            if controls.poll_active { true } else { false }
                         } else {
                             true
                         })
                         :disabled=$(poll_pending.get())
                         @click=$(async |_event| {
                             poll_pending.set(true);
-                            let next_id = clear_poll().await;
-                            current_id.set(next_id);
-                            poll_visible.set(false);
-                            poll_active.set(false);
+                            clear_poll().await;
+
                             poll_pending.set(false);
-                            revision.set(revision.get() + 1.0);
                         })
                     >
                         "Clear results"
@@ -553,36 +491,18 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                         type="button"
                         class=(outline_button.clone())
                         @click=$(async |_event| {
-                            let next_id = send_test_chat().await;
-                            current_id.set(next_id);
-                            revision.set(revision.get() + 1.0);
+                            send_test_chat().await;
                         })
                     >
                         "Test Message"
                     </button>
-                    <button
-                        id="chat-refresh-button"
-                        type="button"
-                        class=(outline_button.clone())
-                        @click=$(async |_event| {
-                            let refreshed_id = refresh_chat().await;
-                            current_id.set(refreshed_id);
-                            pomo_active.set(pomodoro_active().await);
-                            poll_visible.set(poll_is_visible().await);
-                            poll_active.set(poll_is_active().await);
-                            revision.set(revision.get() + 1.0);
-                        })
-                    >
-                        "Check"
-                    </button>
+
                     <button
                         type="button"
                         class=(outline_button.clone())
                         :hidden=$(if queue_mode { true } else { false })
                         @click=$(async |_event| {
-                            let next_id = clear_chat_messages().await;
-                            current_id.set(next_id);
-                            revision.set(revision.get() + 1.0);
+                            clear_chat_messages().await;
                         })
                     >
                         "Clear all"
@@ -591,11 +511,9 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
                         type="button"
                         class=(primary_button)
                         :hidden=$(if queue_mode { false } else { true })
-                        :disabled=$(current_id.get().is_empty())
+                        :disabled=$(controls.current_id.clone().is_empty())
                         @click=$(async |_event| {
-                            let next_id = acknowledge_chat(current_id.get()).await;
-                            current_id.set(next_id);
-                            revision.set(revision.get() + 1.0);
+                            acknowledge_chat(controls.current_id.clone()).await;
                         })
                     >
                         "Acknowledge"
@@ -672,8 +590,26 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
 }
 
 #[shard]
-pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
-    let _ = revision;
+pub async fn chat_inbox_content(cx: &Cx) -> Result<impl View> {
+    Ok(live! {
+        let app: &AppHandle = app_context(cx);
+        let mut changed = app.chat.subscribe_changes();
+        loop {
+            let timer_active = changed.borrow_and_update().pomodoro.is_some();
+            let token = emit! { inbox_messages() }?;
+            if !connected(cx) {
+                break Ok(token);
+            }
+            tokio::select! {
+                result = changed.changed() => if result.is_err() { break Ok(token); },
+                _ = tokio::time::sleep(std::time::Duration::from_secs(1)), if timer_active => {},
+            }
+        }
+    })
+}
+
+#[component]
+async fn inbox_messages(cx: &Cx) -> Result<impl View> {
     let app: &AppHandle = app_context(cx);
     let queue_mode = app.config.get().chat.queue_mode;
     let snapshot = app
@@ -793,13 +729,18 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
                 </div>
             }
             if show_chat {
-                <div data-chat-scroll="true" class="min-h-0 flex-1 overflow-y-auto pr-1">
+                <div
+                    class="flex min-h-0 flex-1 flex-col-reverse overflow-y-auto pr-1"
+                >
                     if snapshot.messages.is_empty() {
-                        <div class="flex h-full min-h-32 items-center justify-center border border-border bg-black/30 px-4 text-center font-mono text-[11px] text-muted-foreground">
+                        <div
+                            class="flex h-full min-h-32 items-center justify-center border border-border bg-black/30 px-4 text-center font-mono text-[11px] text-muted-foreground"
+                        >
                             "// No chat messages waiting."
                         </div>
                     } else {
                         <div class="flex flex-col gap-2">
+                            #[key(message.id)]
                             for (index, message) in snapshot
                                 .messages
                                 .into_iter()
@@ -814,19 +755,27 @@ pub async fn chat_inbox_content(cx: &Cx, revision: f64) -> Result<impl View> {
                 </div>
             }
             if show_chat {
-                <div class="mt-1 flex justify-end gap-4 border-t border-border pt-2 pb-1 font-mono text-[10px] tracking-[0.12em] uppercase">
+                <div
+                    class="mt-1 flex justify-end gap-4 border-t border-border pt-2 pb-1 font-mono text-[10px] tracking-[0.12em] uppercase"
+                >
                     if queue_mode {
                         <span class="text-muted-foreground">
-                            <span class="font-semibold text-foreground tabular-nums">(snapshot.queued)</span>
+                            <span class="font-semibold text-foreground tabular-nums">
+                                (snapshot.queued)
+                            </span>
                             " queued"
                         </span>
                         <span class="text-muted-foreground">
-                            <span class="font-semibold text-foreground tabular-nums">(snapshot.dropped)</span>
+                            <span class="font-semibold text-foreground tabular-nums">
+                                (snapshot.dropped)
+                            </span>
                             " dropped"
                         </span>
                     } else {
                         <span class="text-muted-foreground">
-                            <span class="font-semibold text-foreground tabular-nums">(snapshot.queued)</span>
+                            <span class="font-semibold text-foreground tabular-nums">
+                                (snapshot.queued)
+                            </span>
                             " messages"
                         </span>
                     }

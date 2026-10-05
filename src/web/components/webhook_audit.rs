@@ -3,20 +3,12 @@ use crate::web::components::ui::form::secret_input;
 use topcoat::{
     Result,
     context::{Cx, app_context},
-    runtime::{procedure, shard, signal},
-    view::{View, attributes, component, view},
+    runtime::{connected, shard},
+    view::{View, attributes, component, emit, live, view},
 };
 
-#[procedure]
-async fn refresh_webhook_audit(cx: &Cx) -> Result<f64> {
-    let _app: &AppHandle = app_context(cx);
-    Ok(1.0)
-}
-
 #[component]
-pub async fn webhook_audit(cx: &Cx) -> Result<impl View> {
-    let _app: &AppHandle = app_context(cx);
-    let revision = signal(cx, || 0.0);
+pub async fn webhook_audit() -> Result<impl View> {
     Ok(view! {
         <section class="mt-4" aria-labelledby="webhook-audit-heading">
             <div class="mb-2 flex items-center justify-between gap-4">
@@ -28,24 +20,28 @@ pub async fn webhook_audit(cx: &Cx) -> Result<impl View> {
                         "Latest 10 POST requests. Payloads are concealed by default."
                     </p>
                 </div>
-                <button
-                    type="button"
-                    class="inline-flex h-9 items-center justify-center rounded-md border border-border bg-background px-3 text-sm font-medium shadow-xs hover:bg-accent"
-                    @click=$(async |_event| {
-                        revision.set(revision.get() + refresh_webhook_audit().await);
-                    })
-                >
-                    "Refresh"
-                </button>
             </div>
-            webhook_audit_table(revision: $(revision.get()))
+            webhook_audit_table()
         </section>
     })
 }
 
 #[shard]
-async fn webhook_audit_table(cx: &Cx, revision: f64) -> Result<impl View> {
-    let _ = revision;
+async fn webhook_audit_table(cx: &Cx) -> Result<impl View> {
+    Ok(live! {
+        let app: &AppHandle = app_context(cx);
+        let mut changed = app.webhook_audit.subscribe();
+        loop {
+            let token = emit! { audit_entries() }?;
+            if !connected(cx) || changed.changed().await.is_err() {
+                break Ok(token);
+            }
+        }
+    })
+}
+
+#[component]
+async fn audit_entries(cx: &Cx) -> Result<impl View> {
     let app: &AppHandle = app_context(cx);
     let entries = app.webhook_audit.snapshot();
 
@@ -72,6 +68,7 @@ async fn webhook_audit_table(cx: &Cx, revision: f64) -> Result<impl View> {
                             </td>
                         </tr>
                     } else {
+                        #[key(entry.id)]
                         for entry in entries {
                             <tr>
                                 <td class="whitespace-nowrap px-4 py-3 font-mono text-xs">
