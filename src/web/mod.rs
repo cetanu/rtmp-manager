@@ -166,6 +166,7 @@ async fn app_page(active_page: &'static str) -> Result<impl View> {
                 <script src=(METRICS_CHARTS_SCRIPT) defer="defer"></script>
             </head>
             <body
+                data-page=(active_page)
                 class="min-h-screen bg-background font-sans text-foreground antialiased selection:bg-signal/30"
             >
                 app_navigation(active_page: active_page)
