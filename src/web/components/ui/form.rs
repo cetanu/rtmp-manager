@@ -4,6 +4,8 @@ use crate::web::components::ui::label::label;
 use crate::web::components::ui::switch::switch;
 use topcoat::{
     Result,
+    context::Cx,
+    runtime::signal,
     view::{Attributes, Child, View, attributes, class, component, view},
 };
 
@@ -44,14 +46,16 @@ pub async fn field_description(
 
 #[component]
 pub async fn secret_input(
+    cx: &Cx,
     #[into] control_id: String,
     #[default] mut attrs: Attributes,
 ) -> Result<impl View> {
+    let visible = signal(cx, || false);
     Ok(view! {
         <div class="relative">
             input(
                 attrs: attributes! {
-                    type="password"
+                    :type=$(if visible.get() { "text" } else { "password" })
                     id=(control_id.clone())
                     class=(class!("pr-11", attrs.remove("class")))
                     (attrs)
@@ -59,14 +63,14 @@ pub async fn secret_input(
             )
             <button
                 type="button"
-                data-secret-toggle=(control_id.clone())
                 aria-controls=(control_id)
-                aria-pressed="false"
-                aria-label="Show value"
-                title="Show value"
+                :aria-pressed=$(if visible.get() { "true" } else { "false" })
+                :aria-label=$(if visible.get() { "Hide value" } else { "Show value" })
+                :title=$(if visible.get() { "Hide value" } else { "Show value" })
+                @click=$(|_event| visible.set(!visible.get()))
                 class="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-                eye_icon()
+                eye_icon(visible: visible)
             </button>
         </div>
     })

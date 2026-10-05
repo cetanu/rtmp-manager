@@ -48,7 +48,6 @@ pub(crate) const OVERLAY_EVENTS_SCRIPT: Asset = asset!("static/overlay-events.js
 pub(crate) const HLS_PLAYER_SCRIPT: Asset = asset!("static/hls.min.js");
 pub(crate) const STREAM_PREVIEW_SCRIPT: Asset = asset!("static/stream-preview.js");
 pub(crate) const METRICS_CHARTS_SCRIPT: Asset = asset!("static/metrics-charts.js");
-pub(crate) const SECRET_FIELDS_SCRIPT: Asset = asset!("static/secret-fields.js");
 const MAX_WEBHOOK_SIZE: usize = 128 * 1024;
 const MAX_CONFIG_BODY_SIZE: usize = 1024 * 1024;
 const MAX_CHAT_TEST_BODY_SIZE: usize = 64 * 1024;
@@ -165,7 +164,6 @@ async fn app_page(active_page: &'static str) -> Result<impl View> {
                 <script src=(HLS_PLAYER_SCRIPT) defer="defer"></script>
                 <script src=(STREAM_PREVIEW_SCRIPT) defer="defer"></script>
                 <script src=(METRICS_CHARTS_SCRIPT) defer="defer"></script>
-                <script src=(SECRET_FIELDS_SCRIPT) defer="defer"></script>
             </head>
             <body
                 class="min-h-screen bg-background font-sans text-foreground antialiased selection:bg-signal/30"

@@ -23,10 +23,10 @@ pub async fn trash_icon() -> Result<impl View> {
 }
 
 #[component]
-pub async fn eye_icon() -> Result<impl View> {
+pub async fn eye_icon(visible: topcoat::runtime::Signal<bool>) -> Result<impl View> {
     Ok(view! {
         <svg
-            data-secret-visible="false"
+            :hidden=$(visible.get())
             aria-hidden="true"
             width="18"
             height="18"
@@ -39,8 +39,7 @@ pub async fn eye_icon() -> Result<impl View> {
             <circle cx="12" cy="12" r="3" />
         </svg>
         <svg
-            data-secret-visible="true"
-            hidden="true"
+            :hidden=$(!visible.get())
             aria-hidden="true"
             width="18"
             height="18"
