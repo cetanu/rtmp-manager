@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use topcoat::asset::{Asset, AssetBundle, RouterBuilderAssetExt, asset};
-use topcoat::runtime::RouterBuilderRuntimeExt;
+use topcoat::runtime::{PrefetchMode, RouterBuilderRuntimeExt};
 use topcoat::tailwind::stylesheet;
 use topcoat::{
     Result,
@@ -47,7 +47,6 @@ pub(crate) const FAVICON: Asset = asset!("rtmp.png");
 pub(crate) const OVERLAY_EVENTS_SCRIPT: Asset = asset!("static/overlay-events.js");
 pub(crate) const HLS_PLAYER_SCRIPT: Asset = asset!("static/hls.min.js");
 pub(crate) const STREAM_PREVIEW_SCRIPT: Asset = asset!("static/stream-preview.js");
-pub(crate) const APP_NAVIGATION_SCRIPT: Asset = asset!("static/app-navigation.js");
 pub(crate) const METRICS_CHARTS_SCRIPT: Asset = asset!("static/metrics-charts.js");
 pub(crate) const SECRET_FIELDS_SCRIPT: Asset = asset!("static/secret-fields.js");
 const MAX_WEBHOOK_SIZE: usize = 128 * 1024;
@@ -77,6 +76,7 @@ pub async fn run_web_server(
         .layer(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE).at("/api/test-stream"))
         .app_context(app_handle)
         .runtime()
+        .prefetch(PrefetchMode::Never)
         .build();
 
     tokio::spawn(async move {
@@ -122,6 +122,18 @@ fn metrics_sample_interval(status: StreamStatus) -> Duration {
     }
 }
 
+fn page_title(page: &str) -> &'static str {
+    match page {
+        "metrics" => "Metrics",
+        "chat" => "Chat",
+        "logs" => "Logs",
+        "settings" => "Settings",
+        "targets" => "Targets",
+        "export" => "Export",
+        _ => "Preview",
+    }
+}
+
 #[component]
 async fn app_page(active_page: &'static str) -> Result<impl View> {
     Ok(view! {
@@ -130,7 +142,7 @@ async fn app_page(active_page: &'static str) -> Result<impl View> {
             <head>
                 <meta charset="UTF-8" />
                 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-                <title>"RTMP-Manager"</title>
+                <title>(format!("{} · RTMP Manager", page_title(active_page)))</title>
                 <meta
                     name="description"
                     content="Configuration dashboard for the RTMP Stream Multiplexer."
@@ -153,7 +165,6 @@ async fn app_page(active_page: &'static str) -> Result<impl View> {
                 <script src=(HLS_PLAYER_SCRIPT) defer="defer"></script>
                 <script src=(STREAM_PREVIEW_SCRIPT) defer="defer"></script>
                 <script src=(METRICS_CHARTS_SCRIPT) defer="defer"></script>
-                <script src=(APP_NAVIGATION_SCRIPT) defer="defer"></script>
                 <script src=(SECRET_FIELDS_SCRIPT) defer="defer"></script>
             </head>
             <body
@@ -161,23 +172,30 @@ async fn app_page(active_page: &'static str) -> Result<impl View> {
             >
                 app_navigation(active_page: active_page)
                 <main class="mx-auto w-full max-w-[1600px] px-4 py-4 sm:px-5">
-                    <section data-app-page="preview" hidden=(active_page != "preview")>
-                        stream_preview()
-                    </section>
-                    <section data-app-page="metrics" hidden=(active_page != "metrics")>
-                        metrics_page()
-                    </section>
-                    <section data-app-page="chat" hidden=(active_page != "chat")>
-                        chat_inbox()
-                    </section>
-                    <section data-app-page="logs" hidden=(active_page != "logs")>
-                        log_viewer()
-                        webhook_audit()
-                    </section>
-                    configuration_form(active_page: active_page)
-                    <section data-app-page="export" hidden=(active_page != "export")>
-                        config_transfer()
-                    </section>
+                    match active_page {
+                        "preview" => {
+                            stream_preview()
+                        }
+                        "metrics" => {
+                            metrics_page()
+                        }
+                        "chat" => {
+                            chat_inbox()
+                        }
+                        "logs" => {
+                            log_viewer()
+                            webhook_audit()
+                        }
+                        "settings" | "targets" => {
+                            configuration_form(active_page: active_page)
+                        }
+                        "export" => {
+                            config_transfer()
+                        }
+                        _ => {
+
+                        }
+                    }
                 </main>
             </body>
         </html>

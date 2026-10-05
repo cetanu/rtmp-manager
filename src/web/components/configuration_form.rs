@@ -12,31 +12,22 @@ use topcoat::{
 #[component]
 pub async fn configuration_form(active_page: &'static str) -> Result<impl View> {
     Ok(view! {
-        <form
-            id="configForm"
-            method="post"
-            action="/api/config"
-            data-app-config="true"
-            hidden=(active_page != "settings" && active_page != "targets")
-            class="relative"
-        >
+        <form id="configForm" method="post" action="/api/config" class="relative">
             <input
                 type="hidden"
                 name="return_to"
-                data-app-return-to="true"
                 value=(if active_page == "targets" { "/targets" } else { "/settings" })
             />
-            <section data-app-page="settings" hidden=(active_page != "settings")>
+            if active_page == "settings" {
                 <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
                     <div class="min-w-0">server_settings()</div>
                     <div class="min-w-0">web_auth()</div>
                     <div class="min-w-0">chat_settings()</div>
                     <div class="min-w-0">notifications()</div>
                 </div>
-            </section>
-            <section data-app-page="targets" hidden=(active_page != "targets")>
+            } else {
                 targets()
-            </section>
+            }
             <div class="mt-6">actions_panel()</div>
         </form>
     })

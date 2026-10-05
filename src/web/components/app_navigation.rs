@@ -1,5 +1,8 @@
 use topcoat::{
     Result,
+    context::Cx,
+    router::href,
+    runtime::{link_attrs, prefetch_mode},
     view::{View, component, view},
 };
 
@@ -15,7 +18,7 @@ fn link_class(active_page: &str, page: &str) -> &'static str {
 }
 
 #[component]
-pub async fn app_navigation(active_page: &'static str) -> Result<impl View> {
+pub async fn app_navigation(cx: &Cx, active_page: &'static str) -> Result<impl View> {
     Ok(view! {
         <header
             class="sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur-md"
@@ -24,8 +27,7 @@ pub async fn app_navigation(active_page: &'static str) -> Result<impl View> {
                 class="mx-auto flex w-full max-w-[1600px] items-center gap-3 px-4 py-2 sm:px-5"
             >
                 <a
-                    href="/preview"
-                    data-app-link="preview"
+                    (link_attrs(cx, href!(crate::web::preview_page), prefetch_mode(cx)))
                     class="flex shrink-0 items-center gap-2 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                     <img
@@ -53,10 +55,11 @@ pub async fn app_navigation(active_page: &'static str) -> Result<impl View> {
                     class="hud-tabs -mx-1 flex flex-1 gap-0.5 overflow-x-auto px-0.5 py-0.5"
                 >
                     <a
-                        href="/preview"
-                        data-app-link="preview"
-                        data-active-class=(ACTIVE_LINK)
-                        data-inactive-class=(INACTIVE_LINK)
+                        (link_attrs(
+                            cx,
+                            href!(crate::web::preview_page),
+                            prefetch_mode(cx),
+                        ))
                         class=(link_class(active_page, "preview"))
                         aria-current=(if active_page == "preview" {
                             "page"
@@ -67,10 +70,11 @@ pub async fn app_navigation(active_page: &'static str) -> Result<impl View> {
                         "Preview"
                     </a>
                     <a
-                        href="/metrics"
-                        data-app-link="metrics"
-                        data-active-class=(ACTIVE_LINK)
-                        data-inactive-class=(INACTIVE_LINK)
+                        (link_attrs(
+                            cx,
+                            href!(crate::web::metrics_page_route),
+                            prefetch_mode(cx),
+                        ))
                         class=(link_class(active_page, "metrics"))
                         aria-current=(if active_page == "metrics" {
                             "page"
@@ -81,10 +85,7 @@ pub async fn app_navigation(active_page: &'static str) -> Result<impl View> {
                         "Metrics"
                     </a>
                     <a
-                        href="/chat"
-                        data-app-link="chat"
-                        data-active-class=(ACTIVE_LINK)
-                        data-inactive-class=(INACTIVE_LINK)
+                        (link_attrs(cx, href!(crate::web::chat_page), prefetch_mode(cx)))
                         class=(link_class(active_page, "chat"))
                         aria-current=(if active_page == "chat" {
                             "page"
@@ -95,10 +96,7 @@ pub async fn app_navigation(active_page: &'static str) -> Result<impl View> {
                         "Chat"
                     </a>
                     <a
-                        href="/logs"
-                        data-app-link="logs"
-                        data-active-class=(ACTIVE_LINK)
-                        data-inactive-class=(INACTIVE_LINK)
+                        (link_attrs(cx, href!(crate::web::logs_page), prefetch_mode(cx)))
                         class=(link_class(active_page, "logs"))
                         aria-current=(if active_page == "logs" {
                             "page"
@@ -109,10 +107,11 @@ pub async fn app_navigation(active_page: &'static str) -> Result<impl View> {
                         "Logs"
                     </a>
                     <a
-                        href="/settings"
-                        data-app-link="settings"
-                        data-active-class=(ACTIVE_LINK)
-                        data-inactive-class=(INACTIVE_LINK)
+                        (link_attrs(
+                            cx,
+                            href!(crate::web::settings_page),
+                            prefetch_mode(cx),
+                        ))
                         class=(link_class(active_page, "settings"))
                         aria-current=(if active_page == "settings" {
                             "page"
@@ -123,10 +122,11 @@ pub async fn app_navigation(active_page: &'static str) -> Result<impl View> {
                         "Settings"
                     </a>
                     <a
-                        href="/targets"
-                        data-app-link="targets"
-                        data-active-class=(ACTIVE_LINK)
-                        data-inactive-class=(INACTIVE_LINK)
+                        (link_attrs(
+                            cx,
+                            href!(crate::web::targets_page),
+                            prefetch_mode(cx),
+                        ))
                         class=(link_class(active_page, "targets"))
                         aria-current=(if active_page == "targets" {
                             "page"
@@ -137,10 +137,11 @@ pub async fn app_navigation(active_page: &'static str) -> Result<impl View> {
                         "Targets"
                     </a>
                     <a
-                        href="/export"
-                        data-app-link="export"
-                        data-active-class=(ACTIVE_LINK)
-                        data-inactive-class=(INACTIVE_LINK)
+                        (link_attrs(
+                            cx,
+                            href!(crate::web::export_page),
+                            prefetch_mode(cx),
+                        ))
                         class=(link_class(active_page, "export"))
                         aria-current=(if active_page == "export" {
                             "page"
@@ -151,18 +152,6 @@ pub async fn app_navigation(active_page: &'static str) -> Result<impl View> {
                         "Export"
                     </a>
                 </nav>
-                <div
-                    class="hidden shrink-0 items-center gap-3 md:flex"
-                >
-                    <span
-                        class="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase"
-                        role="status"
-                        aria-live="polite"
-                    >
-                        <span data-control-link-dot="true" class="hud-dot bg-white/30 text-white/30" aria-hidden="true"></span>
-                        <span data-control-link-label="true">"CONNECTING"</span>
-                    </span>
-                </div>
             </div>
         </header>
     })
