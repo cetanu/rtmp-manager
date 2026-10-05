@@ -1,9 +1,9 @@
 (() => {
   const cards = Array.from(document.querySelectorAll("[data-target-metric]"));
   const ingestCard = document.querySelector("[data-ingest-metric]");
-  const transferCard = document.querySelector("[data-transfer-metric]");
+  const transferCards = Array.from(document.querySelectorAll("[data-transfer-metric]"));
   const chatMessagesCard = document.querySelector("[data-chat-messages-metric]");
-  if (!cards.length && !ingestCard && !transferCard && !chatMessagesCard) return;
+  if (!cards.length && !ingestCard && !transferCards.length && !chatMessagesCard) return;
   let samples = [];
 
   const formatRate = (bps) => {
@@ -65,61 +65,6 @@
     context.fillText(label, left + 15, height - 6);
   }
 
-  function drawMulti(canvas, series, formatValue, minimum) {
-    const rect = canvas.getBoundingClientRect();
-    const ratio = window.devicePixelRatio || 1;
-    const width = Math.max(180, Math.floor(rect.width));
-    const height = Math.max(1, Math.floor(rect.height));
-    canvas.width = width * ratio;
-    canvas.height = height * ratio;
-    const context = canvas.getContext("2d");
-    context.scale(ratio, ratio);
-    context.clearRect(0, 0, width, height);
-
-    const allValues = series.flatMap((entry) => entry.values);
-    const maximum = Math.max(minimum, ...allValues);
-    const left = 44;
-    const top = 12;
-    const plotWidth = width - left - 8;
-    const plotHeight = height - top - 28;
-
-    context.strokeStyle = "rgba(148, 163, 184, .14)";
-    context.fillStyle = "rgb(148, 163, 184)";
-    context.font = '10px "JetBrains Mono", monospace';
-    for (let index = 0; index <= 3; index += 1) {
-      const y = top + (plotHeight * index) / 3;
-      context.beginPath();
-      context.moveTo(left, y);
-      context.lineTo(width - 8, y);
-      context.stroke();
-      context.fillText(formatValue(maximum * (1 - index / 3)), 0, y + 4);
-    }
-
-    series.forEach((entry) => {
-      context.strokeStyle = entry.color;
-      context.lineWidth = 2;
-      context.beginPath();
-      entry.values.forEach((value, index) => {
-        const x = left + (plotWidth * index) / Math.max(1, entry.values.length - 1);
-        const y = top + plotHeight * (1 - value / maximum);
-        if (index === 0) context.moveTo(x, y);
-        else context.lineTo(x, y);
-      });
-      context.stroke();
-    });
-
-    let legendX = left;
-    context.font = '10px "JetBrains Mono", monospace';
-    series.forEach((entry) => {
-      context.fillStyle = entry.color;
-      context.fillRect(legendX, height - 10, 10, 3);
-      legendX += 15;
-      context.fillStyle = "rgb(148, 163, 184)";
-      context.fillText(entry.label, legendX, height - 6);
-      legendX += context.measureText(entry.label).width + 12;
-    });
-  }
-
   function render() {
     if (ingestCard) {
       const latest = samples.at(-1)?.ingest_bps || 0;
@@ -133,31 +78,25 @@
         1_000_000,
       );
     }
-    if (transferCard) {
-      const latestIn = samples.at(-1)?.ingest_bytes || 0;
-      const latestOut = samples.at(-1)?.egress_bytes || 0;
-      const inEl = transferCard.querySelector("[data-transfer-in]");
-      const outEl = transferCard.querySelector("[data-transfer-out]");
-      const totalEl = transferCard.querySelector("[data-transfer-total]");
-      if (inEl) inEl.textContent = formatBytes(latestIn);
-      if (outEl) outEl.textContent = formatBytes(latestOut);
-      if (totalEl) totalEl.textContent = formatBytes(latestIn + latestOut);
-      const inValues = samples.map((sample) => sample.ingest_bytes || 0);
-      const outValues = samples.map((sample) => sample.egress_bytes || 0);
-      const totalValues = samples.map(
-        (sample) => (sample.ingest_bytes || 0) + (sample.egress_bytes || 0),
-      );
-      drawMulti(
-        transferCard.querySelector("canvas"),
-        [
-          { values: inValues, color: "rgb(74, 222, 128)", label: "In" },
-          { values: outValues, color: "rgb(56, 189, 248)", label: "Out" },
-          { values: totalValues, color: "rgb(251, 191, 36)", label: "Total" },
-        ],
+    transferCards.forEach((card) => {
+      const type = card.dataset.transferMetric;
+      const values = samples.map((sample) => {
+        const bytesIn = sample.ingest_bytes || 0;
+        const bytesOut = sample.egress_bytes || 0;
+        if (type === "in") return bytesIn;
+        if (type === "out") return bytesOut;
+        return bytesIn + bytesOut;
+      });
+      card.querySelector("[data-transfer-value]").textContent = formatBytes(values.at(-1) || 0);
+      draw(
+        card.querySelector("canvas"),
+        values,
+        type === "in" ? "rgb(74, 222, 128)" : type === "out" ? "rgb(56, 189, 248)" : "rgb(251, 191, 36)",
+        type === "in" ? "Bytes in" : type === "out" ? "Bytes out" : "Total bytes",
         formatBytes,
         1_000,
       );
-    }
+    });
     cards.forEach((card) => {
       const name = card.dataset.targetMetric;
       const latest = [...samples].reverse().map((sample) =>

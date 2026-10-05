@@ -90,57 +90,48 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
                     )
                 )
                 card(
-                    attrs: attributes! { class="!gap-2 !py-3" data-transfer-metric="true" },
+                    attrs: attributes! { class="!gap-2 !py-3" data-transfer-metric="in" },
                     card_header(
                         attrs: attributes! { class="!px-3" },
-                        <div class="flex items-center justify-between gap-3">
-                            card_title("Data transferred")
-                            <span
-                                class="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground"
-                            >
-                                "In / Out"
-                            </span>
-                        </div>
+                        card_title("Bytes in")
                     )
                     card_content(
                         attrs: attributes! { class="!px-3" },
-                        <div class="mb-2 grid grid-cols-3 gap-2">
-                            <div>
-                                <div
-                                    class="text-xs uppercase tracking-[0.18em] text-muted-foreground font-mono"
-                                >
-                                    "In"
-                                </div>
-                                <div class="hud-value text-xl" data-transfer-in="true">
-                                    (format_bytes(ingest_bytes))
-                                </div>
-                            </div>
-                            <div>
-                                <div
-                                    class="text-xs uppercase tracking-[0.18em] text-muted-foreground font-mono"
-                                >
-                                    "Out"
-                                </div>
-                                <div class="hud-value text-xl" data-transfer-out="true">
-                                    (format_bytes(egress_bytes))
-                                </div>
-                            </div>
-                            <div>
-                                <div
-                                    class="text-xs uppercase tracking-[0.18em] text-muted-foreground font-mono"
-                                >
-                                    "Total"
-                                </div>
-                                <div class="hud-value text-xl" data-transfer-total="true">
-                                    (format_bytes(total_bytes))
-                                </div>
-                            </div>
+                        <div class="mb-2">
+                            <div class="text-xs uppercase tracking-[0.18em] text-muted-foreground font-mono">"Total received"</div>
+                            <div class="hud-value text-xl" data-transfer-value="true">(format_bytes(ingest_bytes))</div>
                         </div>
-                        <canvas
-                            class="h-28 w-full"
-                            height="112"
-                            aria-label="Data transferred history (in, out, total)"
-                        ></canvas>
+                        <canvas class="h-28 w-full" height="112" aria-label="Bytes in history"></canvas>
+                    )
+                )
+                card(
+                    attrs: attributes! { class="!gap-2 !py-3" data-transfer-metric="out" },
+                    card_header(
+                        attrs: attributes! { class="!px-3" },
+                        card_title("Bytes out")
+                    )
+                    card_content(
+                        attrs: attributes! { class="!px-3" },
+                        <div class="mb-2">
+                            <div class="text-xs uppercase tracking-[0.18em] text-muted-foreground font-mono">"Total sent"</div>
+                            <div class="hud-value text-xl" data-transfer-value="true">(format_bytes(egress_bytes))</div>
+                        </div>
+                        <canvas class="h-28 w-full" height="112" aria-label="Bytes out history"></canvas>
+                    )
+                )
+                card(
+                    attrs: attributes! { class="!gap-2 !py-3" data-transfer-metric="total" },
+                    card_header(
+                        attrs: attributes! { class="!px-3" },
+                        card_title("Total bytes")
+                    )
+                    card_content(
+                        attrs: attributes! { class="!px-3" },
+                        <div class="mb-2">
+                            <div class="text-xs uppercase tracking-[0.18em] text-muted-foreground font-mono">"Received + sent"</div>
+                            <div class="hud-value text-xl" data-transfer-value="true">(format_bytes(total_bytes))</div>
+                        </div>
+                        <canvas class="h-28 w-full" height="112" aria-label="Total bytes history"></canvas>
                     )
                 )
             </div>
