@@ -381,7 +381,7 @@ fn merge_web_auth(config: &mut AppConfig, form: WebAuthForm) {
 
 fn merge_chat(config: &mut AppConfig, form: ChatForm) {
     config.chat = ChatSettings {
-        queue_mode: form.queue_mode,
+        queue_mode: config.chat.queue_mode,
         queue_capacity: form.queue_capacity.unwrap_or(config.chat.queue_capacity),
         twitch_channel: non_empty(form.twitch_channel)
             .map(|channel| channel.trim_start_matches('#').to_ascii_lowercase()),
@@ -740,8 +740,6 @@ pub struct WebAuthForm {
 
 #[derive(Debug, Default, Deserialize)]
 pub struct ChatForm {
-    #[serde(default)]
-    pub queue_mode: bool,
     pub queue_capacity: Option<usize>,
     pub twitch_channel: Option<String>,
     pub youtube_api_key: Option<String>,
@@ -1026,6 +1024,13 @@ impl ConfigHandle {
         let current_config = self.get();
         let updated = current_config.merge_form(form)?;
         self.save_updated(current_config, updated).await
+    }
+
+    pub async fn set_queue_mode(&self, enabled: bool) -> Result<(Arc<AppConfig>, bool, bool)> {
+        self.set_chat_flag(enabled, |chat, enabled| {
+            chat.queue_mode = enabled;
+        })
+        .await
     }
 
     pub async fn set_youtube_polling(&self, enabled: bool) -> Result<(Arc<AppConfig>, bool, bool)> {
@@ -1363,6 +1368,23 @@ mod tests {
         assert!(config.chat.kick_webhook_enabled);
 
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn chat_settings_form_preserves_queue_mode() {
+        for enabled in [true, false] {
+            let mut config = populated_config();
+            config.chat.queue_mode = enabled;
+            let form: ConfigForm = serde_qs::Config::new()
+                .use_form_encoding(true)
+                .deserialize_str("chat%5Btwitch_channel%5D=streamer&action=save")
+                .unwrap();
+
+            let updated = config.merge_form(form).unwrap();
+
+            assert_eq!(updated.chat.queue_mode, enabled);
+            assert_eq!(updated.chat.twitch_channel.as_deref(), Some("streamer"));
+        }
     }
 
     #[test]

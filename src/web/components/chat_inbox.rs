@@ -98,6 +98,10 @@ async fn send_test_chat(cx: &Cx) -> Result<()> {
 async fn set_chat_toggle(cx: &Cx, platform: String, enabled: bool) -> Result<String> {
     let app: &AppHandle = app_context(cx);
     match platform.as_str() {
+        "queue" => app
+            .set_queue_mode(enabled)
+            .await
+            .map_err(topcoat::Error::from_anyhow)?,
         "youtube" => app
             .set_youtube_polling(enabled)
             .await
@@ -122,6 +126,7 @@ async fn set_chat_toggle(cx: &Cx, platform: String, enabled: bool) -> Result<Str
 #[procedure]
 async fn start_pomodoro(cx: &Cx) -> Result<String> {
     let app: &AppHandle = app_context(cx);
+    let queue_mode = app.config.get().chat.queue_mode;
     let chat = app.config.get().chat.clone();
     match app
         .chat
@@ -330,7 +335,6 @@ async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
         .snapshot()
         .await
         .map_err(topcoat::Error::from_anyhow)?;
-    let queue_mode = app.config.get().chat.queue_mode;
     let chat = app.config.get().chat.clone();
     let youtube_configured = [
         &chat.youtube_live_chat_id,
@@ -352,6 +356,8 @@ async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
             .is_some_and(|poll| poll.is_active()),
     };
     let youtube_polling_enabled = signal(cx, || chat.youtube_polling_enabled);
+    let queue_mode_enabled = signal(cx, || chat.queue_mode);
+    let queue_toggle_pending = signal(cx, || false);
     let youtube_toggle_pending = signal(cx, || false);
     let x_webhook_enabled = signal(cx, || chat.x_webhook_enabled);
     let x_toggle_pending = signal(cx, || false);
@@ -529,6 +535,13 @@ async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
                     class="!px-3 !pt-2 !pb-2 flex items-center justify-between gap-3 flex-wrap"
                 },
                 <div class="flex flex-wrap items-center gap-2">
+                    chat_toggle(
+                        label: "Queue mode",
+                        platform: "queue".to_string(),
+                        enabled: &queue_mode_enabled,
+                        pending: &queue_toggle_pending,
+                        error: &polling_error
+                    )
                     if youtube_configured {
                         chat_toggle(
                             label: "YouTube polling",

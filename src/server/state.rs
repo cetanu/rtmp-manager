@@ -80,6 +80,14 @@ impl AppHandle {
         self.chat.apply_config(chat_settings).await
     }
 
+    pub async fn set_queue_mode(&self, enabled: bool) -> Result<()> {
+        let (config, changed, _) = self.config.set_queue_mode(enabled).await?;
+        if changed {
+            self.chat.apply_config(config.chat.clone()).await?;
+        }
+        Ok(())
+    }
+
     pub async fn set_youtube_polling(&self, enabled: bool) -> Result<()> {
         let (config, changed, _) = self.config.set_youtube_polling(enabled).await?;
         if changed {
