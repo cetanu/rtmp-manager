@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0](https://github.com/cetanu/rtmp-manager/compare/v0.7.0...v0.8.0) - 2026-10-06
+
+### Added
+
+- *(chat)* rename queue toggle and separate ingestion controls
+- *(chat)* move queue mode to the inbox toggle row
+
+### Fixed
+
+- *(chat)* react to queue mode changes in inbox action buttons
+- *(chat)* highlight the first message only in queue mode
+- *(salt)* extract archives and restart RTMP only on updates
+
 ## [0.7.0](https://github.com/cetanu/rtmp-manager/compare/v0.6.0...v0.7.0) - 2026-10-05
 
 ### Added
