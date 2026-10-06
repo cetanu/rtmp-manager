@@ -535,12 +535,13 @@ async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
                 },
                 <div class="flex flex-wrap items-center gap-2">
                     chat_toggle(
-                        label: "Queue mode",
+                        label: "Queue incoming chat",
                         platform: "queue".to_string(),
                         enabled: &queue_mode_enabled,
                         pending: &queue_toggle_pending,
                         error: &polling_error
                     )
+                    <div aria-hidden="true" class="mx-1 h-6 w-px shrink-0 bg-border"></div>
                     if youtube_configured {
                         chat_toggle(
                             label: "YouTube polling",
