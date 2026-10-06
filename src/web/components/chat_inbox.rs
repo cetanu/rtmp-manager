@@ -749,7 +749,7 @@ async fn inbox_messages(cx: &Cx) -> Result<impl View> {
                                 .enumerate() {
                                 chat_message_card(
                                     message: message,
-                                    highlighted: index == 0
+                                    highlighted: queue_mode && index == 0
                                 )
                             }
                         </div>
