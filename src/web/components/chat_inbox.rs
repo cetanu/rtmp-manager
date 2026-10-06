@@ -126,7 +126,6 @@ async fn set_chat_toggle(cx: &Cx, platform: String, enabled: bool) -> Result<Str
 #[procedure]
 async fn start_pomodoro(cx: &Cx) -> Result<String> {
     let app: &AppHandle = app_context(cx);
-    let queue_mode = app.config.get().chat.queue_mode;
     let chat = app.config.get().chat.clone();
     match app
         .chat
@@ -507,7 +506,7 @@ async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
                     <button
                         type="button"
                         class=(outline_button.clone())
-                        :hidden=$(if queue_mode { true } else { false })
+                        :hidden=$(queue_mode_enabled.get())
                         @click=$(async |_event| {
                             clear_chat_messages().await;
                         })
@@ -517,7 +516,7 @@ async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
                     <button
                         type="button"
                         class=(primary_button)
-                        :hidden=$(if queue_mode { false } else { true })
+                        :hidden=$(!queue_mode_enabled.get())
                         :disabled=$(controls.current_id.clone().is_empty())
                         @click=$(async |_event| {
                             acknowledge_chat(controls.current_id.clone()).await;
