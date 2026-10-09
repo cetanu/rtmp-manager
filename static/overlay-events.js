@@ -13,6 +13,32 @@
     });
   };
 
+  const scrollToLatest = () => {
+    const messages = document.getElementById("chat-overlay-messages");
+    if (!messages) return;
+    const reversed = getComputedStyle(messages).flexDirection === "column-reverse";
+    const wrapper = document.getElementById("chat-overlay-wrapper");
+    wrapper.scrollTop = reversed ? 0 : wrapper.scrollHeight;
+  };
+  const scheduleScroll = () => window.requestAnimationFrame(scrollToLatest);
+  const wrapper = document.getElementById("chat-overlay-wrapper");
+  if (wrapper) {
+    const observer = new ResizeObserver(scheduleScroll);
+    observer.observe(wrapper);
+    const observeMessages = () => {
+      observer.disconnect();
+      observer.observe(wrapper);
+      const messages = document.getElementById("chat-overlay-messages");
+      if (messages) observer.observe(messages);
+      scheduleScroll();
+    };
+    new MutationObserver(observeMessages).observe(wrapper, { childList: true });
+    observeMessages();
+    wrapper.addEventListener("load", scheduleScroll, true);
+    window.addEventListener("resize", scheduleScroll);
+    scheduleScroll();
+  }
+
   const key = new URLSearchParams(window.location.search).get("key");
   if (key && window.EventSource) {
     const eventsUrl = new URL("/api/overlay/events", window.location.origin);
@@ -29,6 +55,7 @@
       if (replacement?.id !== "chat-overlay-messages") return;
       current.replaceWith(replacement);
       tickCountdowns();
+      scheduleScroll();
     });
 
     window.addEventListener("pagehide", () => {

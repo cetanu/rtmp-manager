@@ -48,7 +48,7 @@ def dashboard(profile):
             ingest_port = unused_port()
         config["server"]["api_listen"] = f"127.0.0.1:{web_port}"
         config["server"]["listen"] = f"127.0.0.1:{ingest_port}"
-        config["web_auth"] = {}
+        config["web_auth"] = {"overlay_token": "browser-test-overlay-token"}
         config["targets"] = []
         config["chat"] = {"queue_mode": True}
         with sqlite3.connect(database) as connection:
@@ -162,6 +162,42 @@ def check_chat_layout(browser, base_url, viewport):
             expect(tab.locator("#chat-pomodoro-focus")).to_be_visible()
             expect(tab.locator("#chat-pomodoro-stop")).to_be_hidden()
         other.close()
+
+        # The OBS viewport follows the latest message as content and size change.
+        page.get_by_role("switch", name="Toggle Queue incoming chat", exact=True).click()
+        overlay_url = page.get_by_role("link", name="OBS Overlay").get_attribute("href")
+        overlay = context.new_page()
+        for direction in ("down", "up"):
+            overlay.goto(base_url + overlay_url + "&direction=" + direction)
+            expect(overlay.locator(".chat-overlay-message")).to_have_count(10)
+            def assert_latest_visible():
+                overlay.wait_for_function("""() => {
+                    const rows = document.querySelectorAll('.chat-overlay-message');
+                    const rect = rows[rows.length - 1].getBoundingClientRect();
+                    const reversed = getComputedStyle(document.getElementById('chat-overlay-messages')).flexDirection === 'column-reverse';
+                    return reversed ? rect.top >= 0 && rect.top < innerHeight
+                        : rect.bottom > 0 && rect.bottom <= innerHeight;
+                }""")
+            assert_latest_visible()
+            response = context.request.post(base_url + "/api/chat/test", data={
+                "source": "twitch", "author": "Latest viewer",
+                "text": "The latest message must stay visible.",
+            })
+            assert response.ok, response.text()
+            expect(overlay.locator(".chat-overlay-message")).to_have_count(11)
+            assert_latest_visible()
+            overlay.set_viewport_size({**viewport, "height": 400})
+            assert_latest_visible()
+            # Restore the message count before testing the other direction.
+            page.get_by_role("button", name="Clear all", exact=True).click()
+            expect(overlay.locator(".chat-overlay-message")).to_have_count(0)
+            for index in range(10):
+                response = context.request.post(base_url + "/api/chat/test", data={
+                    "source": "twitch", "author": f"Viewer {index}",
+                    "text": "Overflowing overlay message. " * 70,
+                })
+                assert response.ok, response.text()
+        overlay.close()
 
         # Resizing and navigating back must not leave the panel at its old height.
         page.set_viewport_size({**viewport, "height": viewport["height"] + 180})

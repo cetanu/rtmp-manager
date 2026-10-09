@@ -24,6 +24,9 @@ body {
     --overlay-alpha: 0.8;
 }
 #chat-overlay-wrapper {
+    overflow: hidden;
+    height: calc(100vh - 1rem);
+    height: calc(100dvh - 1rem);
     min-height: calc(100vh - 1rem);
     min-height: calc(100dvh - 1rem);
 }
