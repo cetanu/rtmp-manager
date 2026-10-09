@@ -150,6 +150,19 @@ def check_chat_layout(browser, base_url, viewport):
         geometry = assert_fills_viewport(page)
         assert geometry["messageScrollHeight"] > geometry["messageHeight"], geometry
 
+        # Focus controls must switch on the live page, including another tab.
+        other = context.new_page()
+        other.goto(base_url + "/chat")
+        page.locator("#chat-pomodoro-focus").click()
+        for tab in (page, other):
+            expect(tab.locator("#chat-pomodoro-stop")).to_be_visible()
+            expect(tab.locator("#chat-pomodoro-focus")).to_be_hidden()
+        page.locator("#chat-pomodoro-stop").click()
+        for tab in (page, other):
+            expect(tab.locator("#chat-pomodoro-focus")).to_be_visible()
+            expect(tab.locator("#chat-pomodoro-stop")).to_be_hidden()
+        other.close()
+
         # Resizing and navigating back must not leave the panel at its old height.
         page.set_viewport_size({**viewport, "height": viewport["height"] + 180})
         assert_fills_viewport(page)

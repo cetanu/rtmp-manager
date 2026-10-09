@@ -313,6 +313,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
         let mut changed = app.chat.subscribe_changes();
         let mut config_changed = app.config.subscribe();
         loop {
+            let timer_active = changed.borrow_and_update().pomodoro.is_some();
             let token = emit! { chat_inbox_panel() }?;
             if !connected(cx) {
                 break Ok(token);
@@ -320,6 +321,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
             tokio::select! {
                 result = changed.changed() => if result.is_err() { break Ok(token); },
                 result = config_changed.changed() => if result.is_err() { break Ok(token); },
+                _ = tokio::time::sleep(std::time::Duration::from_secs(1)), if timer_active => {},
             }
         }
     })
@@ -388,7 +390,7 @@ async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
             if poll_form_open.get() {
                 poll_setup(signals: poll_setup_signals.clone())
             } else {
-                chat_inbox_content()
+                inbox_messages()
             }
             card_footer(
                 attrs: attributes! {
@@ -399,19 +401,13 @@ async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
                         id="chat-pomodoro-focus"
                         type="button"
                         class=(outline_button.clone())
-                        :hidden=$(if controls.pomodoro_active {
-                            true
-                        } else if poll_form_open.get() {
-                            true
-                        } else {
-                            false
-                        })
+                        hidden=(controls.pomodoro_active)
+                        :style=$(if poll_form_open.get() { "display: none" } else { "" })
                         :disabled=$(pomo_pending.get())
                         @click=$(async |_event| {
                             pomo_pending.set(true);
                             let error = start_pomodoro().await;
                             pomo_error.set(error);
-                            if pomo_error.get().is_empty() {}
                             pomo_pending.set(false);
                         })
                     >
@@ -421,7 +417,7 @@ async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
                         id="chat-pomodoro-stop"
                         type="button"
                         class=(destructive_button.clone())
-                        :hidden=$(if controls.pomodoro_active { false } else { true })
+                        hidden=(!controls.pomodoro_active)
                         :disabled=$(pomo_pending.get())
                         @click=$(async |_event| {
                             pomo_pending.set(true);
@@ -600,25 +596,6 @@ async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
                 </a>
             )
         )
-    })
-}
-
-#[shard]
-pub async fn chat_inbox_content(cx: &Cx) -> Result<impl View> {
-    Ok(live! {
-        let app: &AppHandle = app_context(cx);
-        let mut changed = app.chat.subscribe_changes();
-        loop {
-            let timer_active = changed.borrow_and_update().pomodoro.is_some();
-            let token = emit! { inbox_messages() }?;
-            if !connected(cx) {
-                break Ok(token);
-            }
-            tokio::select! {
-                result = changed.changed() => if result.is_err() { break Ok(token); },
-                _ = tokio::time::sleep(std::time::Duration::from_secs(1)), if timer_active => {},
-            }
-        }
     })
 }
 
