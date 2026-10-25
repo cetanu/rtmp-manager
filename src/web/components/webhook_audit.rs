@@ -74,7 +74,9 @@ async fn audit_entries(cx: &Cx) -> Result<impl View> {
                             let payload_id = element_id(cx);
                             <tr>
                                 <td class="whitespace-nowrap px-4 py-3 font-mono text-xs">
-                                    if let Some(dt) = crate::util::to_localized_datetime(entry.timestamp_ms) {
+                                    if let Some(dt) = crate::util::to_localized_datetime(
+                                        entry.timestamp_ms,
+                                    ) {
                                         (dt)
                                     } else {
                                         (entry.timestamp_ms.to_string())
@@ -99,11 +101,11 @@ async fn audit_entries(cx: &Cx) -> Result<impl View> {
                                         popover_content(
                                             id: &payload_id,
                                             align: FloatingAlign::End,
-                                            attrs: attributes! {
-                                                class="!w-[34rem] max-w-[92vw] p-4 text-xs"
-                                            },
+                                            attrs: attributes! { class="!w-[34rem] max-w-[92vw] p-4 text-xs" },
                                             <div class="flex flex-col gap-2">
-                                                <div class="flex items-center justify-between border-b border-border pb-2">
+                                                <div
+                                                    class="flex items-center justify-between border-b border-border pb-2"
+                                                >
                                                     <span class="font-mono font-semibold text-foreground">
                                                         (format!("{} Webhook Payload", entry.platform))
                                                     </span>
@@ -111,7 +113,9 @@ async fn audit_entries(cx: &Cx) -> Result<impl View> {
                                                         (format!("{} bytes", entry.body_bytes))
                                                     </span>
                                                 </div>
-                                                <pre class="max-h-80 overflow-auto rounded bg-black/50 p-2.5 font-mono text-[11px] whitespace-pre-wrap break-all text-emerald-200/90 selection:bg-emerald-800">
+                                                <pre
+                                                    class="max-h-80 overflow-auto rounded bg-black/50 p-2.5 font-mono text-[11px] whitespace-pre-wrap break-all text-emerald-200/90 selection:bg-emerald-800"
+                                                >
                                                     (entry.payload)
                                                 </pre>
                                             </div>

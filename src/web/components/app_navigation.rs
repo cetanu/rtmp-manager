@@ -59,11 +59,7 @@ pub async fn app_navigation(cx: &Cx, active_page: &'static str) -> Result<impl V
                     for (label, id, target) in NAV_ITEMS {
                         let is_active = active_page == *id;
                         <a
-                            (link_attrs(
-                                cx,
-                                href!(*target),
-                                prefetch_mode(cx),
-                            ))
+                            (link_attrs(cx, href!(*target), prefetch_mode(cx)))
                             class=(if is_active { ACTIVE_LINK } else { INACTIVE_LINK })
                             aria-current=(if is_active { "page" } else { "false" })
                         >
