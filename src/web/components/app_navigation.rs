@@ -1,7 +1,7 @@
 use topcoat::{
     Result,
     context::Cx,
-    router::href,
+    router::{HrefTarget, href},
     runtime::{connected, link_attrs, prefetch_mode, shard},
     view::{View, component, emit, live, view},
 };
@@ -9,13 +9,15 @@ use topcoat::{
 const ACTIVE_LINK: &str = "rounded-[3px] bg-foreground px-2.5 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-background transition-colors";
 const INACTIVE_LINK: &str = "rounded-[3px] px-2.5 py-1.5 font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground";
 
-fn link_class(active_page: &str, page: &str) -> &'static str {
-    if active_page == page {
-        ACTIVE_LINK
-    } else {
-        INACTIVE_LINK
-    }
-}
+const NAV_ITEMS: &[(&str, &str, &(dyn HrefTarget + Sync))] = &[
+    ("Preview", "preview", &crate::web::preview_page),
+    ("Metrics", "metrics", &crate::web::metrics_page_route),
+    ("Chat", "chat", &crate::web::chat_page),
+    ("Logs", "logs", &crate::web::logs_page),
+    ("Settings", "settings", &crate::web::settings_page),
+    ("Targets", "targets", &crate::web::targets_page),
+    ("Export", "export", &crate::web::export_page),
+];
 
 #[component]
 pub async fn app_navigation(cx: &Cx, active_page: &'static str) -> Result<impl View> {
@@ -54,103 +56,20 @@ pub async fn app_navigation(cx: &Cx, active_page: &'static str) -> Result<impl V
                     aria-label="Primary navigation"
                     class="hud-tabs -mx-1 flex flex-1 gap-0.5 overflow-x-auto px-0.5 py-0.5"
                 >
-                    <a
-                        (link_attrs(
-                            cx,
-                            href!(crate::web::preview_page),
-                            prefetch_mode(cx),
-                        ))
-                        class=(link_class(active_page, "preview"))
-                        aria-current=(if active_page == "preview" {
-                            "page"
-                        } else {
-                            "false"
-                        })
-                    >
-                        "Preview"
-                    </a>
-                    <a
-                        (link_attrs(
-                            cx,
-                            href!(crate::web::metrics_page_route),
-                            prefetch_mode(cx),
-                        ))
-                        class=(link_class(active_page, "metrics"))
-                        aria-current=(if active_page == "metrics" {
-                            "page"
-                        } else {
-                            "false"
-                        })
-                    >
-                        "Metrics"
-                    </a>
-                    <a
-                        (link_attrs(cx, href!(crate::web::chat_page), prefetch_mode(cx)))
-                        class=(link_class(active_page, "chat"))
-                        aria-current=(if active_page == "chat" {
-                            "page"
-                        } else {
-                            "false"
-                        })
-                    >
-                        "Chat"
-                    </a>
-                    <a
-                        (link_attrs(cx, href!(crate::web::logs_page), prefetch_mode(cx)))
-                        class=(link_class(active_page, "logs"))
-                        aria-current=(if active_page == "logs" {
-                            "page"
-                        } else {
-                            "false"
-                        })
-                    >
-                        "Logs"
-                    </a>
-                    <a
-                        (link_attrs(
-                            cx,
-                            href!(crate::web::settings_page),
-                            prefetch_mode(cx),
-                        ))
-                        class=(link_class(active_page, "settings"))
-                        aria-current=(if active_page == "settings" {
-                            "page"
-                        } else {
-                            "false"
-                        })
-                    >
-                        "Settings"
-                    </a>
-                    <a
-                        (link_attrs(
-                            cx,
-                            href!(crate::web::targets_page),
-                            prefetch_mode(cx),
-                        ))
-                        class=(link_class(active_page, "targets"))
-                        aria-current=(if active_page == "targets" {
-                            "page"
-                        } else {
-                            "false"
-                        })
-                    >
-                        "Targets"
-                    </a>
-                    <a
-                        (link_attrs(
-                            cx,
-                            href!(crate::web::export_page),
-                            prefetch_mode(cx),
-                        ))
-                        class=(link_class(active_page, "export"))
-                        aria-current=(if active_page == "export" {
-                            "page"
-                        } else {
-                            "false"
-                        })
-                    >
-                        "Export"
-                    </a>
+                    for (label, id, target) in NAV_ITEMS {
+                        let is_active = active_page == *id;
+                        <a
+                            (link_attrs(
+                                cx,
+                                href!(*target),
+                                prefetch_mode(cx),
+                            ))
+                            class=(if is_active { ACTIVE_LINK } else { INACTIVE_LINK })
+                            aria-current=(if is_active { "page" } else { "false" })
+                        >
+                            (*label)
+                        </a>
+                    }
                 </nav>
                 <div class="hidden shrink-0 md:block">connection_status()</div>
             </div>
