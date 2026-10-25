@@ -1,6 +1,7 @@
 use regex::Regex;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
+use topcoat::l10n::{DateTime, DateTimeStyle};
 
 /// Compares two byte slices in constant time.
 pub fn constant_time_eq(expected: impl AsRef<[u8]>, submitted: impl AsRef<[u8]>) -> bool {
@@ -103,6 +104,35 @@ pub fn non_empty(value: Option<String>) -> Option<String> {
     })
 }
 
+/// Formats a Unix timestamp in milliseconds into a localized Topcoat DateTime.
+pub fn to_localized_datetime(timestamp_ms: u128) -> Option<DateTime> {
+    let secs = (timestamp_ms / 1000) as i64;
+    let dt = time::OffsetDateTime::from_unix_timestamp(secs).ok()?;
+    DateTime::date(dt.year(), dt.month() as u8, dt.day())?
+        .at(dt.hour(), dt.minute(), dt.second())
+        .map(|d| {
+            d.date_style(DateTimeStyle::Short)
+                .time_style(DateTimeStyle::Medium)
+        })
+}
+
+/// Formats a Unix timestamp in milliseconds into a compact time string: `HH:MM:SS.mmm`.
+pub fn format_time_compact(timestamp_ms: u128) -> String {
+    let secs = (timestamp_ms / 1000) as i64;
+    let millis = timestamp_ms % 1000;
+    if let Ok(dt) = time::OffsetDateTime::from_unix_timestamp(secs) {
+        format!(
+            "{:02}:{:02}:{:02}.{:03}",
+            dt.hour(),
+            dt.minute(),
+            dt.second(),
+            millis
+        )
+    } else {
+        timestamp_ms.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,5 +188,20 @@ mod tests {
             Some("hello".to_string())
         );
         assert_eq!(non_empty(None), None);
+    }
+
+    #[test]
+    fn format_time_compact_formats_hh_mm_ss_mmm() {
+        // 2026-10-25 12:34:56.789 UTC => 1792931696789 ms
+        let ms = 1792931696789_u128;
+        let formatted = format_time_compact(ms);
+        assert_eq!(formatted, "12:34:56.789");
+    }
+
+    #[test]
+    fn to_localized_datetime_creates_valid_datetime() {
+        let ms = 1792931696789_u128;
+        let dt = to_localized_datetime(ms);
+        assert!(dt.is_some());
     }
 }
