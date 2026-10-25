@@ -8,7 +8,7 @@ use crate::web::components::ui::input::input;
 use topcoat::{
     Result,
     context::{Cx, app_context},
-    view::{View, attributes, component, view},
+    view::{View, attributes, component, element_id, view},
 };
 
 #[component]
@@ -49,12 +49,12 @@ pub async fn targets(cx: &Cx) -> Result<impl View> {
 }
 
 #[component]
-pub async fn target_item(index: usize, target: TargetConfig) -> Result<impl View> {
-    let enabled_id = format!("target_enabled_{index}");
-    let name_id = format!("target_name_{index}");
-    let url_id = format!("target_url_{index}");
-    let key_id = format!("target_stream_key_{index}");
-    let public_url_id = format!("target_public_url_{index}");
+pub async fn target_item(cx: &Cx, index: usize, target: TargetConfig) -> Result<impl View> {
+    let name_id = element_id(cx);
+    let public_url_id = element_id(cx);
+    let url_id = element_id(cx);
+    let key_id = element_id(cx);
+    let enabled_id = element_id(cx);
 
     Ok(view! {
         <div
