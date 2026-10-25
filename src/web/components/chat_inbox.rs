@@ -231,7 +231,7 @@ async fn poll_setup(signals: PollSetupSignals) -> Result<impl View> {
                         "Chatters vote by sending the number of their choice. Add one option per line."
                     </p>
                 </div>
-                <label class="text-sm font-medium">
+                <label for="chat-poll-question" class="text-sm font-medium">
                     "Question"
                     <input
                         id="chat-poll-question"
@@ -242,7 +242,7 @@ async fn poll_setup(signals: PollSetupSignals) -> Result<impl View> {
                         @input=$(move |event: Event| question.set(event.target.value))
                     />
                 </label>
-                <label class="text-sm font-medium">
+                <label for="chat-poll-options" class="text-sm font-medium">
                     "Options (2–6, one per line)"
                     <textarea
                         id="chat-poll-options"
