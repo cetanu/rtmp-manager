@@ -41,7 +41,7 @@ pub async fn log_viewer(cx: &Cx) -> Result<impl View> {
                                 >
                                     (format!(
                                         "{} {:5} {} — {}",
-                                        entry.timestamp_ms,
+                                        crate::util::format_time_compact(entry.timestamp_ms),
                                         entry.level,
                                         entry.target,
                                         entry.message,
