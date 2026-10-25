@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1](https://github.com/cetanu/rtmp-manager/compare/v0.9.0...v0.9.1) - 2026-10-25
+
+### Added
+
+- *(webhooks)* show localized timestamps and payload popover in audit log
+- *(logs)* display compact HH:MM:SS.mmm timestamps
+- *(util)* add localized and compact timestamp formatters
+- *(ui)* add floating and popover components from topcoat registry
+
+### Fixed
+
+- *(deps)* bump rustls, webpki, tokio and crypto crates for security advisories
+- *(metrics)* stream events via fetch and mount once children render
+- *(chat)* associate poll form labels with their controls
+
+### Other
+
+- *(web)* apply topcoat fmt to navigation and webhook audit components
+- *(goals)* plan passkey-based authentication for GOAL-202
+- *(targets)* generate form control ids with element_id
+- *(nav)* render navigation links from a static item table
+- *(deps)* upgrade topcoat to 0.11 and pin rust toolchain to 1.99
+- ignore sqlite journal files
+
 ## [0.9.0](https://github.com/cetanu/rtmp-manager/compare/v0.8.0...v0.9.0) - 2026-10-09
 
 ### Fixed
