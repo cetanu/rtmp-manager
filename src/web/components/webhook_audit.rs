@@ -1,10 +1,11 @@
 use crate::server::state::AppHandle;
-use crate::web::components::ui::form::secret_input;
+use crate::web::components::ui::floating::FloatingAlign;
+use crate::web::components::ui::popover::{popover, popover_content, popover_trigger};
 use topcoat::{
     Result,
     context::{Cx, app_context},
     runtime::{connected, shard},
-    view::{View, attributes, component, emit, live, view},
+    view::{View, attributes, component, element_id, emit, live, view},
 };
 
 #[component]
@@ -50,11 +51,11 @@ async fn audit_entries(cx: &Cx) -> Result<impl View> {
             <table class="w-full text-left text-sm">
                 <thead class="border-b border-border text-xs text-muted-foreground">
                     <tr>
-                        <th class="px-4 py-3 font-medium">"Received (Unix ms)"</th>
+                        <th class="px-4 py-3 font-medium">"Received"</th>
                         <th class="px-4 py-3 font-medium">"Platform"</th>
                         <th class="px-4 py-3 font-medium">"Content type"</th>
                         <th class="px-4 py-3 font-medium">"Size"</th>
-                        <th class="min-w-80 px-4 py-3 font-medium">"Payload"</th>
+                        <th class="px-4 py-3 font-medium">"Payload"</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-border">
@@ -70,26 +71,51 @@ async fn audit_entries(cx: &Cx) -> Result<impl View> {
                     } else {
                         #[key(entry.id)]
                         for entry in entries {
+                            let payload_id = element_id(cx);
                             <tr>
                                 <td class="whitespace-nowrap px-4 py-3 font-mono text-xs">
-                                    (entry.timestamp_ms.to_string())
+                                    if let Some(dt) = crate::util::to_localized_datetime(entry.timestamp_ms) {
+                                        (dt)
+                                    } else {
+                                        (entry.timestamp_ms.to_string())
+                                    }
                                 </td>
-                                <td class="px-4 py-3">(entry.platform)</td>
+                                <td class="px-4 py-3 font-medium">(&entry.platform)</td>
                                 <td class="px-4 py-3 text-xs text-muted-foreground">
                                     (entry.content_type.unwrap_or_else(|| "—".into()))
                                 </td>
-                                <td class="whitespace-nowrap px-4 py-3">
+                                <td class="whitespace-nowrap px-4 py-3 font-mono text-xs">
                                     (format!("{} B", entry.body_bytes))
                                 </td>
                                 <td class="px-4 py-3">
-                                    secret_input(
-                                        control_id: format!("webhook-payload-{}", entry.id),
-                                        attrs: attributes! {
-                                            value=(entry.payload.chars().take(2048).collect::<String>())
-                                            readonly="readonly"
-                                            aria-label="Webhook payload (truncated to 2K)"
-                                            class="font-mono text-xs"
-                                        }
+                                    popover(
+                                        popover_trigger(
+                                            target: &payload_id,
+                                            attrs: attributes! {
+                                                class="inline-flex items-center gap-1.5 rounded border border-border bg-white/5 px-2.5 py-1 font-mono text-xs text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+                                            },
+                                            "View Payload"
+                                        )
+                                        popover_content(
+                                            id: &payload_id,
+                                            align: FloatingAlign::End,
+                                            attrs: attributes! {
+                                                class="!w-[34rem] max-w-[92vw] p-4 text-xs"
+                                            },
+                                            <div class="flex flex-col gap-2">
+                                                <div class="flex items-center justify-between border-b border-border pb-2">
+                                                    <span class="font-mono font-semibold text-foreground">
+                                                        (format!("{} Webhook Payload", entry.platform))
+                                                    </span>
+                                                    <span class="font-mono text-xs text-muted-foreground">
+                                                        (format!("{} bytes", entry.body_bytes))
+                                                    </span>
+                                                </div>
+                                                <pre class="max-h-80 overflow-auto rounded bg-black/50 p-2.5 font-mono text-[11px] whitespace-pre-wrap break-all text-emerald-200/90 selection:bg-emerald-800">
+                                                    (entry.payload)
+                                                </pre>
+                                            </div>
+                                        )
                                     )
                                 </td>
                             </tr>
