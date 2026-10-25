@@ -1,21 +1,29 @@
 customElements.define("rtmp-metrics", class extends HTMLElement {
   connectedCallback() {
-    // Topcoat can connect an empty element before morphing its children.
     queueMicrotask(() => {
       if (this.isConnected && !this.cleanup) this.mount();
     });
+    if (!this.cleanup && !this.observer) {
+      this.observer = new MutationObserver(() => {
+        if (this.isConnected && !this.cleanup) this.mount();
+      });
+      this.observer.observe(this, { childList: true, subtree: true });
+    }
   }
 
   mount() {
     if (this.cleanup) return;
-    const abort = new AbortController();
-    const events = new EventSource("/api/metrics/events");
-    this.cleanup = () => { events.close(); abort.abort(); };
     const cards = Array.from(this.querySelectorAll("[data-target-metric]"));
     const ingestCard = this.querySelector("[data-ingest-metric]");
     const transferCards = Array.from(this.querySelectorAll("[data-transfer-metric]"));
     const chatMessagesCard = this.querySelector("[data-chat-messages-metric]");
     if (!cards.length && !ingestCard && !transferCards.length && !chatMessagesCard) return;
+
+    this.observer?.disconnect();
+    this.observer = null;
+
+    const abort = new AbortController();
+    this.cleanup = () => abort.abort();
     let samples = [];
 
     const formatRate = (bps) => {
@@ -139,21 +147,65 @@ customElements.define("rtmp-metrics", class extends HTMLElement {
       }
     }
 
-    events.addEventListener("metrics_history", (event) => {
-      samples = JSON.parse(event.data);
-      render();
-    });
-    events.addEventListener("metrics_sample", (event) => {
-      const sample = JSON.parse(event.data);
-      if (!sample) return;
-      if (samples.at(-1)?.timestamp_ms !== sample.timestamp_ms) samples.push(sample);
-      if (samples.length > 300) samples.shift();
-      render();
-    });
     window.addEventListener("resize", render, { signal: abort.signal });
+
+    async function streamEvents() {
+      while (!abort.signal.aborted) {
+        try {
+          const response = await fetch("/api/metrics/events", {
+            signal: abort.signal,
+            headers: { Accept: "text/event-stream" },
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          while (!abort.signal.aborted) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const blocks = buffer.split("\n\n");
+            buffer = blocks.pop() ?? "";
+            for (const block of blocks) {
+              let eventName = "message";
+              let data = "";
+              for (const line of block.split("\n")) {
+                const colon = line.indexOf(":");
+                if (colon <= 0) continue;
+                const field = line.slice(0, colon).trim();
+                const val = line.slice(colon + 1).replace(/^ /, "");
+                if (field === "event") eventName = val;
+                else if (field === "data") data += (data ? "\n" : "") + val;
+              }
+              if (!data) continue;
+              if (eventName === "metrics_history") {
+                samples = JSON.parse(data);
+                render();
+              } else if (eventName === "metrics_sample") {
+                const sample = JSON.parse(data);
+                if (sample) {
+                  if (samples.at(-1)?.timestamp_ms !== sample.timestamp_ms) {
+                    samples.push(sample);
+                  }
+                  if (samples.length > 300) samples.shift();
+                  render();
+                }
+              }
+            }
+          }
+        } catch (_error) {
+          if (abort.signal.aborted) return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    }
+
+    streamEvents();
   }
 
   disconnectedCallback() {
+    this.observer?.disconnect();
+    this.observer = null;
     this.cleanup?.();
     this.cleanup = null;
   }
