@@ -15,14 +15,16 @@
 
 ### GOAL-202: Multi-User Authentication & RBAC
 - **Objective:** Add user registration, login, session management, and role-based access control (Admin, User) for the dashboard and REST APIs.
-- **Current State:** Single-user dashboard without login sessions or authentication middleware.
+- **Current State:** Single-user dashboard without login sessions or authentication middleware (currently relies on basic auth).
 - **Technical Requirements:**
-  1. Implement password hashing using Argon2id and session management (signed HTTP-only cookies or JWTs).
-  2. Support OAuth2 login providers (Twitch, Google, Discord, GitHub).
-  3. Add authentication middleware to protected web routes and API endpoints.
-  4. Implement user profile management (reset stream key, change email/password, revoke active sessions).
+  1. Implement Passkey authentication (WebAuthn / FIDO2) via `webauthn-rs` to provide passwordless, email-less authentication without requiring an SMTP service.
+  2. Implement session management with signed HTTP-only cookies (`__Host-session` using Topcoat's cookie prefix adapter) and Toasty SQLite persistence.
+  3. Support fallback password hashing using Argon2id or OAuth2 login providers (Twitch, Google, Discord, GitHub).
+  4. Add authentication middleware to protected web routes and API endpoints.
+  5. Implement user profile management (register passkeys, reset stream key, revoke active sessions).
 - **Acceptance Criteria:**
-  - Users can register, log in, manage only their personal destinations/chat integrations, and reset their private ingest key.
+  - Users can register and authenticate with biometric / hardware passkeys without requiring an email server.
+  - Users can manage only their personal destinations/chat integrations and reset their private ingest key.
 
 ---
 
