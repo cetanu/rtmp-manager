@@ -16,6 +16,10 @@ file = "src/web/components/ui/button.rs"
 hash = "sha256:f7baecc0a71b59126d311ac504c36a14fa98d438d18230b807f10f7e976a30b7"
 file = "src/web/components/ui/card.rs"
 
+[registries.topcoat.components.floating]
+hash = "sha256:66636f7861a3eb370ee736de1a40aff889ec15e491d7aae57b64ad05e25d5cdd"
+file = "src/web/components/ui/floating.rs"
+
 [registries.topcoat.components.input]
 hash = "sha256:7769330ae511769c1c50b39c75b7475b676af9072d2156398762cf505a3bf306"
 file = "src/web/components/ui/input.rs"
@@ -23,6 +27,10 @@ file = "src/web/components/ui/input.rs"
 [registries.topcoat.components.label]
 hash = "sha256:cd8e7569717c82abad745f0586f03fbc759e6000988a82c8dce15182a409d0d6"
 file = "src/web/components/ui/label.rs"
+
+[registries.topcoat.components.popover]
+hash = "sha256:32946542e73a3701fb42b43b61c6795aef984b7dafe280c6d3c06e71c5666610"
+file = "src/web/components/ui/popover.rs"
 
 [registries.topcoat.components.switch]
 hash = "sha256:34c50460be2165cd07868d8c86991e15d6c413e48ba3b2cea5fc0be0ff423c14"

@@ -1,8 +1,10 @@
 pub mod button;
 pub mod card;
+pub mod floating;
 pub mod form;
 pub mod icon;
 pub mod input;
 pub mod label;
+pub mod popover;
 pub mod switch;
 pub mod textarea;
