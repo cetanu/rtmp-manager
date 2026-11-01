@@ -171,7 +171,11 @@ pub async fn target_item(cx: &Cx, index: usize, target: TargetConfig) -> Result<
                                 let next_enabled = !enabled.get();
                                 enabled.set(next_enabled);
                                 pending.set(true);
-                                let next_error = set_target_enabled(index, target_name.clone(), next_enabled).await;
+                                let next_error = set_target_enabled(
+                                    index,
+                                    target_name.clone(),
+                                    next_enabled,
+                                ).await;
                                 if !next_error.is_empty() {
                                     enabled.set(!next_enabled);
                                 }
