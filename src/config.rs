@@ -1054,6 +1054,30 @@ impl ConfigHandle {
         .await
     }
 
+    pub async fn set_target_enabled(
+        &self,
+        index: usize,
+        name: Option<&str>,
+        enabled: bool,
+    ) -> Result<(Arc<AppConfig>, bool, bool)> {
+        let _guard = self.update_lock.lock().await;
+        let current_config = self.get();
+        let mut updated = (*current_config).clone();
+        let target = if let Some(name) = name {
+            if let Some(target) = updated.targets.iter_mut().find(|t| t.name == name) {
+                Some(target)
+            } else {
+                updated.targets.get_mut(index)
+            }
+        } else {
+            updated.targets.get_mut(index)
+        }
+        .context("Target not found")?;
+
+        target.enabled = enabled;
+        self.save_updated(current_config, updated).await
+    }
+
     async fn set_chat_flag(
         &self,
         enabled: bool,
@@ -1322,6 +1346,39 @@ mod tests {
         let exported_after = handle.export_json().unwrap();
         assert_ne!(exported_before, exported_after);
         assert!(exported_after.contains("\"test_stream_duration_secs\": 42"));
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn set_target_enabled_persists_and_broadcasts() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("rtmp-proxy-target-{unique}"));
+        fs::create_dir(&directory).unwrap();
+        let database_path = directory.join("config.sqlite3");
+        let (store, _) = ConfigStore::open(&database_path).await.unwrap();
+        store.save(&populated_config()).await.unwrap();
+        let (handle, _) = ConfigHandle::open(&database_path).await.unwrap();
+
+        assert!(!handle.get().targets.is_empty());
+        let initial_enabled = handle.get().targets[0].enabled;
+        assert!(initial_enabled);
+
+        let mut rx = handle.subscribe();
+        handle
+            .set_target_enabled(0, Some("Twitch"), !initial_enabled)
+            .await
+            .unwrap();
+
+        rx.changed().await.unwrap();
+        assert_eq!(rx.borrow().targets[0].enabled, !initial_enabled);
+        assert_eq!(handle.get().targets[0].enabled, !initial_enabled);
+
+        let (reopened, _) = ConfigHandle::open(&database_path).await.unwrap();
+        assert_eq!(reopened.get().targets[0].enabled, !initial_enabled);
 
         fs::remove_dir_all(directory).unwrap();
     }
