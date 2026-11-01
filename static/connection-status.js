@@ -19,6 +19,9 @@ customElements.define("rtmp-connection", class extends HTMLElement {
     this.render("LINKED", "bg-signal text-signal");
     this.timer = setTimeout(() => {
       this.render("RETRYING", "bg-warn text-warn");
+      if (typeof window.showError === "function") {
+        window.showError("Connection lost. Retrying connection to server...");
+      }
     }, 12000);
   }
 

@@ -5,6 +5,7 @@
 
 /* Tailwind classes are used in the Rust view source. */
 @source "./src/**/*.rs";
+@source "./static/**/*.js";
 
 /* Dark mode is opted into by putting the `dark` class on an ancestor,
    typically <html>. The dashboard is dark-first: :root already carries

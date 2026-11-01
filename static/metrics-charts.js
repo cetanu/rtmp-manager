@@ -16,8 +16,9 @@ customElements.define("rtmp-metrics", class extends HTMLElement {
     const cards = Array.from(this.querySelectorAll("[data-target-metric]"));
     const ingestCard = this.querySelector("[data-ingest-metric]");
     const transferCards = Array.from(this.querySelectorAll("[data-transfer-metric]"));
+    const chatOutcomeCards = Array.from(this.querySelectorAll("[data-chat-outcomes]"));
     const chatMessagesCard = this.querySelector("[data-chat-messages-metric]");
-    if (!cards.length && !ingestCard && !transferCards.length && !chatMessagesCard) return;
+    if (!cards.length && !ingestCard && !transferCards.length && !chatMessagesCard && !chatOutcomeCards.length) return;
 
     this.observer?.disconnect();
     this.observer = null;
@@ -29,17 +30,17 @@ customElements.define("rtmp-metrics", class extends HTMLElement {
     const formatRate = (bps) => {
       if (bps >= 1_000_000) return `${(bps / 1_000_000).toFixed(2)} Mbps`;
       if (bps >= 1_000) return `${Math.round(bps / 1_000)} Kbps`;
-      return `${bps || 0} bps`;
+      return `${Math.round(bps || 0)} bps`;
     };
 
     const formatBytes = (bytes) => {
       if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(2)} GB`;
       if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(2)} MB`;
       if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(1)} KB`;
-      return `${bytes || 0} B`;
+      return `${Math.round(bytes || 0)} B`;
     };
 
-    function draw(canvas, values, color, label, formatValue, minimum) {
+    function draw(canvas, values, color, label, formatValue, minimum, additionalSeries = []) {
       const rect = canvas.getBoundingClientRect();
       const ratio = window.devicePixelRatio || 1;
       const width = Math.max(180, Math.floor(rect.width));
@@ -50,39 +51,44 @@ customElements.define("rtmp-metrics", class extends HTMLElement {
       context.scale(ratio, ratio);
       context.clearRect(0, 0, width, height);
 
-      const maximum = Math.max(minimum, ...values);
-      const left = 44;
+      const maximum = Math.max(minimum, ...values, ...additionalSeries.flatMap((series) => series.values));
+      context.font = '10px "JetBrains Mono", monospace';
+      const tickLabels = Array.from({ length: 4 }, (_, index) =>
+        formatValue(maximum * (1 - index / 3)));
+      const left = Math.ceil(Math.max(...tickLabels.map((text) => context.measureText(text).width))) + 8;
       const top = 12;
       const plotWidth = width - left - 8;
       const plotHeight = height - top - 28;
 
       context.strokeStyle = "rgba(148, 163, 184, .14)";
       context.fillStyle = "rgb(148, 163, 184)";
-      context.font = '10px "JetBrains Mono", monospace';
       for (let index = 0; index <= 3; index += 1) {
         const y = top + (plotHeight * index) / 3;
         context.beginPath();
         context.moveTo(left, y);
         context.lineTo(width - 8, y);
         context.stroke();
-        context.fillText(formatValue(maximum * (1 - index / 3)), 0, y + 4);
+        context.fillText(tickLabels[index], 0, y + 4);
       }
 
-      context.strokeStyle = color;
-      context.lineWidth = 2;
-      context.beginPath();
-      values.forEach((value, index) => {
-        const x = left + (plotWidth * index) / Math.max(1, values.length - 1);
-        const y = top + plotHeight * (1 - value / maximum);
-        if (index === 0) context.moveTo(x, y);
-        else context.lineTo(x, y);
-      });
-      context.stroke();
+      [{ values, color, label }, ...additionalSeries].forEach((series, seriesIndex) => {
+        context.strokeStyle = series.color;
+        context.lineWidth = 2;
+        context.beginPath();
+        series.values.forEach((value, index) => {
+          const x = left + (plotWidth * index) / Math.max(1, series.values.length - 1);
+          const y = top + plotHeight * (1 - value / maximum);
+          if (index === 0) context.moveTo(x, y);
+          else context.lineTo(x, y);
+        });
+        context.stroke();
 
-      context.fillStyle = color;
-      context.fillRect(left, height - 10, 10, 3);
-      context.fillStyle = "rgb(148, 163, 184)";
-      context.fillText(label, left + 15, height - 6);
+        const legendX = left + seriesIndex * 90;
+        context.fillStyle = series.color;
+        context.fillRect(legendX, height - 10, 10, 3);
+        context.fillStyle = "rgb(148, 163, 184)";
+        context.fillText(series.label, legendX + 15, height - 6);
+      });
     }
 
     function render() {
@@ -132,6 +138,27 @@ customElements.define("rtmp-metrics", class extends HTMLElement {
           1_000_000,
         );
       });
+      chatOutcomeCards.forEach((card) => {
+        const webhooks = card.dataset.chatOutcomes === "webhooks";
+        const successKey = webhooks ? "webhooks_received" : "automations_executed";
+        const failureKey = webhooks ? "webhooks_rejected" : "automations_failed";
+        const latest = samples.at(-1);
+        card.querySelector("[data-chat-success]").textContent = (latest?.[successKey] || 0).toLocaleString();
+        card.querySelector("[data-chat-failure]").textContent = (latest?.[failureKey] || 0).toLocaleString();
+        draw(
+          card.querySelector("canvas"),
+          samples.map((sample) => sample[successKey] || 0),
+          "rgb(74, 222, 128)",
+          webhooks ? "Received" : "Executed",
+          (value) => Math.round(value).toLocaleString(),
+          1,
+          [{
+            values: samples.map((sample) => sample[failureKey] || 0),
+            color: "rgb(248, 113, 113)",
+            label: webhooks ? "Rejected" : "Failed",
+          }],
+        );
+      });
       if (chatMessagesCard) {
         const latest = samples.at(-1)?.chat_messages_received || 0;
         chatMessagesCard.querySelector("[data-chat-messages-received]").textContent =
@@ -149,58 +176,23 @@ customElements.define("rtmp-metrics", class extends HTMLElement {
 
     window.addEventListener("resize", render, { signal: abort.signal });
 
-    async function streamEvents() {
-      while (!abort.signal.aborted) {
-        try {
-          const response = await fetch("/api/metrics/events", {
-            signal: abort.signal,
-            headers: { Accept: "text/event-stream" },
-          });
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
-          while (!abort.signal.aborted) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const blocks = buffer.split("\n\n");
-            buffer = blocks.pop() ?? "";
-            for (const block of blocks) {
-              let eventName = "message";
-              let data = "";
-              for (const line of block.split("\n")) {
-                const colon = line.indexOf(":");
-                if (colon <= 0) continue;
-                const field = line.slice(0, colon).trim();
-                const val = line.slice(colon + 1).replace(/^ /, "");
-                if (field === "event") eventName = val;
-                else if (field === "data") data += (data ? "\n" : "") + val;
-              }
-              if (!data) continue;
-              if (eventName === "metrics_history") {
-                samples = JSON.parse(data);
-                render();
-              } else if (eventName === "metrics_sample") {
-                const sample = JSON.parse(data);
-                if (sample) {
-                  if (samples.at(-1)?.timestamp_ms !== sample.timestamp_ms) {
-                    samples.push(sample);
-                  }
-                  if (samples.length > 300) samples.shift();
-                  render();
-                }
-              }
-            }
-          }
-        } catch (_error) {
-          if (abort.signal.aborted) return;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+    const events = new EventSource("/api/metrics/events");
+    abort.signal.addEventListener("abort", () => events.close(), { once: true });
+    events.addEventListener("metrics_history", (event) => {
+      samples = JSON.parse(event.data);
+      render();
+    });
+    events.addEventListener("metrics_sample", (event) => {
+      const sample = JSON.parse(event.data);
+      if (!sample) return;
+      if (samples.at(-1)?.timestamp_ms !== sample.timestamp_ms) {
+        samples.push(sample);
       }
-    }
+      if (samples.length > 300) samples.shift();
+      render();
+    });
 
-    streamEvents();
+    render();
   }
 
   disconnectedCallback() {

@@ -28,20 +28,20 @@ impl AppHandle {
         listen_port: u16,
     ) -> Result<Self> {
         let initial_config = config_handle.get();
+        let stream = StreamHandle::spawn(
+            listen_port,
+            Arc::clone(&metrics),
+            http_client.clone(),
+            config_handle.subscribe(),
+        )
+        .await?;
         let chat = ChatHandle::spawn_with_database(
             config_handle.database().clone(),
             initial_config.chat.queue_capacity,
             initial_config.chat.poll_results_seconds,
             http_client.clone(),
             Arc::clone(&metrics),
-        )
-        .await?;
-
-        let stream = StreamHandle::spawn(
-            listen_port,
-            Arc::clone(&metrics),
-            http_client.clone(),
-            config_handle.subscribe(),
+            stream.subscribe_status(),
         )
         .await?;
         let handle = Self {

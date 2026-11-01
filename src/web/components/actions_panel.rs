@@ -37,7 +37,7 @@ pub(crate) fn start_test_stream(app: &AppHandle) -> String {
 }
 
 #[procedure]
-async fn send_test_webhooks(cx: &Cx) -> Result<String> {
+async fn send_test_webhooks(cx: &Cx) -> Result<()> {
     let app: &AppHandle = app_context(cx);
     let config = app.config.get();
     let active_targets = config
@@ -48,7 +48,10 @@ async fn send_test_webhooks(cx: &Cx) -> Result<String> {
         .collect::<Vec<_>>();
 
     if active_targets.is_empty() {
-        return Ok("Enable at least one target before sending test webhooks".to_owned());
+        return Err(topcoat::router::error::bad_request(
+            "Enable at least one target before sending test webhooks",
+        )
+        .into());
     }
 
     let dispatcher = NotificationDispatcher::new(&config.notifications, app.http_client.clone());
@@ -56,13 +59,12 @@ async fn send_test_webhooks(cx: &Cx) -> Result<String> {
     tokio::spawn(async move {
         dispatcher.dispatch(&active_targets).await;
     });
-    Ok(String::new())
+    Ok(())
 }
 
 #[component]
 pub async fn actions_panel(cx: &Cx) -> Result<impl View> {
     let testing = signal(cx, || false);
-    let test_error = signal(cx, String::new);
 
     Ok(view! {
         <div
@@ -86,19 +88,13 @@ pub async fn actions_panel(cx: &Cx) -> Result<impl View> {
                             :disabled=$(testing.get())
                             @click=$(async |_event: Event| {
                                 testing.set(true);
-                                test_error.set(send_test_webhooks().await);
+                                send_test_webhooks().await;
                                 testing.set(false);
                             })
                         },
                         "Test Webhooks"
                     )
                 </div>
-                <p
-                    :hidden=$(test_error.get().is_empty())
-                    class="text-sm text-destructive"
-                >
-                    $(test_error.get())
-                </p>
             </div>
             <div class="flex gap-4 w-full sm:w-auto">
                 button(

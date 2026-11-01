@@ -27,6 +27,7 @@ use topcoat::{
     view::{View, component, view},
 };
 
+mod alerts;
 pub mod auth;
 pub mod components;
 use components::{
@@ -49,6 +50,7 @@ pub(crate) const HLS_PLAYER_SCRIPT: Asset = asset!("static/hls.min.js");
 pub(crate) const STREAM_PREVIEW_SCRIPT: Asset = asset!("static/stream-preview.js");
 pub(crate) const METRICS_CHARTS_SCRIPT: Asset = asset!("static/metrics-charts.js");
 pub(crate) const CONNECTION_STATUS_SCRIPT: Asset = asset!("static/connection-status.js");
+pub(crate) const ERROR_TOAST_SCRIPT: Asset = asset!("static/error-toast.js");
 const MAX_WEBHOOK_SIZE: usize = 128 * 1024;
 const MAX_CONFIG_BODY_SIZE: usize = 1024 * 1024;
 const MAX_CHAT_TEST_BODY_SIZE: usize = 64 * 1024;
@@ -74,6 +76,12 @@ pub async fn run_web_server(
         .layer(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE).at("/api/chat/acknowledge"))
         .layer(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE).at("/api/chat/poll/clear"))
         .layer(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE).at("/api/test-stream"))
+        .layer(
+            topcoat::router::BodyLimit::max(
+                crate::chat::automations::alerts::MAX_MEDIA_BYTES + 64 * 1024,
+            )
+            .at("/api/alerts/media"),
+        )
         .app_context(app_handle)
         .runtime()
         .prefetch(PrefetchMode::Never)
@@ -126,6 +134,7 @@ fn page_title(page: &str) -> &'static str {
     match page {
         "metrics" => "Metrics",
         "chat" => "Chat",
+        "media" => "Media",
         "logs" => "Logs",
         "settings" => "Settings",
         "targets" => "Targets",
@@ -166,11 +175,17 @@ async fn app_page(active_page: &'static str) -> Result<impl View> {
                 <script src=(STREAM_PREVIEW_SCRIPT) defer="defer"></script>
                 <script src=(METRICS_CHARTS_SCRIPT) defer="defer"></script>
                 <script src=(CONNECTION_STATUS_SCRIPT) defer="defer"></script>
+                <script src=(ERROR_TOAST_SCRIPT) defer="defer"></script>
+                <script src=(alerts::SCRIPT) defer="defer"></script>
             </head>
             <body
                 data-page=(active_page)
                 class="min-h-screen bg-background font-sans text-foreground antialiased selection:bg-signal/30"
             >
+                <error-toaster
+                    class="fixed top-4 right-4 z-50 flex max-w-sm w-full flex-col gap-2 pointer-events-none px-3"
+                    style="position: fixed !important; top: 1rem !important; right: 1rem !important; z-index: 9999 !important; display: flex !important; flex-direction: column !important; gap: 0.5rem !important; pointer-events: none !important; max-width: 24rem !important; width: calc(100% - 2rem) !important;"
+                ></error-toaster>
                 app_navigation(active_page: active_page)
                 <main class="mx-auto w-full max-w-[1600px] px-4 py-4 sm:px-5">
                     match active_page {
@@ -182,6 +197,10 @@ async fn app_page(active_page: &'static str) -> Result<impl View> {
                         }
                         "chat" => {
                             chat_inbox()
+                            crate::web::components::chat_automations::chat_automations()
+                        }
+                        "media" => {
+                            crate::web::components::automation_media::automation_media()
                         }
                         "logs" => {
                             log_viewer()
@@ -226,6 +245,11 @@ async fn metrics_page_route() -> Result<impl View> {
 #[page("/chat")]
 async fn chat_page() -> Result<impl View> {
     Ok(view! { app_page(active_page: "chat") })
+}
+
+#[page("/media")]
+async fn media_page() -> Result<impl View> {
+    Ok(view! { app_page(active_page: "media") })
 }
 
 #[page("/overlay/chat")]
@@ -657,11 +681,13 @@ async fn overlay_events(
 
 #[route(POST "/api/webhook")]
 async fn receive_webhook(cx: &Cx, body: Bytes) -> Result<Response> {
+    let app: &AppHandle = app_context(cx);
+    app.metrics.add_webhooks_received(1);
     if body.len() > MAX_WEBHOOK_SIZE {
+        app.metrics.add_webhooks_rejected(1);
         return Err(bad_request("Webhook body exceeds 128 KiB").into());
     }
 
-    let app: &AppHandle = app_context(cx);
     let headers = headers(cx)
         .iter()
         .filter_map(|(name, value)| {
@@ -679,6 +705,7 @@ async fn receive_webhook(cx: &Cx, body: Bytes) -> Result<Response> {
     let platform = Platform::from_event(&event);
     let settings = app.config.get().chat.clone();
     let Some(platform) = platform else {
+        app.metrics.add_webhooks_rejected(1);
         tracing::warn!("Rejected webhook without a recognized platform signature");
         return Err(bad_request("Webhook signature is missing").into());
     };
@@ -686,6 +713,7 @@ async fn receive_webhook(cx: &Cx, body: Bytes) -> Result<Response> {
         Platform::Kick => match crate::chat::kick::process_event(&settings, &event) {
             Ok(message) => Some(message),
             Err(error) => {
+                app.metrics.add_webhooks_rejected(1);
                 tracing::warn!("Rejected Kick webhook: {error:#}");
                 return Err(bad_request("Rejected Kick webhook").into());
             }
@@ -693,6 +721,7 @@ async fn receive_webhook(cx: &Cx, body: Bytes) -> Result<Response> {
         Platform::X => match crate::chat::x::process_event(&settings, &event) {
             Ok(message) => message,
             Err(error) => {
+                app.metrics.add_webhooks_rejected(1);
                 tracing::warn!("Rejected X webhook: {error:#}");
                 return Err(bad_request("Rejected X webhook").into());
             }
@@ -863,6 +892,7 @@ mod tests {
                 source: crate::chat::Source::Twitch,
                 external_id: "test1".into(),
                 author: "TestViewer".into(),
+                user_id: None,
                 text: "OBS overlay test message".into(),
                 parts: Vec::new(),
                 avatar_url: None,
@@ -959,6 +989,72 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(overlay_events_response.status(), reqwest::StatusCode::OK);
+
+        for path in ["/overlay/alerts", "/api/alerts/events"] {
+            let denied = client
+                .get(format!("http://{local_addr}{path}"))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(denied.status(), reqwest::StatusCode::UNAUTHORIZED);
+            let allowed = client
+                .get(format!(
+                    "http://{local_addr}{path}?key=overlay-token-for-tests"
+                ))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(allowed.status(), reqwest::StatusCode::OK);
+        }
+        let upload_body = "--media-test\r\nContent-Disposition: form-data; name=\"media\"; filename=\"winner.gif\"\r\nContent-Type: image/gif\r\n\r\nGIF89aexample\r\n--media-test--\r\n";
+        let denied = client
+            .post(format!(
+                "http://{local_addr}/api/alerts/media?key=overlay-token-for-tests"
+            ))
+            .header("Content-Type", "multipart/form-data; boundary=media-test")
+            .body(upload_body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), reqwest::StatusCode::UNAUTHORIZED);
+        let uploaded = client
+            .post(format!("http://{local_addr}/api/alerts/media"))
+            .basic_auth("admin", Some("secretpassword123"))
+            .header("Content-Type", "multipart/form-data; boundary=media-test")
+            .body(upload_body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(uploaded.status(), reqwest::StatusCode::OK);
+        for auth_with_token in [true, false] {
+            let mut request = client.get(format!(
+                "http://{local_addr}/api/alerts/media?name=winner.gif"
+            ));
+            if auth_with_token {
+                request = request.query(&[("key", "overlay-token-for-tests")]);
+            } else {
+                request = request.basic_auth("admin", Some("secretpassword123"));
+            }
+            let response = request.send().await.unwrap();
+            assert_eq!(response.status(), reqwest::StatusCode::OK);
+            assert_eq!(response.headers()["content-type"], "image/gif");
+            assert_eq!(response.bytes().await.unwrap().as_ref(), b"GIF89aexample");
+        }
+        let denied = client
+            .get(format!(
+                "http://{local_addr}/api/alerts/media?name=winner.gif"
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), reqwest::StatusCode::UNAUTHORIZED);
+        let library = client
+            .get(format!("http://{local_addr}/media"))
+            .basic_auth("admin", Some("secretpassword123"))
+            .send()
+            .await
+            .unwrap();
+        assert!(library.text().await.unwrap().contains("winner.gif"));
 
         server_task.abort();
         let _ = std::fs::remove_dir_all(temp_dir);

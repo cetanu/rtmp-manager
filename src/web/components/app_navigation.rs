@@ -13,6 +13,7 @@ const NAV_ITEMS: &[(&str, &str, &(dyn HrefTarget + Sync))] = &[
     ("Preview", "preview", &crate::web::preview_page),
     ("Metrics", "metrics", &crate::web::metrics_page_route),
     ("Chat", "chat", &crate::web::chat_page),
+    ("Media", "media", &crate::web::media_page),
     ("Logs", "logs", &crate::web::logs_page),
     ("Settings", "settings", &crate::web::settings_page),
     ("Targets", "targets", &crate::web::targets_page),
@@ -35,9 +36,9 @@ pub async fn app_navigation(cx: &Cx, active_page: &'static str) -> Result<impl V
                     <img
                         src=(crate::web::FAVICON)
                         alt="RTMP-Manager"
-                        width="24"
-                        height="24"
-                        class="size-6 shrink-0 rounded-[3px] border border-border object-contain"
+                        width="48"
+                        height="48"
+                        class="size-12 shrink-0 object-contain"
                     />
                     <span class="leading-none">
                         <span
@@ -52,10 +53,7 @@ pub async fn app_navigation(cx: &Cx, active_page: &'static str) -> Result<impl V
                         </span>
                     </span>
                 </a>
-                <nav
-                    aria-label="Primary navigation"
-                    class="hud-tabs -mx-1 flex flex-1 gap-0.5 overflow-x-auto px-0.5 py-0.5"
-                >
+                <nav aria-label="Primary navigation" class="hud-tabs overflow-x-auto">
                     for (label, id, target) in NAV_ITEMS {
                         let is_active = active_page == *id;
                         <a
@@ -67,7 +65,7 @@ pub async fn app_navigation(cx: &Cx, active_page: &'static str) -> Result<impl V
                         </a>
                     }
                 </nav>
-                <div class="hidden shrink-0 md:block">connection_status()</div>
+                <div class="ml-auto hidden shrink-0 md:block">connection_status()</div>
             </div>
         </header>
     })

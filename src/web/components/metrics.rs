@@ -270,6 +270,32 @@ pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
                             ></canvas>
                         )
                     )
+                    for (metric, title, success_label, failure_label, success, failure) in [
+                        ("webhooks", "Webhooks", "Received", "Rejected", app.metrics.current_webhooks_received(), app.metrics.current_webhooks_rejected()),
+                        ("automations", "Automations", "Executed", "Failed", app.metrics.current_automations_executed(), app.metrics.current_automations_failed()),
+                    ] {
+                        card(
+                            attrs: attributes! { class="!gap-2 !py-3" data-chat-outcomes=(metric) },
+                            card_header(
+                                attrs: attributes! { class="!px-3" },
+                                card_title((title))
+                            )
+                            card_content(
+                                attrs: attributes! { class="!px-3" },
+                                <div class="mb-2 flex gap-6">
+                                    <div>
+                                        <div class="text-xs uppercase tracking-[0.18em] text-muted-foreground font-mono">(success_label)</div>
+                                        <div class="hud-value text-xl" data-chat-success="true">(success.to_string())</div>
+                                    </div>
+                                    <div>
+                                        <div class="text-xs uppercase tracking-[0.18em] text-muted-foreground font-mono">(failure_label)</div>
+                                        <div class="hud-value text-xl" data-chat-failure="true">(failure.to_string())</div>
+                                    </div>
+                                </div>
+                                <canvas class="h-28 w-full" height="112" aria-label=(format!("{title}: {success_label} and {failure_label} history"))></canvas>
+                            )
+                        )
+                    }
                 </div>
             </section>
         </rtmp-metrics>

@@ -559,6 +559,10 @@ fn parse_renderer(renderer: &serde_json::Value, kind: MessageKind) -> Option<Inc
         source: Source::YouTube,
         external_id,
         author,
+        user_id: renderer
+            .get("authorExternalChannelId")
+            .and_then(|id| id.as_str())
+            .map(str::to_owned),
         text,
         parts,
         avatar_url,
@@ -781,6 +785,7 @@ mod tests {
                 "item": {
                     "liveChatTextMessageRenderer": {
                         "id": "msg-123",
+                        "authorExternalChannelId": "UC123",
                         "authorName": {
                             "simpleText": "@Alice"
                         },
@@ -813,6 +818,7 @@ mod tests {
         assert_eq!(parsed.source, Source::YouTube);
         assert_eq!(parsed.external_id, "msg-123");
         assert_eq!(parsed.author, "@Alice");
+        assert_eq!(parsed.user_id.as_deref(), Some("UC123"));
         assert_eq!(parsed.text, "Hello world 😊");
         assert_eq!(
             parsed.parts,

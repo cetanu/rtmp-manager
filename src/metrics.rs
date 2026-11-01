@@ -10,6 +10,10 @@ pub struct Metrics {
     ingest_bytes: AtomicU64,
     ingest_bps: AtomicU64,
     egress_bytes: AtomicU64,
+    webhooks_received: AtomicU64,
+    webhooks_rejected: AtomicU64,
+    automations_executed: AtomicU64,
+    automations_failed: AtomicU64,
     chat_messages_received: AtomicU64,
     last_sample_ingest_bytes: AtomicU64,
     last_sample_timestamp_ms: AtomicU64,
@@ -40,6 +44,10 @@ pub struct MetricsSample {
     pub ingest_bps: u64,
     pub ingest_bytes: u64,
     pub egress_bytes: u64,
+    pub webhooks_received: u64,
+    pub webhooks_rejected: u64,
+    pub automations_executed: u64,
+    pub automations_failed: u64,
     pub chat_messages_received: u64,
     pub targets: Vec<TargetBitrateSample>,
 }
@@ -57,6 +65,10 @@ impl Metrics {
             ingest_bytes: AtomicU64::new(0),
             ingest_bps: AtomicU64::new(0),
             egress_bytes: AtomicU64::new(0),
+            webhooks_received: AtomicU64::new(0),
+            webhooks_rejected: AtomicU64::new(0),
+            automations_executed: AtomicU64::new(0),
+            automations_failed: AtomicU64::new(0),
             chat_messages_received: AtomicU64::new(0),
             last_sample_ingest_bytes: AtomicU64::new(0),
             last_sample_timestamp_ms: AtomicU64::new(0),
@@ -113,6 +125,10 @@ impl Metrics {
             ingest_bps,
             ingest_bytes: bytes,
             egress_bytes: self.current_egress_bytes(),
+            webhooks_received: self.current_webhooks_received(),
+            webhooks_rejected: self.current_webhooks_rejected(),
+            automations_executed: self.current_automations_executed(),
+            automations_failed: self.current_automations_failed(),
             chat_messages_received: self.current_chat_messages_received(),
             targets: self.current_target_bitrates(),
         };
@@ -156,6 +172,39 @@ impl Metrics {
 
     pub fn current_egress_bytes(&self) -> u64 {
         self.egress_bytes.load(Ordering::Relaxed)
+    }
+
+    pub fn add_webhooks_received(&self, count: u64) {
+        self.webhooks_received.fetch_add(count, Ordering::Relaxed);
+    }
+
+    pub fn current_webhooks_received(&self) -> u64 {
+        self.webhooks_received.load(Ordering::Relaxed)
+    }
+
+    pub fn add_webhooks_rejected(&self, count: u64) {
+        self.webhooks_rejected.fetch_add(count, Ordering::Relaxed);
+    }
+
+    pub fn current_webhooks_rejected(&self) -> u64 {
+        self.webhooks_rejected.load(Ordering::Relaxed)
+    }
+
+    pub fn add_automations_executed(&self, count: u64) {
+        self.automations_executed
+            .fetch_add(count, Ordering::Relaxed);
+    }
+
+    pub fn current_automations_executed(&self) -> u64 {
+        self.automations_executed.load(Ordering::Relaxed)
+    }
+
+    pub fn add_automations_failed(&self, count: u64) {
+        self.automations_failed.fetch_add(count, Ordering::Relaxed);
+    }
+
+    pub fn current_automations_failed(&self) -> u64 {
+        self.automations_failed.load(Ordering::Relaxed)
     }
 
     pub fn add_chat_messages_received(&self, count: u64) {
@@ -211,6 +260,25 @@ impl TargetBitrate {
 mod tests {
     use super::{Metrics, calculate_ingest_bps};
     use std::sync::atomic::Ordering;
+
+    #[test]
+    fn chat_outcomes_are_included_in_history_and_live_samples() {
+        let metrics = Metrics::default();
+        let receiver = metrics.subscribe();
+        metrics.add_webhooks_received(5);
+        metrics.add_webhooks_rejected(2);
+        metrics.add_automations_executed(3);
+        metrics.add_automations_failed(1);
+        metrics.record_sample();
+        let history = metrics.history();
+        let live = receiver.borrow();
+        for sample in [&history[0], live.as_ref().unwrap()] {
+            assert_eq!(sample.webhooks_received, 5);
+            assert_eq!(sample.webhooks_rejected, 2);
+            assert_eq!(sample.automations_executed, 3);
+            assert_eq!(sample.automations_failed, 1);
+        }
+    }
 
     #[test]
     fn ingest_sample_is_the_byte_delta_in_bits_per_second() {

@@ -54,6 +54,9 @@ pub struct IncomingChatMessage {
     #[validate(min_length = 1)]
     #[validate(max_length = 200)]
     pub author: String,
+    #[serde(default)]
+    #[validate(max_length = 256)]
+    pub user_id: Option<String>,
     #[validate(min_length = 1)]
     #[validate(max_length = 5000)]
     pub text: String,

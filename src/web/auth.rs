@@ -19,7 +19,9 @@ pub(crate) fn is_public_path(path: &str) -> bool {
 }
 
 fn is_overlay_path(path: &str) -> bool {
-    path == OVERLAY_PATH || path == OVERLAY_EVENTS_PATH
+    path == OVERLAY_PATH
+        || path == OVERLAY_EVENTS_PATH
+        || matches!(path, "/overlay/alerts" | "/api/alerts/events")
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -28,7 +30,9 @@ struct OverlayAccessQuery {
 }
 
 fn has_overlay_access(cx: &Cx, app: &AppHandle) -> bool {
-    if !is_overlay_path(uri(cx).path()) || method(cx).as_str() != "GET" {
+    if !(is_overlay_path(uri(cx).path()) || uri(cx).path() == "/api/alerts/media")
+        || method(cx).as_str() != "GET"
+    {
         return false;
     }
 
@@ -102,6 +106,9 @@ async fn basic_auth(cx: &Cx, body: Body, next: Next<'_>) -> Result<Response> {
         return unauthorized_response(cx);
     }
 
+    if path == "/api/alerts/media" && has_overlay_access(cx, app) {
+        return next.run(cx, body).await;
+    }
     let auth = app.config.get().web_auth.clone();
     if auth.username.is_empty() && auth.password.is_empty() {
         return next.run(cx, body).await;

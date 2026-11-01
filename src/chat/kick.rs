@@ -23,6 +23,7 @@ struct KickChatEvent {
 
 #[derive(Debug, Deserialize)]
 struct KickSender {
+    user_id: Option<u64>,
     username: String,
     profile_picture: Option<String>,
 }
@@ -135,6 +136,7 @@ pub fn parse_chat_event(body: &[u8]) -> Result<IncomingChatMessage> {
         source: Source::Kick,
         external_id: event.message_id,
         author: event.sender.username,
+        user_id: event.sender.user_id.map(|id| id.to_string()),
         text: event.content,
         parts: Vec::new(),
         avatar_url: event.sender.profile_picture,
@@ -370,12 +372,13 @@ mod tests {
     #[test]
     fn parses_chat_event() {
         let message = parse_chat_event(
-            br#"{"message_id":"01ABC","content":"Hello Kick","sender":{"username":"viewer","profile_picture":"https://example.test/avatar.jpg"},"created_at":"2026-08-30T15:00:00Z"}"#,
+            br#"{"message_id":"01ABC","content":"Hello Kick","sender":{"user_id":123,"username":"viewer","profile_picture":"https://example.test/avatar.jpg"},"created_at":"2026-08-30T15:00:00Z"}"#,
         )
         .unwrap();
         assert_eq!(message.source, Source::Kick);
         assert_eq!(message.external_id, "01ABC");
         assert_eq!(message.author, "viewer");
+        assert_eq!(message.user_id.as_deref(), Some("123"));
         assert_eq!(message.text, "Hello Kick");
     }
 

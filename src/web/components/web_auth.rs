@@ -70,7 +70,7 @@ pub async fn web_auth(cx: &Cx) -> Result<impl View> {
                             }
                         )
                         field_description(
-                            "The OBS URL must include ?key=...; this token grants access only to the chat overlay and its chat SSE stream."
+                            "The OBS URL must include ?key=...; this token grants access to chat and alerts overlays, their event streams and alert media."
                         )
                     )
                 </div>

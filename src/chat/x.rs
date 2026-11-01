@@ -35,6 +35,7 @@ struct XAuthor {
 
 #[derive(Debug, Deserialize)]
 struct XAuthorData {
+    id: Option<String>,
     username: String,
     profile_image_url: Option<String>,
 }
@@ -78,6 +79,7 @@ pub fn parse_chat_event(body: &[u8]) -> Result<Option<IncomingChatMessage>> {
         source: Source::X,
         external_id: event.data.payload.message_id,
         author: event.data.payload.author.data.username,
+        user_id: event.data.payload.author.data.id,
         text: event.data.payload.message,
         parts: Vec::new(),
         avatar_url: event.data.payload.author.data.profile_image_url,
@@ -146,6 +148,7 @@ mod tests {
         assert_eq!(message.external_id, "2090000000000000004");
         assert_eq!(message.author, "ExampleUser");
         assert_eq!(message.text, "hello from chat");
+        assert_eq!(message.user_id.as_deref(), Some("1234567890123456789"));
         assert_eq!(
             message.avatar_url.as_deref(),
             Some("https://example.test/avatar.jpg")

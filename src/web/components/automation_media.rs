@@ -1,0 +1,209 @@
+use super::ui::{
+    button::{ButtonSize, ButtonVariant, button_variants},
+    card::{card, card_content, card_header, card_title},
+};
+use crate::{chat::automations::alerts, server::state::AppHandle};
+use topcoat::{
+    Result,
+    context::{Cx, app_context},
+    view::{View, component, view},
+};
+
+#[component]
+pub async fn automation_media(cx: &Cx) -> Result<impl View> {
+    let app: &AppHandle = app_context(cx);
+    let library = alerts::list(app.config.database())
+        .await
+        .map_err(topcoat::Error::from_anyhow)?;
+    let count = library.len();
+    let overlay_url = format!(
+        "/overlay/alerts?key={}",
+        app.config.get().web_auth.overlay_token
+    );
+    let outline = button_variants(ButtonVariant::Outline, ButtonSize::Md);
+    let primary = button_variants(ButtonVariant::Primary, ButtonSize::Md);
+    Ok(view! {
+        <section
+            id="automation-media"
+            class="pb-4"
+            aria-label="Media"
+            data-media-library=""
+        >
+            card(
+                card_header(
+                    <div class="flex flex-wrap items-center justify-between gap-3 pb-3">
+                        <div class="flex items-center gap-3">
+                            card_title("Media")
+                            <span class="font-mono text-[10px] text-muted-foreground">
+                                (format!("{count} / 100"))
+                            </span>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <a
+                                href=(overlay_url.clone())
+                                target="_blank"
+                                rel="noopener"
+                                class=(outline.clone())
+                            >
+                                "OBS overlay ↗"
+                            </a>
+                            <form
+                                method="post"
+                                action="/api/alerts/media"
+                                enctype="multipart/form-data"
+                                data-media-form=""
+                            >
+                                <label class=(primary) for="alert-media-upload">
+                                    "Upload media"
+                                </label>
+                                <input
+                                    id="alert-media-upload"
+                                    aria-label="Upload alert media"
+                                    class="sr-only"
+                                    type="file"
+                                    name="media"
+                                    required="required"
+                                    accept=".png,.gif,.jpg,.jpeg,.webp,.mp3,.wav,.ogg"
+                                />
+                            </form>
+                        </div>
+                    </div>
+                )
+                card_content(
+                    <p class="mb-4 text-xs text-muted-foreground">
+                        "Images and sounds for your automation scripts. PNG, GIF, JPEG, WebP, MP3, WAV or Ogg · up to 10 MiB each."
+                    </p>
+                    <p
+                        data-media-status=""
+                        role="status"
+                        class="mb-3 hidden text-sm text-muted-foreground"
+                    ></p>
+                    if library.is_empty() {
+                        <div
+                            class="flex flex-col items-center justify-center gap-2 rounded-sm border border-dashed border-border bg-white/[0.02] px-5 py-8 text-center"
+                        >
+                            <p class="text-sm font-medium">
+                                "Give your winning moment a sound and a picture."
+                            </p>
+                            <p
+                                class="max-w-md text-xs leading-relaxed text-muted-foreground"
+                            >
+                                "Upload your first file, then use its filename in overlay.show. Use the script tester to inspect alerts before going live."
+                            </p>
+                        </div>
+                    } else {
+                        <div
+                            class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
+                        >
+                            for media in library {
+                                let image = media.content_type.starts_with("image/");
+                                let url = format!("/api/alerts/media?name={}", media.name);
+                                let snippet = format!(
+                                    "overlay.show(#{{ {}: \"{}\", duration_ms: 8000 }});",
+                                    if image { "image" } else { "sound" },
+                                    media.name,
+                                );
+                                <article
+                                    class="flex min-w-0 flex-col overflow-hidden rounded-sm border border-border bg-background/40"
+                                    data-media-item=""
+                                >
+                                    <div
+                                        class="flex h-36 items-center justify-center overflow-hidden bg-white/[0.03] p-3"
+                                    >
+                                        if image {
+                                            <img
+                                                src=(url)
+                                                alt=(media.name.clone())
+                                                loading="lazy"
+                                                class="max-h-full max-w-full object-contain"
+                                            />
+                                        } else {
+                                            <div
+                                                class="flex w-full min-w-0 flex-col items-center gap-3"
+                                            >
+                                                <span
+                                                    class="font-mono text-[10px] tracking-[0.16em] text-muted-foreground uppercase"
+                                                >
+                                                    "Sound"
+                                                </span>
+                                                <audio
+                                                    style="color-scheme:dark"
+                                                    controls="controls"
+                                                    preload="none"
+                                                    aria-label=(format!("Preview {}", media.name))
+                                                    src=(url)
+                                                    class="h-8 w-full min-w-0"
+                                                ></audio>
+                                            </div>
+                                        }
+                                    </div>
+                                    <div
+                                        class="flex flex-col gap-3 border-t border-border p-3"
+                                    >
+                                        <div class="min-w-0">
+                                            <p
+                                                class="truncate font-mono text-xs"
+                                                title=(media.name.clone())
+                                            >
+                                                (media.name.clone())
+                                            </p>
+                                            <p
+                                                class="mt-1 font-mono text-[10px] text-muted-foreground"
+                                            >
+                                                (media.content_type)
+                                            </p>
+                                        </div>
+                                        <div
+                                            class="flex flex-wrap items-center justify-between gap-2"
+                                        >
+                                            <button
+                                                type="button"
+                                                data-copy-script=(snippet)
+                                                class=(outline.clone())
+                                            >
+                                                "Copy script"
+                                            </button>
+                                            <form
+                                                method="post"
+                                                action=(format!(
+                                                    "/api/alerts/media/delete?name={}",
+                                                    media.name,
+                                                ))
+                                                data-media-form=""
+                                            >
+                                                <button
+                                                    type="submit"
+                                                    class="cursor-pointer font-mono text-[10px] text-muted-foreground uppercase transition-colors hover:text-destructive"
+                                                    aria-label=(format!("Delete {}", media.name))
+                                                >
+                                                    "Delete"
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </article>
+                            }
+                        </div>
+                    }
+                    <details class="mt-4 border-t border-border pt-3">
+                        <summary
+                            class="cursor-pointer text-xs text-muted-foreground hover:text-foreground"
+                        >
+                            "Use media in a script"
+                        </summary>
+                        <div class="mt-3 grid gap-4 md:grid-cols-2">
+                            <pre
+                                class="overflow-x-auto rounded-sm border border-border bg-background p-3 font-mono text-xs leading-relaxed"
+                            >
+                                ("overlay.show(#{\n    text: message.author + \" WON!\",\n    image: \"jackpot.gif\",\n    sound: \"jackpot.mp3\",\n    duration_ms: 8000\n});")
+                            </pre>
+                            <p class="text-xs leading-relaxed text-muted-foreground">
+                                "Use the exact filename. Text, image and sound are optional; include at least one. Alerts queue in your OBS browser source after a successful live execution. Script tests list alerts without sending them to OBS."
+                            </p>
+                        </div>
+                    </details>
+                )
+            )
+        </section>
+    })
+}

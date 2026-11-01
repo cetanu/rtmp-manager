@@ -19,3 +19,13 @@ snapshot_name = "0002_snapshot.toml"
 id = 7155122764839597547
 name = "0003_unique_chat_seen.sql"
 snapshot_name = "0003_snapshot.toml"
+
+[[migrations]]
+id = 8319715751363881086
+name = "0004_add_chat_automations.sql"
+snapshot_name = "0004_snapshot.toml"
+
+[[migrations]]
+id = 5260140354893373334
+name = "0005_add_automation_media.sql"
+snapshot_name = "0005_snapshot.toml"

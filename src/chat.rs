@@ -13,6 +13,7 @@ use toasty::Executor;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
+pub mod automations;
 pub mod kick;
 pub mod twitch;
 pub mod types;
@@ -50,6 +51,7 @@ impl IncomingChatMessage {
             ChatMessagePart::Text(text) => !text.is_empty(),
             ChatMessagePart::Emoji { alt, url } => !alt.is_empty() && !url.is_empty(),
         });
+        self.user_id = non_empty(self.user_id);
         self.avatar_url = non_empty(self.avatar_url);
         self.sent_at = non_empty(self.sent_at);
 
@@ -66,6 +68,8 @@ pub struct TestChatMessageRequest {
     pub source: Option<Source>,
     #[serde(default)]
     pub author: Option<String>,
+    #[serde(default)]
+    pub user_id: Option<String>,
     #[serde(default)]
     pub text: Option<String>,
     #[serde(default)]
@@ -251,6 +255,7 @@ pub struct ChatInbox {
     capacity: usize,
     queue_mode: bool,
     database: toasty::Db,
+    alerts: tokio::sync::broadcast::Sender<automations::alerts::Alert>,
 }
 
 impl ChatInbox {
@@ -279,6 +284,7 @@ impl ChatInbox {
         let mut inbox = Self {
             capacity,
             queue_mode: true,
+            alerts: tokio::sync::broadcast::channel(128).0,
             database,
         };
         inbox.trim_to_capacity().await?;
@@ -290,28 +296,9 @@ impl ChatInbox {
         let mut database = self.database.clone();
         let mut transaction = database.transaction().await?;
 
-        let seen = StoredChatSeen::filter(
-            StoredChatSeen::fields()
-                .source()
-                .eq(incoming.source.as_str())
-                .and(
-                    StoredChatSeen::fields()
-                        .external_id()
-                        .eq(&incoming.external_id),
-                ),
-        )
-        .first()
-        .exec(&mut transaction)
-        .await?;
-        if seen.is_some() {
+        if !claim_message(&mut transaction, &incoming).await? {
             return Ok(EnqueueOutcome::Duplicate);
         }
-        toasty::create!(StoredChatSeen {
-            source: incoming.source.to_string(),
-            external_id: incoming.external_id.clone(),
-        })
-        .exec(&mut transaction)
-        .await?;
         trim_seen(
             &mut transaction,
             self.capacity.saturating_mul(SEEN_ID_RETENTION_MULTIPLIER),
@@ -553,28 +540,9 @@ impl ChatInbox {
     ) -> Result<PollVoteOutcome> {
         let mut database = self.database.clone();
         let mut transaction = database.transaction().await?;
-        let seen = StoredChatSeen::filter(
-            StoredChatSeen::fields()
-                .source()
-                .eq(incoming.source.as_str())
-                .and(
-                    StoredChatSeen::fields()
-                        .external_id()
-                        .eq(&incoming.external_id),
-                ),
-        )
-        .first()
-        .exec(&mut transaction)
-        .await?;
-        if seen.is_some() {
+        if !claim_message(&mut transaction, incoming).await? {
             return Ok(PollVoteOutcome::Duplicate);
         }
-        toasty::create!(StoredChatSeen {
-            source: incoming.source.to_string(),
-            external_id: incoming.external_id.clone(),
-        })
-        .exec(&mut transaction)
-        .await?;
         trim_seen(
             &mut transaction,
             self.capacity.saturating_mul(SEEN_ID_RETENTION_MULTIPLIER),
@@ -739,6 +707,40 @@ async fn increment_dropped(executor: &mut dyn Executor, amount: usize) -> Result
     Ok(())
 }
 
+/// Claim a platform message in the same transaction as its effects.
+async fn claim_message(
+    executor: &mut dyn Executor,
+    incoming: &IncomingChatMessage,
+) -> Result<bool> {
+    if message_seen(executor, incoming).await? {
+        return Ok(false);
+    }
+    toasty::create!(StoredChatSeen {
+        source: incoming.source.to_string(),
+        external_id: incoming.external_id.clone()
+    })
+    .exec(executor)
+    .await?;
+    Ok(true)
+}
+
+async fn message_seen(executor: &mut dyn Executor, incoming: &IncomingChatMessage) -> Result<bool> {
+    let seen = StoredChatSeen::filter(
+        StoredChatSeen::fields()
+            .source()
+            .eq(incoming.source.as_str())
+            .and(
+                StoredChatSeen::fields()
+                    .external_id()
+                    .eq(&incoming.external_id),
+            ),
+    )
+    .first()
+    .exec(executor)
+    .await?;
+    Ok(seen.is_some())
+}
+
 async fn trim_seen(executor: &mut dyn Executor, capacity: usize) -> Result<()> {
     let Some(boundary) = StoredChatSeen::all()
         .order_by(StoredChatSeen::fields().id().asc())
@@ -768,6 +770,23 @@ async fn load_state(executor: &mut dyn Executor) -> Result<StoredChatState> {
 }
 
 enum ChatCommand {
+    SaveAutomation {
+        id: Option<u64>,
+        definition: automations::AutomationDefinition,
+        respond_to: oneshot::Sender<Result<()>>,
+    },
+    ToggleAutomation {
+        id: u64,
+        enabled: bool,
+        respond_to: oneshot::Sender<Result<()>>,
+    },
+    DeleteAutomation {
+        id: u64,
+        respond_to: oneshot::Sender<Result<()>>,
+    },
+    AutomationSnapshot {
+        respond_to: oneshot::Sender<Result<automations::AutomationSnapshot>>,
+    },
     Enqueue {
         message: IncomingChatMessage,
         respond_to: oneshot::Sender<Result<EnqueueOutcome>>,
@@ -823,6 +842,7 @@ enum ChatCommand {
 /// Actor owning chat queue storage and background platform workers exclusively without mutexes.
 struct ChatActor {
     inbox: ChatInbox,
+    stream_status: watch::Receiver<crate::server::preview::StreamStatus>,
     twitch_task: Option<JoinHandle<()>>,
     youtube_task: Option<JoinHandle<()>>,
     pomodoro_timer: Option<JoinHandle<()>>,
@@ -837,11 +857,43 @@ impl ChatActor {
     async fn run(mut self, mut receiver: mpsc::Receiver<ChatCommand>, handle: ChatHandle) {
         while let Some(command) = receiver.recv().await {
             match command {
+                ChatCommand::SaveAutomation {
+                    id,
+                    definition,
+                    respond_to,
+                } => {
+                    let result = automations::save(&self.inbox.database, id, definition).await;
+                    if result.is_ok() {
+                        self.notify_changed();
+                    }
+                    let _ = respond_to.send(result);
+                }
+                ChatCommand::ToggleAutomation {
+                    id,
+                    enabled,
+                    respond_to,
+                } => {
+                    let result = automations::set_enabled(&self.inbox.database, id, enabled).await;
+                    if result.is_ok() {
+                        self.notify_changed();
+                    }
+                    let _ = respond_to.send(result);
+                }
+                ChatCommand::DeleteAutomation { id, respond_to } => {
+                    let result = automations::delete(&self.inbox.database, id).await;
+                    if result.is_ok() {
+                        self.notify_changed();
+                    }
+                    let _ = respond_to.send(result);
+                }
+                ChatCommand::AutomationSnapshot { respond_to } => {
+                    let _ = respond_to.send(automations::snapshot(&self.inbox.database).await);
+                }
                 ChatCommand::Enqueue {
                     message,
                     respond_to,
                 } => {
-                    let outcome = self.handle_enqueue(message).await;
+                    let outcome = self.handle_enqueue(message, &handle.metrics).await;
                     if let Ok(outcome) = &outcome
                         && matches!(outcome, EnqueueOutcome::Accepted | EnqueueOutcome::Dropped)
                     {
@@ -980,7 +1032,31 @@ impl ChatActor {
         }
     }
 
-    async fn handle_enqueue(&mut self, message: IncomingChatMessage) -> Result<EnqueueOutcome> {
+    async fn handle_enqueue(
+        &mut self,
+        message: IncomingChatMessage,
+        metrics: &Metrics,
+    ) -> Result<EnqueueOutcome> {
+        let message = message.normalized()?;
+        if message_seen(&mut self.inbox.database.clone(), &message).await?
+            || automations::was_processed(&self.inbox.database, &message).await?
+        {
+            return Ok(EnqueueOutcome::Duplicate);
+        }
+        if self.stream_status.borrow().state == crate::server::preview::StreamState::Live {
+            let outcome = automations::process(&self.inbox.database, &message).await?;
+            for alert in outcome.alerts {
+                let _ = self.inbox.alerts.send(alert);
+            }
+            metrics.add_automations_executed(outcome.succeeded);
+            metrics.add_automations_failed(outcome.failed);
+            if outcome.executed {
+                self.notify_changed();
+            }
+            if outcome.consumed {
+                return Ok(EnqueueOutcome::Accepted);
+            }
+        }
         if let Some(poll) = self.state.poll.as_ref().filter(|poll| poll.is_active())
             && let Some(option_number) = parse_poll_vote(&message.text, poll.options.len())
         {
@@ -1253,18 +1329,72 @@ pub struct ChatHandle {
     state_rx: watch::Receiver<ChatState>,
     metrics: Arc<Metrics>,
     test_message_sequence: Arc<AtomicU64>,
+    alerts: tokio::sync::broadcast::Sender<automations::alerts::Alert>,
 }
 
 impl ChatHandle {
+    pub fn subscribe_alerts(&self) -> tokio::sync::broadcast::Receiver<automations::alerts::Alert> {
+        self.alerts.subscribe()
+    }
+
+    pub async fn save_automation(
+        &self,
+        id: Option<u64>,
+        definition: automations::AutomationDefinition,
+    ) -> Result<()> {
+        self.call(
+            |respond_to| ChatCommand::SaveAutomation {
+                id,
+                definition,
+                respond_to,
+            },
+            "Chat actor dropped automation response",
+        )
+        .await
+    }
+    pub async fn toggle_automation(&self, id: u64, enabled: bool) -> Result<()> {
+        self.call(
+            |respond_to| ChatCommand::ToggleAutomation {
+                id,
+                enabled,
+                respond_to,
+            },
+            "Chat actor dropped automation response",
+        )
+        .await
+    }
+    pub async fn delete_automation(&self, id: u64) -> Result<()> {
+        self.call(
+            |respond_to| ChatCommand::DeleteAutomation { id, respond_to },
+            "Chat actor dropped automation response",
+        )
+        .await
+    }
+    pub async fn automations(&self) -> Result<automations::AutomationSnapshot> {
+        self.call(
+            |respond_to| ChatCommand::AutomationSnapshot { respond_to },
+            "Chat actor dropped automation response",
+        )
+        .await
+    }
+
     pub async fn spawn(
         path: &Path,
         capacity: usize,
         poll_results_secs: u64,
         http_client: Client,
         metrics: Arc<Metrics>,
+        stream_status: watch::Receiver<crate::server::preview::StreamStatus>,
     ) -> Result<Self> {
         let inbox = ChatInbox::open(path, capacity).await?;
-        Self::spawn_with_inbox(inbox, poll_results_secs, http_client, metrics).await
+        Self::spawn_with_inbox(
+            inbox,
+            poll_results_secs,
+            http_client,
+            metrics,
+            stream_status,
+        )
+        .await
     }
 
     pub async fn spawn_with_database(
@@ -1273,9 +1403,17 @@ impl ChatHandle {
         poll_results_secs: u64,
         http_client: Client,
         metrics: Arc<Metrics>,
+        stream_status: watch::Receiver<crate::server::preview::StreamStatus>,
     ) -> Result<Self> {
         let inbox = ChatInbox::from_database(database, capacity).await?;
-        Self::spawn_with_inbox(inbox, poll_results_secs, http_client, metrics).await
+        Self::spawn_with_inbox(
+            inbox,
+            poll_results_secs,
+            http_client,
+            metrics,
+            stream_status,
+        )
+        .await
     }
 
     async fn spawn_with_inbox(
@@ -1283,6 +1421,7 @@ impl ChatHandle {
         poll_results_secs: u64,
         http_client: Client,
         metrics: Arc<Metrics>,
+        stream_status: watch::Receiver<crate::server::preview::StreamStatus>,
     ) -> Result<Self> {
         let (state_tx, state_rx) = watch::channel(ChatState::default());
         let (sender, receiver) = mpsc::channel(ACTOR_COMMAND_CAPACITY);
@@ -1292,6 +1431,7 @@ impl ChatHandle {
             state_rx,
             metrics,
             test_message_sequence: Arc::new(AtomicU64::new(1)),
+            alerts: inbox.alerts.clone(),
         };
 
         // Rehydrate focus mode persisted before a restart, if it has not
@@ -1330,6 +1470,7 @@ impl ChatHandle {
 
         let actor = ChatActor {
             inbox,
+            stream_status,
             twitch_task: None,
             youtube_task: None,
             pomodoro_timer,
@@ -1389,6 +1530,7 @@ impl ChatHandle {
             source,
             external_id: format!("test-{}-{}", now_unix_ms(), seq),
             author,
+            user_id: req.user_id,
             text,
             parts: Vec::new(),
             avatar_url: req.avatar_url,
@@ -1569,6 +1711,7 @@ mod tests {
             source: source.parse().unwrap(),
             external_id: external_id.into(),
             author: "Viewer".into(),
+            user_id: None,
             text: text.into(),
             parts: Vec::new(),
             avatar_url: None,
@@ -1812,6 +1955,10 @@ mod tests {
             crate::config::default_poll_results_seconds(),
             Client::new(),
             Arc::new(Metrics::default()),
+            watch::channel(crate::server::preview::StreamStatus {
+                state: crate::server::preview::StreamState::Offline,
+            })
+            .1,
         )
         .await
         .unwrap();
@@ -1867,11 +2014,19 @@ mod tests {
             crate::config::default_poll_results_seconds(),
             Client::new(),
             Arc::new(Metrics::default()),
+            watch::channel(crate::server::preview::StreamStatus {
+                state: crate::server::preview::StreamState::Offline,
+            })
+            .1,
         )
         .await
         .unwrap();
         let mut actor = ChatActor {
             inbox,
+            stream_status: watch::channel(crate::server::preview::StreamStatus {
+                state: crate::server::preview::StreamState::Offline,
+            })
+            .1,
             twitch_task: None,
             youtube_task: None,
             pomodoro_timer: None,
@@ -1909,6 +2064,10 @@ mod tests {
             crate::config::default_poll_results_seconds(),
             Client::new(),
             Arc::new(Metrics::default()),
+            watch::channel(crate::server::preview::StreamStatus {
+                state: crate::server::preview::StreamState::Offline,
+            })
+            .1,
         )
         .await
         .unwrap();
@@ -1962,6 +2121,10 @@ mod tests {
             crate::config::default_poll_results_seconds(),
             Client::new(),
             Arc::new(Metrics::default()),
+            watch::channel(crate::server::preview::StreamStatus {
+                state: crate::server::preview::StreamState::Offline,
+            })
+            .1,
         )
         .await
         .unwrap();
@@ -2020,6 +2183,10 @@ mod tests {
             crate::config::default_poll_results_seconds(),
             Client::new(),
             Arc::new(Metrics::default()),
+            watch::channel(crate::server::preview::StreamStatus {
+                state: crate::server::preview::StreamState::Offline,
+            })
+            .1,
         )
         .await
         .unwrap();
@@ -2052,6 +2219,10 @@ mod tests {
             crate::config::default_poll_results_seconds(),
             Client::new(),
             Arc::new(Metrics::default()),
+            watch::channel(crate::server::preview::StreamStatus {
+                state: crate::server::preview::StreamState::Offline,
+            })
+            .1,
         )
         .await
         .unwrap();
@@ -2067,6 +2238,10 @@ mod tests {
             crate::config::default_poll_results_seconds(),
             Client::new(),
             Arc::new(Metrics::default()),
+            watch::channel(crate::server::preview::StreamStatus {
+                state: crate::server::preview::StreamState::Offline,
+            })
+            .1,
         )
         .await
         .unwrap();
@@ -2084,6 +2259,10 @@ mod tests {
             crate::config::default_poll_results_seconds(),
             Client::new(),
             Arc::new(Metrics::default()),
+            watch::channel(crate::server::preview::StreamStatus {
+                state: crate::server::preview::StreamState::Offline,
+            })
+            .1,
         )
         .await
         .unwrap();
@@ -2112,6 +2291,10 @@ mod tests {
             crate::config::default_poll_results_seconds(),
             Client::new(),
             Arc::new(Metrics::default()),
+            watch::channel(crate::server::preview::StreamStatus {
+                state: crate::server::preview::StreamState::Offline,
+            })
+            .1,
         )
         .await
         .unwrap();

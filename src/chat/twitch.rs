@@ -80,6 +80,7 @@ async fn read_connection(chat: &ChatHandle, channel: &str) -> Result<()> {
                 .id
                 .unwrap_or_else(|| format!("irc-{}-{fallback_message_id}", now_unix_ms())),
             author: parsed.author,
+            user_id: parsed.user_id,
             text: parsed.text,
             parts: parsed.parts,
             avatar_url: None,
@@ -95,6 +96,7 @@ async fn read_connection(chat: &ChatHandle, channel: &str) -> Result<()> {
 struct ParsedMessage {
     id: Option<String>,
     author: String,
+    user_id: Option<String>,
     text: String,
     parts: Vec<ChatMessagePart>,
 }
@@ -131,6 +133,7 @@ fn parse_privmsg(line: &str) -> Option<ParsedMessage> {
 
     Some(ParsedMessage {
         id: tag("id"),
+        user_id: tag("user-id"),
         author,
         text: text.to_owned(),
         parts,
@@ -247,7 +250,7 @@ mod tests {
     #[test]
     fn parses_tagged_twitch_privmsg() {
         let message = parse_privmsg(
-            "@display-name=Some\\sViewer;id=message-123 :someviewer!someviewer@someviewer.tmi.twitch.tv PRIVMSG #channel :hello chat!\r\n",
+            "@display-name=Some\\sViewer;user-id=123;id=message-123 :someviewer!someviewer@someviewer.tmi.twitch.tv PRIVMSG #channel :hello chat!\r\n",
         )
         .unwrap();
 
@@ -256,6 +259,7 @@ mod tests {
             ParsedMessage {
                 id: Some("message-123".into()),
                 author: "Some Viewer".into(),
+                user_id: Some("123".into()),
                 text: "hello chat!".into(),
                 parts: Vec::new(),
             }
