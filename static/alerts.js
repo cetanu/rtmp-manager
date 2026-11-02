@@ -32,13 +32,13 @@
         const img = document.createElement("img");
         img.src = mediaUrl(alert.image);
         img.alt = "";
-        img.style.cssText = "max-width:100%;max-height:70%;object-fit:contain";
+        img.style.cssText = "max-width:90%;max-height:65%;object-fit:contain;flex-shrink:0";
         stage.append(img);
       }
       if (alert.text) {
         const text = document.createElement("div");
         text.textContent = alert.text;
-        text.style.cssText = "white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%";
+        text.style.cssText = "box-sizing:border-box;width:80%;max-height:25%;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;text-align:center;flex-shrink:0";
         stage.append(text);
       }
       if (alert.sound) {
