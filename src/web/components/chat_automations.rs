@@ -3,12 +3,13 @@ use crate::server::{preview::StreamState, state::AppHandle};
 use crate::web::components::ui::{
     button::{ButtonSize, ButtonVariant, button_variants},
     card::{card, card_content, card_header, card_title},
+    confirm_delete::confirm_delete,
 };
 use topcoat::{
     Result,
     context::{Cx, app_context},
     runtime::{Event, connected, procedure, shard, signal},
-    view::{View, component, element_id, emit, live, view},
+    view::{View, attributes, component, element_id, emit, live, view},
 };
 
 #[procedure]
@@ -53,7 +54,7 @@ async fn test_automation(pattern: String, script: String, text: String) -> Resul
         let message = crate::chat::IncomingChatMessage {
             source: crate::chat::Source::Twitch,
             external_id: "test-message".into(),
-            author: "Test viewer".into(),
+            author: "test_viewer".into(),
             user_id: Some("test-viewer".into()),
             text,
             parts: vec![],
@@ -379,21 +380,19 @@ async fn automation_row(
                     >
                         (if enabled { "Disable" } else { "Enable" })
                     </button>
-                    <button
-                        type="button"
-                        class=(outline)
-                        :disabled=$(pending.get())
-                        @click=$(async move |_event| {
-                            pending.set(true);
-                            let next_error = delete_automation(id).await;
-                            if !next_error.is_empty() {
-                                error.set(next_error);
-                                pending.set(false);
-                            }
+                    <div @click=$(async move |_event: Event| {
+                        pending.set(true);
+                        let next_error = delete_automation(id).await;
+                        if !next_error.is_empty() {
+                            error.set(next_error);
+                            pending.set(false);
+                        }
+                    })>
+                        confirm_delete(attrs: attributes! {
+                            type="button"
+                            :disabled=$(pending.get())
                         })
-                    >
-                        "Delete"
-                    </button>
+                    </div>
                 </div>
             </div>
             <p

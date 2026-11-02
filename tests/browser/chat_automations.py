@@ -1,11 +1,12 @@
 """Exercise generic Rhai automations below chat, including real stream live gating."""
+
 import argparse
 import re
 import subprocess
 import time
 
-from playwright.sync_api import expect, sync_playwright
 from chat_layout import dashboard
+from playwright.sync_api import expect, sync_playwright
 
 
 def wait_status(context, base_url, allowed):
@@ -32,7 +33,10 @@ def check_automations(browser, base_url, viewport):
         inbox = page.locator("[data-chat-inbox]")
         # The automations are a sibling section below the complete chat panel.
         assert panel.evaluate("node => !node.closest('[data-chat-inbox]')")
-        assert panel.bounding_box()["y"] >= inbox.bounding_box()["y"] + inbox.bounding_box()["height"]
+        assert (
+            panel.bounding_box()["y"]
+            >= inbox.bounding_box()["y"] + inbox.bounding_box()["height"]
+        )
         listing = panel.locator("[data-automation-list]").bounding_box()
         log = panel.locator("[data-automation-log]").bounding_box()
         if viewport["width"] >= 768:
@@ -53,20 +57,24 @@ def check_automations(browser, base_url, viewport):
         editor.get_by_label("Automation name", exact=True).fill("Points")
         editor.get_by_label("Rhai script", exact=True).fill(
             'let points = if viewer.contains("points") { viewer.points } else { 0 }; '
-            'viewer.points = points + 1; '
+            "viewer.points = points + 1; "
             'message.author + " has " + viewer.points.to_string() + " points"'
         )
         panel.get_by_label("Automation enabled", exact=True).check()
         panel.get_by_label("Message pattern", exact=True).fill("[")
         panel.get_by_role("button", name="Save", exact=True).click()
-        expect(editor.get_by_role("alert")).to_contain_text(re.compile("pattern", re.IGNORECASE))
+        expect(editor.get_by_role("alert")).to_contain_text(
+            re.compile("pattern", re.IGNORECASE)
+        )
         expect(editor).to_be_visible()
         panel.get_by_label("Message pattern", exact=True).fill("(?i)^!point$")
         panel.get_by_role("button", name="Save", exact=True).click()
         expect(editor).not_to_be_visible()
         row = panel.locator("[data-automation-id]").first
-        expect(row.get_by_role("img", name="Enabled · no active stream", exact=True)).to_be_visible()
-        expect(row.get_by_role("button")).to_have_text(["Edit", "Disable", "Delete"])
+        expect(
+            row.get_by_role("img", name="Enabled · no active stream", exact=True)
+        ).to_be_visible()
+        expect(row.get_by_role("button", name="Delete", exact=True)).to_be_visible()
         expect(row.locator("code")).to_have_count(0)
         expect(row.get_by_text("(?i)^!point$", exact=True)).not_to_be_visible()
         dot = row.get_by_role("img")
@@ -75,9 +83,15 @@ def check_automations(browser, base_url, viewport):
         expect(dot).to_have_class(re.compile("bg-warn"))
 
         def send(text="!point"):
-            response = context.request.post(base_url + "/api/chat/test", data={
-                "source": "twitch", "author": "Test viewer", "user_id": "viewer-123", "text": text,
-            })
+            response = context.request.post(
+                base_url + "/api/chat/test",
+                data={
+                    "source": "twitch",
+                    "author": "test_viewer",
+                    "user_id": "viewer-123",
+                    "text": text,
+                },
+            )
             assert response.ok, response.text()
             return response.json()
 
@@ -85,13 +99,40 @@ def check_automations(browser, base_url, viewport):
         expect(panel).to_contain_text("No executions yet")
         config = context.request.get(base_url + "/api/config").json()
         target = f"rtmp://{config['server']['listen']}/live/local-ingest"
-        stream = subprocess.Popen([
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-re",
-            "-f", "lavfi", "-i", "color=c=black:s=320x180:r=10",
-            "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
-            "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
-            "-pix_fmt", "yuv420p", "-g", "20", "-c:a", "aac", "-f", "flv", target,
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        stream = subprocess.Popen(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-re",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=320x180:r=10",
+                "-f",
+                "lavfi",
+                "-i",
+                "anullsrc=r=44100:cl=mono",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-tune",
+                "zerolatency",
+                "-pix_fmt",
+                "yuv420p",
+                "-g",
+                "20",
+                "-c:a",
+                "aac",
+                "-f",
+                "flv",
+                target,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         wait_status(context, base_url, {"preparing", "preview_ready", "preview_failed"})
         send()
         expect(panel).to_contain_text("No executions yet")
@@ -99,20 +140,24 @@ def check_automations(browser, base_url, viewport):
         preview.goto(base_url + "/preview")
         preview.get_by_role("button", name="PUBLISH", exact=True).click()
         wait_status(context, base_url, {"live"})
-        expect(row.get_by_role("img", name="Enabled · live", exact=True)).to_be_visible()
+        expect(
+            row.get_by_role("img", name="Enabled · live", exact=True)
+        ).to_be_visible()
         expect(dot).to_have_class(re.compile("bg-signal"))
         send(" !POINT ")
-        expect(panel).to_contain_text("Test viewer has 1 points")
+        expect(panel).to_contain_text("test_viewer has 1 points")
         send()
-        expect(panel).to_contain_text("Test viewer has 2 points")
+        expect(panel).to_contain_text("test_viewer has 2 points")
         # Execution updates must preserve an open editor and its draft.
         row.get_by_role("button", name="Edit", exact=True).click()
         editor = page.get_by_role("dialog", name="Edit automation", exact=True)
         editor.get_by_label("Automation name", exact=True).fill("Unsaved draft")
         send()
-        expect(panel).to_contain_text("Test viewer has 3 points")
+        expect(panel).to_contain_text("test_viewer has 3 points")
         expect(editor).to_be_visible()
-        expect(editor.get_by_label("Automation name", exact=True)).to_have_value("Unsaved draft")
+        expect(editor.get_by_label("Automation name", exact=True)).to_have_value(
+            "Unsaved draft"
+        )
         assert editor.evaluate("node => node.matches(':modal')")
         bounds = editor.bounding_box()
         assert bounds["width"] <= viewport["width"]
@@ -122,12 +167,14 @@ def check_automations(browser, base_url, viewport):
         expect(row.get_by_role("img", name="Disabled", exact=True)).to_be_visible()
         expect(dot).to_have_class(re.compile("bg-live"))
         send()
-        expect(panel).not_to_contain_text("Test viewer has 4 points")
+        expect(panel).not_to_contain_text("test_viewer has 4 points")
         # Editing retains stored data and does not re-enable a disabled automation.
         row.get_by_role("button", name="Edit", exact=True).click()
         editor = page.get_by_role("dialog", name="Edit automation", exact=True)
         expect(editor).to_be_visible()
-        editor.get_by_label("Rhai script", exact=True).fill("viewer.points += 10; viewer.points.to_string()")
+        editor.get_by_label("Rhai script", exact=True).fill(
+            "viewer.points += 10; viewer.points.to_string()"
+        )
         editor.get_by_role("button", name="Save", exact=True).click()
         expect(editor).not_to_be_visible()
         expect(row.get_by_role("img", name="Disabled", exact=True)).to_be_visible()
@@ -140,11 +187,15 @@ def check_automations(browser, base_url, viewport):
         expect(panel.get_by_text("13", exact=True)).to_be_visible()
         preview.get_by_role("button", name="LIVE", exact=True).click()
         wait_status(context, base_url, {"preparing", "preview_ready", "preview_failed"})
-        expect(row.get_by_role("img", name="Enabled · no active stream", exact=True)).to_be_visible()
+        expect(
+            row.get_by_role("img", name="Enabled · no active stream", exact=True)
+        ).to_be_visible()
         send()
         expect(panel.get_by_text("23", exact=True)).to_have_count(0)
         assert not errors, errors
         row.get_by_role("button", name="Delete", exact=True).click()
+        expect(panel.locator("[data-automation-id]")).to_have_count(1)
+        row.get_by_role("button", name="Are you sure?", exact=True).click()
         expect(panel.locator("[data-automation-id]")).to_have_count(0)
         assert not errors, errors
         print(f"PASS: chat automations at {viewport['width']}×{viewport['height']}")
@@ -166,7 +217,10 @@ def main():
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         try:
-            for viewport in ({"width": 1440, "height": 900}, {"width": 390, "height": 844}):
+            for viewport in (
+                {"width": 1440, "height": 900},
+                {"width": 390, "height": 844},
+            ):
                 with dashboard(args.profile) as base_url:
                     check_automations(browser, base_url, viewport)
         finally:

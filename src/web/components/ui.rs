@@ -1,5 +1,6 @@
 pub mod button;
 pub mod card;
+pub mod confirm_delete;
 pub mod floating;
 pub mod form;
 pub mod icon;

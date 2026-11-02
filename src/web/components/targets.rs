@@ -1,14 +1,15 @@
 use crate::config::TargetConfig;
 use crate::server::state::AppHandle;
-use crate::web::components::ui::button::{ButtonSize, ButtonVariant, button, button_variants};
+use crate::web::components::ui::button::{ButtonVariant, button};
 use crate::web::components::ui::card::{card, card_content, card_footer};
+use crate::web::components::ui::confirm_delete::confirm_delete;
 use crate::web::components::ui::form::{form_field, secret_input};
 use crate::web::components::ui::input::input;
 use topcoat::{
     Result,
     context::{Cx, app_context},
-    runtime::{Event, procedure, signal},
-    view::{View, attributes, class, component, element_id, view},
+    runtime::{procedure, signal},
+    view::{View, attributes, component, element_id, view},
 };
 
 #[procedure]
@@ -72,7 +73,6 @@ pub async fn target_item(cx: &Cx, index: usize, target: TargetConfig) -> Result<
     let key_id = element_id(cx);
     let enabled = signal(cx, || target.enabled);
     let pending = signal(cx, || false);
-    let confirming_delete = signal(cx, || false);
     let target_name = target.name.clone();
 
     Ok(view! {
@@ -188,47 +188,13 @@ pub async fn target_item(cx: &Cx, index: usize, target: TargetConfig) -> Result<
                             <span>"Enabled"</span>
                         </button>
                     </div>
-                    <button
+                    confirm_delete(attrs: attributes! {
                         type="submit"
                         name="action"
                         value=(format!("remove_target:{index}"))
-                        class="group grid cursor-pointer overflow-hidden rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                        :data-confirming=$(confirming_delete.get())
-                        @click=$(|event: Event| {
-                            if !confirming_delete.get() {
-                                event.prevent_default();
-                                confirming_delete.set(true);
-                            }
-                        })
-                        @blur=$(|_event: Event| confirming_delete.set(false))
-                        @keydown=$(|event: Event| {
-                            if event.key == "Escape" {
-                                confirming_delete.set(false);
-                            }
-                        })
                         formaction="/api/config"
                         formnovalidate="formnovalidate"
-                        aria-live="polite"
-                    >
-                        <span
-                            class=(class!(
-                                button_variants(ButtonVariant::Destructive, ButtonSize::Md),
-                                "!bg-destructive/20 !text-red-300 pointer-events-none col-start-1 row-start-1 !transition-transform duration-200 ease-out group-data-[confirming=true]:-translate-x-full motion-reduce:!transition-none",
-                            ))
-                            :aria-hidden=$(confirming_delete.get())
-                        >
-                            "Delete"
-                        </span>
-                        <span
-                            class=(class!(
-                                button_variants(ButtonVariant::Destructive, ButtonSize::Md),
-                                "pointer-events-none col-start-1 row-start-1 translate-x-full !transition-transform duration-200 ease-out group-data-[confirming=true]:translate-x-0 motion-reduce:!transition-none",
-                            ))
-                            :aria-hidden=$(!confirming_delete.get())
-                        >
-                            "Are you sure?"
-                        </span>
-                    </button>
+                    })
                 </div>
             </div>
         </div>

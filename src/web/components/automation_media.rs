@@ -1,12 +1,13 @@
 use super::ui::{
     button::{ButtonSize, ButtonVariant, button_variants},
     card::{card, card_content, card_header, card_title},
+    confirm_delete::confirm_delete,
 };
 use crate::{chat::automations::alerts, server::state::AppHandle};
 use topcoat::{
     Result,
     context::{Cx, app_context},
-    view::{View, component, view},
+    view::{View, attributes, component, view},
 };
 
 #[component]
@@ -90,6 +91,7 @@ pub async fn automation_media(cx: &Cx) -> Result<impl View> {
                         <div
                             class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
                         >
+                            #[key(media.name)]
                             for media in library {
                                 let image = media.content_type.starts_with("image/");
                                 let url = format!("/api/alerts/media?name={}", media.name);
@@ -166,13 +168,9 @@ pub async fn automation_media(cx: &Cx) -> Result<impl View> {
                                                 ))
                                                 data-media-form=""
                                             >
-                                                <button
+                                                confirm_delete(attrs: attributes! {
                                                     type="submit"
-                                                    class="cursor-pointer font-mono text-[10px] text-muted-foreground uppercase transition-colors hover:text-destructive"
-                                                    aria-label=(format!("Delete {}", media.name))
-                                                >
-                                                    "Delete"
-                                                </button>
+                                                })
                                             </form>
                                         </div>
                                     </div>
