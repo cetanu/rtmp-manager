@@ -39,18 +39,12 @@ class ErrorToaster extends HTMLElement {
   observeInlineErrors() {
     const isErrorEl = (node) => {
       if (!node || node.nodeType !== Node.ELEMENT_NODE) return false;
-      if (node.getAttribute?.("role") === "alert" && !node.closest("error-toaster")) return true;
-      if (node.classList?.contains("text-destructive") || node.classList?.contains("text-live")) {
-        // Exclude metric success badges and execution logs
-        if (node.closest("[data-chat-outcomes]") || node.closest("[data-automation-log]")) return false;
-        return true;
-      }
-      return false;
+      return node.getAttribute?.("role") === "alert" && !node.closest("error-toaster");
     };
 
     const checkElement = (el) => {
       if (!isErrorEl(el)) return;
-      if (el.hidden || el.style.display === "none") return;
+      if (el.closest("[hidden]") || el.getClientRects().length === 0) return;
       const text = el.textContent?.trim();
       if (text) {
         this.show(text);
@@ -63,7 +57,7 @@ class ErrorToaster extends HTMLElement {
           for (const node of mutation.addedNodes) {
             checkElement(node);
             if (node.querySelectorAll) {
-              node.querySelectorAll("[role='alert'], .text-destructive, .text-live").forEach(checkElement);
+              node.querySelectorAll("[role='alert']").forEach(checkElement);
             }
           }
         } else if (mutation.type === "characterData") {

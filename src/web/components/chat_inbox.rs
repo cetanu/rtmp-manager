@@ -252,7 +252,7 @@ async fn poll_setup(signals: PollSetupSignals) -> Result<impl View> {
                         @input=$(move |event: Event| options.set(event.target.value))
                     ></textarea>
                 </label>
-                <p :hidden=$(error.get().is_empty()) class="text-sm text-destructive">
+                <p role="alert" :hidden=$(error.get().is_empty()) class="text-sm text-destructive">
                     $(error.get())
                 </p>
                 <div class="flex justify-center gap-3">
@@ -478,6 +478,7 @@ async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
                         "Clear results"
                     </button>
                     <p
+                        role="alert"
                         :hidden=$(pomo_error.get().is_empty())
                         class="text-xs text-destructive"
                     >
@@ -562,6 +563,7 @@ async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
                         error: &polling_error
                     )
                     <p
+                        role="alert"
                         :hidden=$(polling_error.get().is_empty())
                         class="text-xs text-destructive"
                     >
