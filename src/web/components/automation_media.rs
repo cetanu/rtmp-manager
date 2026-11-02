@@ -33,7 +33,7 @@ pub async fn automation_media(cx: &Cx) -> Result<impl View> {
                 card_header(
                     <div class="flex flex-wrap items-center justify-between gap-3 pb-3">
                         <div class="flex items-center gap-3">
-                            card_title("Media")
+                            card_title("capacity used")
                             <span class="font-mono text-[10px] text-muted-foreground">
                                 (format!("{count} / 100"))
                             </span>
@@ -54,7 +54,7 @@ pub async fn automation_media(cx: &Cx) -> Result<impl View> {
                                 data-media-form=""
                             >
                                 <label class=(primary) for="alert-media-upload">
-                                    "Upload media"
+                                    "Upload"
                                 </label>
                                 <input
                                     id="alert-media-upload"
@@ -71,7 +71,7 @@ pub async fn automation_media(cx: &Cx) -> Result<impl View> {
                 )
                 card_content(
                     <p class="mb-4 text-xs text-muted-foreground">
-                        "Images and sounds for your automation scripts. PNG, GIF, JPEG, WebP, MP3, WAV or Ogg · up to 10 MiB each."
+                        "Supported formats: PNG, GIF, JPEG, WebP, MP3, WAV or Ogg · Size limit: 10 MiB"
                     </p>
                     <p
                         data-media-status=""
@@ -83,12 +83,7 @@ pub async fn automation_media(cx: &Cx) -> Result<impl View> {
                             class="flex flex-col items-center justify-center gap-2 rounded-sm border border-dashed border-border bg-white/[0.02] px-5 py-8 text-center"
                         >
                             <p class="text-sm font-medium">
-                                "Give your winning moment a sound and a picture."
-                            </p>
-                            <p
-                                class="max-w-md text-xs leading-relaxed text-muted-foreground"
-                            >
-                                "Upload your first file, then use its filename in overlay.show. Use the script tester to inspect alerts before going live."
+                                "No files yet"
                             </p>
                         </div>
                     } else {
@@ -185,23 +180,6 @@ pub async fn automation_media(cx: &Cx) -> Result<impl View> {
                             }
                         </div>
                     }
-                    <details class="mt-4 border-t border-border pt-3">
-                        <summary
-                            class="cursor-pointer text-xs text-muted-foreground hover:text-foreground"
-                        >
-                            "Use media in a script"
-                        </summary>
-                        <div class="mt-3 grid gap-4 md:grid-cols-2">
-                            <pre
-                                class="overflow-x-auto rounded-sm border border-border bg-background p-3 font-mono text-xs leading-relaxed"
-                            >
-                                ("overlay.show(#{\n    text: message.author + \" WON!\",\n    image: \"jackpot.gif\",\n    sound: \"jackpot.mp3\",\n    duration_ms: 8000\n});")
-                            </pre>
-                            <p class="text-xs leading-relaxed text-muted-foreground">
-                                "Use the exact filename. Text, image and sound are optional; include at least one. Alerts queue in your OBS browser source after a successful live execution. Script tests list alerts without sending them to OBS."
-                            </p>
-                        </div>
-                    </details>
                 )
             )
         </section>
