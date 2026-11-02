@@ -47,6 +47,24 @@ fn definition() -> AutomationDefinition {
         consume: true,
     }
 }
+
+#[test]
+fn example_script_runs_with_and_without_a_viewer_id() {
+    let mut rule = definition();
+    rule.pattern = r"(?i)^!point(?:\s+(\w+))?$".into();
+    rule.script = runtime::EXAMPLE_SCRIPT.into();
+    let mut incoming = message("example");
+    let result = runtime::test_message(&rule, &incoming).unwrap().unwrap();
+    assert_eq!(result.state["total"], 1);
+    assert_eq!(result.viewer["visits"], 1);
+    assert_eq!(result.alerts.len(), 1);
+    assert!(result.output.starts_with("Viewer rolled "));
+
+    incoming.user_id = None;
+    let result = runtime::test_message(&rule, &incoming).unwrap().unwrap();
+    assert!(result.viewer.is_empty());
+    assert_eq!(result.alerts.len(), 1);
+}
 async fn data(db: &toasty::Db, id: u64, scope: &str) -> Map<String, Value> {
     load_data(&mut db.clone(), id, scope).await.unwrap()
 }

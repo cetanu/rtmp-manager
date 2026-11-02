@@ -11,6 +11,50 @@ use std::sync::Arc;
 #[derive(Clone)]
 struct Overlay(Arc<Mutex<Vec<Alert>>>);
 
+pub const EXAMPLE_SCRIPT: &str = r#"// This script runs when the message matches your pattern.
+// Example pattern: (?i)^!roll(?:\s+(\w+))?$
+// captures[0] is the full match; later entries are capture groups.
+let matched = captures[0];
+let argument = if captures.len() > 1 { captures[1] } else { "" };
+
+// Message fields: platform, id, author, user_id and text.
+// user_id is empty when the platform did not provide an account ID.
+let author = message.author;
+let platform = message.platform;
+let message_id = message.id;
+let text = message.text;
+
+// state is shared by this automation and persists between executions.
+let total = if state.contains("total") { state.total } else { 0 };
+state.total = total + 1;
+state.last_run_ms = now_ms; // Current Unix time in milliseconds.
+
+// viewer persists separately for each platform account. Only write it
+// when a user ID is available.
+let visits = 0;
+if message.user_id != "" {
+    visits = if viewer.contains("visits") { viewer.visits } else { 0 };
+    visits += 1;
+    viewer.visits = visits;
+}
+
+let roll = random_int(100); // A random integer from 1 through 100.
+let result = author + " rolled " + roll.to_string();
+
+// Alerts appear on the OBS alert overlay. At least one of text, image or
+// sound is required; duration_ms must be between 250 and 60000.
+overlay.show(#{
+    text: result,
+    // image: "your-uploaded-image.gif", // Uncomment after uploading it.
+    // sound: "your-uploaded-sound.mp3", // Uncomment after uploading it.
+    duration_ms: 8000
+});
+
+// The final string appears in Recent executions (it is not sent to chat).
+// Return () instead to leave the output empty.
+result
+"#;
+
 pub const GIVEAWAY_SCRIPT: &str = r#"// One attempt per platform account. Change these rules however you like.
 if message.user_id == "" { throw "A platform user ID is required"; }
 let attempts = if viewer.contains("attempts") { viewer.attempts } else { 0 };

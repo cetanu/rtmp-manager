@@ -456,7 +456,7 @@ async fn automations_panel(cx: &Cx) -> Result<impl View> {
                                 definition: AutomationDefinition {
                                     name: String::new(),
                                     pattern: String::new(),
-                                    script: String::new(),
+                                    script: crate::chat::automations::runtime::EXAMPLE_SCRIPT.to_owned(),
                                     enabled: false,
                                     consume: false,
                                 }
