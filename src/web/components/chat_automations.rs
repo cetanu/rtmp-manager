@@ -380,18 +380,19 @@ async fn automation_row(
                     >
                         (if enabled { "Disable" } else { "Enable" })
                     </button>
-                    <div @click=$(async move |_event: Event| {
-                        pending.set(true);
-                        let next_error = delete_automation(id).await;
-                        if !next_error.is_empty() {
-                            error.set(next_error);
-                            pending.set(false);
-                        }
-                    })>
-                        confirm_delete(attrs: attributes! {
-                            type="button"
-                            :disabled=$(pending.get())
+                    <div
+                        @click=$(async move |_event: Event| {
+                            pending.set(true);
+                            let next_error = delete_automation(id).await;
+                            if !next_error.is_empty() {
+                                error.set(next_error);
+                                pending.set(false);
+                            }
                         })
+                    >
+                        confirm_delete(
+                            attrs: attributes! { type="button" :disabled=$(pending.get()) }
+                        )
                     </div>
                 </div>
             </div>
@@ -455,7 +456,9 @@ async fn automations_panel(cx: &Cx) -> Result<impl View> {
                                 definition: AutomationDefinition {
                                     name: String::new(),
                                     pattern: String::new(),
-                                    script: crate::chat::automations::runtime::EXAMPLE_SCRIPT.to_owned(),
+                                    script: crate::chat::automations::runtime::EXAMPLE_SCRIPT.to_owned(
+
+                                    ),
                                     enabled: false,
                                     consume: false,
                                 }

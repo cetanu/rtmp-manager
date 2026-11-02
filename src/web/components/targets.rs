@@ -188,13 +188,15 @@ pub async fn target_item(cx: &Cx, index: usize, target: TargetConfig) -> Result<
                             <span>"Enabled"</span>
                         </button>
                     </div>
-                    confirm_delete(attrs: attributes! {
-                        type="submit"
-                        name="action"
-                        value=(format!("remove_target:{index}"))
-                        formaction="/api/config"
-                        formnovalidate="formnovalidate"
-                    })
+                    confirm_delete(
+                        attrs: attributes! {
+                            type="submit"
+                            name="action"
+                            value=(format!("remove_target:{index}"))
+                            formaction="/api/config"
+                            formnovalidate="formnovalidate"
+                        }
+                    )
                 </div>
             </div>
         </div>

@@ -83,9 +83,7 @@ pub async fn automation_media(cx: &Cx) -> Result<impl View> {
                         <div
                             class="flex flex-col items-center justify-center gap-2 rounded-sm border border-dashed border-border bg-white/[0.02] px-5 py-8 text-center"
                         >
-                            <p class="text-sm font-medium">
-                                "No files yet"
-                            </p>
+                            <p class="text-sm font-medium">"No files yet"</p>
                         </div>
                     } else {
                         <div
@@ -168,9 +166,7 @@ pub async fn automation_media(cx: &Cx) -> Result<impl View> {
                                                 ))
                                                 data-media-form=""
                                             >
-                                                confirm_delete(attrs: attributes! {
-                                                    type="submit"
-                                                })
+                                                confirm_delete(attrs: attributes! { type="submit" })
                                             </form>
                                         </div>
                                     </div>

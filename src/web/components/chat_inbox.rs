@@ -252,7 +252,11 @@ async fn poll_setup(signals: PollSetupSignals) -> Result<impl View> {
                         @input=$(move |event: Event| options.set(event.target.value))
                     ></textarea>
                 </label>
-                <p role="alert" :hidden=$(error.get().is_empty()) class="text-sm text-destructive">
+                <p
+                    role="alert"
+                    :hidden=$(error.get().is_empty())
+                    class="text-sm text-destructive"
+                >
                     $(error.get())
                 </p>
                 <div class="flex justify-center gap-3">
