@@ -13,6 +13,8 @@ pub struct Alert {
     #[serde(default)]
     pub image: String,
     #[serde(default)]
+    pub video: String,
+    #[serde(default)]
     pub sound: String,
     pub duration_ms: u64,
 }
@@ -25,10 +27,13 @@ impl Alert {
             "Alert duration must be 250–60,000 ms"
         );
         ensure!(
-            !self.text.trim().is_empty() || !self.image.is_empty() || !self.sound.is_empty(),
-            "Alert must contain text, an image or a sound"
+            !self.text.trim().is_empty()
+                || !self.image.is_empty()
+                || !self.video.is_empty()
+                || !self.sound.is_empty(),
+            "Alert must contain text, an image, a video or a sound"
         );
-        for name in [&self.image, &self.sound] {
+        for name in [&self.image, &self.video, &self.sound] {
             if !name.is_empty() {
                 validate_name(name)?;
             }
@@ -85,7 +90,11 @@ pub async fn get(db: &toasty::Db, name: &str) -> Result<Media> {
 pub async fn validate_media(db: &toasty::Db, alerts: &[Alert]) -> Result<()> {
     let library = list(db).await?;
     for alert in alerts {
-        for (name, prefix) in [(&alert.image, "image/"), (&alert.sound, "audio/")] {
+        for (name, prefix) in [
+            (&alert.image, "image/"),
+            (&alert.video, "video/"),
+            (&alert.sound, "audio/"),
+        ] {
             if name.is_empty() {
                 continue;
             }
@@ -118,13 +127,18 @@ pub async fn upload(db: &toasty::Db, name: String, bytes: &[u8]) -> Result<()> {
         "audio/wav"
     } else if bytes.starts_with(b"OggS") {
         "audio/ogg"
+    } else if bytes.len() >= 12
+        && bytes.get(4..8) == Some(b"ftyp")
+        && name.to_ascii_lowercase().ends_with(".mp4")
+    {
+        "video/mp4"
     } else if bytes.starts_with(b"ID3")
         || (bytes.len() >= 2 && bytes[0] == 0xff && bytes[1] & 0xe0 == 0xe0)
     {
         "audio/mpeg"
     } else {
         return Err(anyhow!(
-            "Supported media: PNG, GIF, JPEG, WebP, MP3, WAV and Ogg"
+            "Supported media: PNG, GIF, JPEG, WebP, MP4, MP3, WAV and Ogg"
         ));
     };
     let library = list(db).await?;

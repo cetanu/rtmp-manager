@@ -16,11 +16,13 @@
     let stopped = false;
     let timer;
     let audio;
+    let video;
     let generation = 0;
     const clear = () => {
       generation += 1;
       clearTimeout(timer);
       if (audio) { audio.pause(); audio.removeAttribute("src"); audio.load(); audio = null; }
+      if (video) { video.pause(); video.removeAttribute("src"); video.load(); video = null; }
       stage.replaceChildren();
     };
     const next = () => {
@@ -34,6 +36,20 @@
         img.alt = "";
         img.style.cssText = "max-width:90%;max-height:65%;object-fit:contain;flex-shrink:0";
         stage.append(img);
+      }
+      if (alert.video) {
+        video = document.createElement("video");
+        video.src = mediaUrl(alert.video);
+        video.playsInline = true;
+        video.style.cssText = "max-width:90%;max-height:65%;object-fit:contain;flex-shrink:0";
+        stage.append(video);
+        const currentGeneration = generation;
+        video.play().catch(() => {
+          if (stopped || generation !== currentGeneration) return;
+          const status = document.createElement("small");
+          status.textContent = "Video unavailable. Check the media file and browser playback permissions.";
+          stage.append(status);
+        });
       }
       if (alert.text) {
         const text = document.createElement("div");

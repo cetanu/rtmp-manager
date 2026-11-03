@@ -439,10 +439,30 @@ async fn media_library_preserves_bytes_and_checks_references() {
     let mut alert = alerts::Alert {
         text: String::new(),
         image: "winner.gif".into(),
+        video: String::new(),
         sound: String::new(),
         duration_ms: 1000,
     };
     alerts::validate_media(&db, &[alert.clone()]).await.unwrap();
     alert.sound = "winner.gif".into();
     assert!(alerts::validate_media(&db, &[alert]).await.is_err());
+    alerts::upload(&db, "winner.mp4".into(), b"\0\0\0\x18ftypisomexample")
+        .await
+        .unwrap();
+    let mut video_alert = alerts::Alert {
+        text: String::new(),
+        image: String::new(),
+        video: "winner.mp4".into(),
+        sound: String::new(),
+        duration_ms: 1000,
+    };
+    assert_eq!(
+        alerts::get(&db, "winner.mp4").await.unwrap().content_type,
+        "video/mp4"
+    );
+    alerts::validate_media(&db, &[video_alert.clone()])
+        .await
+        .unwrap();
+    video_alert.image = video_alert.video.clone();
+    assert!(alerts::validate_media(&db, &[video_alert]).await.is_err());
 }

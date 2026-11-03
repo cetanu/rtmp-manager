@@ -60,7 +60,7 @@ separate from storage and execution coordination.
 ### Script alerts and media
 
 Open **Media** in the app navigation. Upload
-images (PNG, GIF, JPEG, WebP) or sounds (MP3, WAV, Ogg), up to 10 MiB per file
+images (PNG, GIF, JPEG, WebP), MP4 videos or sounds (MP3, WAV, Ogg), up to 10 MiB per file
 and 100 files total. Files live in the shared SQLite database. Names are unique
 and may contain ASCII letters, numbers, dots, dashes and underscores.
 
@@ -80,9 +80,11 @@ if rolled == 1 {
 }
 ```
 
-Text, image and sound are optional, but at least one must be supplied.
+Text, image, video and sound are optional, but at least one must be supplied. Use
+`video: "clip.mp4"` to play an MP4 with its embedded audio. Playback stops at
+the alert duration; use a duration long enough to play the clip.
 `duration_ms` is required (250–60,000 ms); each execution may emit up to eight
-alerts. Media references must exist and match the requested image or sound type.
+alerts. Media references must exist and match the requested image, video or sound type.
 An invalid alert fails the script and discards its state changes and alerts.
 Deleting media makes scripts that reference it fail until their references are
 updated or the file is uploaded again.

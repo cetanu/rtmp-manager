@@ -64,7 +64,7 @@ pub async fn automation_media(cx: &Cx) -> Result<impl View> {
                                     type="file"
                                     name="media"
                                     required="required"
-                                    accept=".png,.gif,.jpg,.jpeg,.webp,.mp3,.wav,.ogg"
+                                    accept=".png,.gif,.jpg,.jpeg,.webp,.mp4,.mp3,.wav,.ogg"
                                 />
                             </form>
                         </div>
@@ -72,7 +72,7 @@ pub async fn automation_media(cx: &Cx) -> Result<impl View> {
                 )
                 card_content(
                     <p class="mb-4 text-xs text-muted-foreground">
-                        "Supported formats: PNG, GIF, JPEG, WebP, MP3, WAV or Ogg · Size limit: 10 MiB"
+                        "Supported formats: PNG, GIF, JPEG, WebP, MP4, MP3, WAV or Ogg · Size limit: 10 MiB"
                     </p>
                     <p
                         data-media-status=""
@@ -92,10 +92,11 @@ pub async fn automation_media(cx: &Cx) -> Result<impl View> {
                             #[key(media.name)]
                             for media in library {
                                 let image = media.content_type.starts_with("image/");
+                                let video = media.content_type.starts_with("video/");
                                 let url = format!("/api/alerts/media?name={}", media.name);
                                 let snippet = format!(
                                     "overlay.show(#{{ {}: \"{}\", duration_ms: 8000 }});",
-                                    if image { "image" } else { "sound" },
+                                    if image { "image" } else if video { "video" } else { "sound" },
                                     media.name,
                                 );
                                 <article
@@ -112,6 +113,8 @@ pub async fn automation_media(cx: &Cx) -> Result<impl View> {
                                                 loading="lazy"
                                                 class="max-h-full max-w-full object-contain"
                                             />
+                                        } else if video {
+                                            <video controls="controls" preload="metadata" aria-label=(format!("Preview {}", media.name)) src=(url) class="max-h-full max-w-full"></video>
                                         } else {
                                             <div
                                                 class="flex w-full min-w-0 flex-col items-center gap-3"
