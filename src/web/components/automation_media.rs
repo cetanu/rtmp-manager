@@ -96,7 +96,13 @@ pub async fn automation_media(cx: &Cx) -> Result<impl View> {
                                 let url = format!("/api/alerts/media?name={}", media.name);
                                 let snippet = format!(
                                     "overlay.show(#{{ {}: \"{}\", duration_ms: 8000 }});",
-                                    if image { "image" } else if video { "video" } else { "sound" },
+                                    if image {
+                                        "image"
+                                    } else if video {
+                                        "video"
+                                    } else {
+                                        "sound"
+                                    },
                                     media.name,
                                 );
                                 <article
@@ -114,7 +120,13 @@ pub async fn automation_media(cx: &Cx) -> Result<impl View> {
                                                 class="max-h-full max-w-full object-contain"
                                             />
                                         } else if video {
-                                            <video controls="controls" preload="metadata" aria-label=(format!("Preview {}", media.name)) src=(url) class="max-h-full max-w-full"></video>
+                                            <video
+                                                controls="controls"
+                                                preload="metadata"
+                                                aria-label=(format!("Preview {}", media.name))
+                                                src=(url)
+                                                class="max-h-full max-w-full"
+                                            ></video>
                                         } else {
                                             <div
                                                 class="flex w-full min-w-0 flex-col items-center gap-3"
