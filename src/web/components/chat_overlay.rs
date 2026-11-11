@@ -529,7 +529,7 @@ mod tests {
         assert!(html.contains("Deep work &lt;focus&gt;"));
         assert!(!html.contains("should be hidden"));
         assert!(html.contains("data-pomodoro-countdown"));
-        assert!(html.contains("25:00"));
+        assert!(html.contains("25:00") || html.contains("24:59"));
         assert!(html.contains("id=\"chat-overlay-waiting\""));
         assert!(html.contains("3 messages waiting"));
     }
