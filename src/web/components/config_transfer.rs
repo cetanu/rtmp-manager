@@ -8,7 +8,7 @@ use crate::web::components::ui::input::input;
 use crate::web::components::ui::textarea::textarea;
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::{Cx, context},
     runtime::{shard, signal},
     view::{View, attributes, component, view},
 };
@@ -57,7 +57,7 @@ pub async fn config_transfer(cx: &Cx) -> Result<impl View> {
 
 #[shard]
 pub async fn exported_config(cx: &Cx, open: bool) -> Result<impl View> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let config_json = if open {
         Some(
             app.config
@@ -93,7 +93,7 @@ pub async fn exported_config(cx: &Cx, open: bool) -> Result<impl View> {
 }
 
 #[component]
-pub async fn config_import_form() -> Result<impl View> {
+pub async fn config_import_form(cx: &Cx) -> Result<impl View> {
     Ok(view! {
         <form
             method="post"

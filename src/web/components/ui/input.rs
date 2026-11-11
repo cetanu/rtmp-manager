@@ -1,3 +1,4 @@
+use topcoat::context::Cx;
 use topcoat::{
     Result,
     view::{Attributes, StaticClass, View, class, component, view},
@@ -14,6 +15,6 @@ const INPUT: StaticClass = class!(
 
 /// A styled text input that forwards its attributes and custom classes.
 #[component]
-pub async fn input(#[default] mut attrs: Attributes) -> Result<impl View> {
+pub async fn input(cx: &Cx, #[default] mut attrs: Attributes) -> Result<impl View> {
     Ok(view! { <input class=(class!(INPUT, attrs.remove("class"))) (attrs)> })
 }

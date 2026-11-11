@@ -3,7 +3,7 @@ use crate::server::state::AppHandle;
 use crate::web::components::ui::button::{ButtonVariant, button};
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::{Cx, context},
     runtime::{Event, procedure, signal},
     view::{View, attributes, component, view},
 };
@@ -38,7 +38,7 @@ pub(crate) fn start_test_stream(app: &AppHandle) -> String {
 
 #[procedure]
 async fn send_test_webhooks(cx: &Cx) -> Result<()> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let config = app.config.get();
     let active_targets = config
         .targets

@@ -6,13 +6,13 @@ use super::ui::{
 use crate::{chat::automations::alerts, server::state::AppHandle};
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::{Cx, context},
     view::{View, attributes, component, view},
 };
 
 #[component]
 pub async fn automation_media(cx: &Cx) -> Result<impl View> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let library = alerts::list(app.config.database())
         .await
         .map_err(topcoat::Error::from_anyhow)?;

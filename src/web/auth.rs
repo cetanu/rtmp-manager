@@ -3,7 +3,7 @@ use crate::util::constant_time_eq;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::{Cx, context},
     router::{
         Body, Next, StatusCode, header, layer, parse_query_params,
         request::{headers, method, uri},
@@ -98,7 +98,7 @@ async fn basic_auth(cx: &Cx, body: Body, next: Next<'_>) -> Result<Response> {
         }
     }
 
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     if is_overlay_path(path) {
         if has_overlay_access(cx, app) {
             return next.run(cx, body).await;

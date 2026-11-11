@@ -6,11 +6,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use topcoat::asset::{Asset, AssetBundle, RouterBuilderAssetExt, asset};
-use topcoat::runtime::{PrefetchMode, RouterBuilderRuntimeExt};
+use topcoat::runtime::PrefetchMode;
 use topcoat::tailwind::stylesheet;
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::{Cx, context},
     router::{
         Router, RouterBuilderDiscoverExt,
         content::{
@@ -66,25 +66,9 @@ pub async fn run_web_server(
     let app = Router::builder()
         .discover()
         .assets(AssetBundle::load()?)
-        .layer(topcoat::router::BodyLimit::max(MAX_WEBHOOK_SIZE).at("/api/webhook"))
-        .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config"))
-        .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import"))
-        .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import-file"))
-        .layer(topcoat::router::BodyLimit::max(MAX_CHAT_TEST_BODY_SIZE).at("/api/chat/test"))
-        .layer(topcoat::router::BodyLimit::max(MAX_POMODORO_BODY_SIZE).at("/api/chat/pomodoro"))
-        .layer(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE).at("/api/chat/poll"))
-        .layer(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE).at("/api/chat/acknowledge"))
-        .layer(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE).at("/api/chat/poll/clear"))
-        .layer(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE).at("/api/test-stream"))
-        .layer(
-            topcoat::router::BodyLimit::max(
-                crate::chat::automations::alerts::MAX_MEDIA_BYTES + 64 * 1024,
-            )
-            .at("/api/alerts/media"),
-        )
-        .app_context(app_handle)
-        .runtime()
-        .prefetch(PrefetchMode::Never)
+        .with(app_handle)
+        .layer(topcoat::runtime::RuntimeLayer::new())
+        .with(PrefetchMode::Never)
         .build();
 
     tokio::spawn(async move {
@@ -144,7 +128,7 @@ fn page_title(page: &str) -> &'static str {
 }
 
 #[component]
-async fn app_page(active_page: &'static str) -> Result<impl View> {
+async fn app_page(cx: &Cx, active_page: &'static str) -> Result<impl View> {
     Ok(view! {
         <!DOCTYPE html>
         <html lang="en" class="dark">
@@ -223,57 +207,57 @@ async fn app_page(active_page: &'static str) -> Result<impl View> {
 }
 
 #[page("/")]
-async fn home() -> Result<impl View> {
+async fn home(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "preview") })
 }
 
 #[page("/overview")]
-async fn overview_page() -> Result<impl View> {
+async fn overview_page(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "preview") })
 }
 
 #[page("/preview")]
-async fn preview_page() -> Result<impl View> {
+async fn preview_page(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "preview") })
 }
 
 #[page("/metrics")]
-async fn metrics_page_route() -> Result<impl View> {
+async fn metrics_page_route(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "metrics") })
 }
 
 #[page("/chat")]
-async fn chat_page() -> Result<impl View> {
+async fn chat_page(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "chat") })
 }
 
 #[page("/media")]
-async fn media_page() -> Result<impl View> {
+async fn media_page(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "media") })
 }
 
 #[page("/overlay/chat")]
-async fn chat_overlay_route() -> Result<impl View> {
+async fn chat_overlay_route(cx: &Cx) -> Result<impl View> {
     Ok(view! { chat_overlay_page() })
 }
 
 #[page("/logs")]
-async fn logs_page() -> Result<impl View> {
+async fn logs_page(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "logs") })
 }
 
 #[page("/settings")]
-async fn settings_page() -> Result<impl View> {
+async fn settings_page(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "settings") })
 }
 
 #[page("/targets")]
-async fn targets_page() -> Result<impl View> {
+async fn targets_page(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "targets") })
 }
 
 #[page("/export")]
-async fn export_page() -> Result<impl View> {
+async fn export_page(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "export") })
 }
 
@@ -281,8 +265,8 @@ topcoat::router::path_param!(preview_file);
 
 #[route(GET "/api/preview/{preview_file}")]
 async fn get_preview_file(cx: &Cx) -> Result<Response> {
-    let app: &AppHandle = app_context(cx);
-    let name = topcoat::router::path_param::<PreviewFile>(cx);
+    let app: &AppHandle = context(cx);
+    let name = preview_file(cx);
     let Some(path) = app.stream.preview_file(name) else {
         return Err(not_found().into());
     };
@@ -312,7 +296,7 @@ async fn get_preview_file(cx: &Cx) -> Result<Response> {
 
 #[route(GET "/api/stream/status")]
 async fn get_stream_status(cx: &Cx) -> Result<Json<StreamStatus>> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     Ok(Json(app.stream.status()))
 }
 
@@ -321,9 +305,9 @@ struct AcknowledgeChatMessage {
     id: u64,
 }
 
-#[route(POST "/api/config")]
+#[route(POST "/api/config", with(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE)))]
 async fn update_config(cx: &Cx, body: Bytes) -> Result<Response> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
 
     let form: ConfigForm = match serde_qs::Config::new()
         .use_form_encoding(true)
@@ -366,9 +350,12 @@ async fn update_config(cx: &Cx, body: Bytes) -> Result<Response> {
     redirect.into_response(cx)
 }
 
-#[route(POST "/api/test-stream")]
+#[route(
+    POST "/api/test-stream",
+    with(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE))
+)]
 async fn run_test_stream(cx: &Cx) -> Result<Response> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let error = start_test_stream(app);
     if !error.is_empty() {
         return Err(bad_request(error).into());
@@ -381,9 +368,9 @@ async fn run_test_stream(cx: &Cx) -> Result<Response> {
         .into_response(cx)
 }
 
-#[route(GET "/api/config")]
+#[route(GET "/api/config", with(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE)))]
 async fn get_config(cx: &Cx) -> Result<Response> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     (
         [(topcoat::router::header::CACHE_CONTROL, "no-store, private")],
         Json(app.config.get().redacted()),
@@ -391,9 +378,12 @@ async fn get_config(cx: &Cx) -> Result<Response> {
         .into_response(cx)
 }
 
-#[route(POST "/api/config/import")]
+#[route(
+    POST "/api/config/import",
+    with(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE))
+)]
 async fn import_config(cx: &Cx, body: Bytes) -> Result<Response> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let (_, _changed, chat_changed) = match app.config.import(&body).await {
         Ok(res) => res,
         Err(error) => return Err(bad_request(error.to_string()).into()),
@@ -406,7 +396,10 @@ async fn import_config(cx: &Cx, body: Bytes) -> Result<Response> {
     topcoat::router::StatusCode::NO_CONTENT.into_response(cx)
 }
 
-#[route(POST "/api/config/import-file")]
+#[route(
+    POST "/api/config/import-file",
+    with(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE))
+)]
 async fn import_config_file(cx: &Cx, mut multipart: Multipart) -> Result<Response> {
     let mut config_bytes = None;
     while let Some(field) = multipart.next_field().await? {
@@ -419,7 +412,7 @@ async fn import_config_file(cx: &Cx, mut multipart: Multipart) -> Result<Respons
     let config_bytes =
         config_bytes.ok_or_else(|| bad_request("The form did not contain a config_file upload"))?;
 
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let (_, _changed, chat_changed) = match app.config.import(&config_bytes).await {
         Ok(res) => res,
         Err(error) => return Err(bad_request(error.to_string()).into()),
@@ -442,7 +435,7 @@ fn redirect_to(cx: &Cx, location: &'static str) -> Result<Response> {
 
 #[route(GET "/api/chat")]
 async fn get_chat_inbox(cx: &Cx) -> Result<Response> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let snapshot = app
         .chat
         .snapshot()
@@ -455,12 +448,15 @@ async fn get_chat_inbox(cx: &Cx) -> Result<Response> {
         .into_response(cx)
 }
 
-#[route(POST "/api/chat/acknowledge")]
+#[route(
+    POST "/api/chat/acknowledge",
+    with(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE))
+)]
 async fn acknowledge_chat_message(
     cx: &Cx,
     Json(request): Json<AcknowledgeChatMessage>,
 ) -> Result<Response> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     if !app
         .chat
         .acknowledge(request.id)
@@ -483,9 +479,12 @@ async fn acknowledge_chat_message(
     .into_response(cx)
 }
 
-#[route(POST "/api/chat/test")]
+#[route(
+    POST "/api/chat/test",
+    with(topcoat::router::BodyLimit::max(MAX_CHAT_TEST_BODY_SIZE))
+)]
 async fn send_test_chat_message(cx: &Cx, body: Bytes) -> Result<Response> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let request = if body.is_empty() {
         None
     } else {
@@ -518,9 +517,12 @@ struct StartPomodoroRequest {
     message: Option<String>,
 }
 
-#[route(POST "/api/chat/pomodoro")]
+#[route(
+    POST "/api/chat/pomodoro",
+    with(topcoat::router::BodyLimit::max(MAX_POMODORO_BODY_SIZE))
+)]
 async fn start_chat_pomodoro(cx: &Cx, body: Bytes) -> Result<Response> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let request: StartPomodoroRequest = if body.is_empty() {
         StartPomodoroRequest {
             duration_minutes: None,
@@ -548,9 +550,12 @@ async fn start_chat_pomodoro(cx: &Cx, body: Bytes) -> Result<Response> {
     Json(snapshot).into_response(cx)
 }
 
-#[route(DELETE "/api/chat/pomodoro")]
+#[route(
+    DELETE "/api/chat/pomodoro",
+    with(topcoat::router::BodyLimit::max(MAX_POMODORO_BODY_SIZE))
+)]
 async fn stop_chat_pomodoro(cx: &Cx) -> Result<Response> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     Json(
         app.chat
             .stop_pomodoro()
@@ -568,9 +573,9 @@ struct StartPollRequest {
     results_seconds: Option<u64>,
 }
 
-#[route(POST "/api/chat/poll")]
+#[route(POST "/api/chat/poll", with(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE)))]
 async fn start_chat_poll(cx: &Cx, Json(request): Json<StartPollRequest>) -> Result<Response> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let results_seconds = request
         .results_seconds
         .unwrap_or(app.config.get().chat.poll_results_seconds);
@@ -582,9 +587,12 @@ async fn start_chat_poll(cx: &Cx, Json(request): Json<StartPollRequest>) -> Resu
     Json(snapshot).into_response(cx)
 }
 
-#[route(DELETE "/api/chat/poll")]
+#[route(
+    DELETE "/api/chat/poll",
+    with(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE))
+)]
 async fn stop_chat_poll(cx: &Cx) -> Result<Response> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     Json(
         app.chat
             .stop_poll()
@@ -594,9 +602,12 @@ async fn stop_chat_poll(cx: &Cx) -> Result<Response> {
     .into_response(cx)
 }
 
-#[route(DELETE "/api/chat/poll/clear")]
+#[route(
+    DELETE "/api/chat/poll/clear",
+    with(topcoat::router::BodyLimit::max(MAX_POLL_BODY_SIZE))
+)]
 async fn clear_chat_poll(cx: &Cx) -> Result<Response> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     Json(
         app.chat
             .clear_poll()
@@ -610,7 +621,7 @@ async fn clear_chat_poll(cx: &Cx) -> Result<Response> {
 async fn metrics_events(
     cx: &Cx,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<SseEvent>> + use<>>> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let samples = app.metrics.subscribe();
     let initial = futures_util::stream::once(std::future::ready(
         SseEvent::new()
@@ -633,7 +644,7 @@ async fn metrics_events(
 async fn overlay_events(
     cx: &Cx,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<SseEvent>> + use<>>> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let chat = app.chat.clone();
     let chat_changes = app.chat.subscribe_changes();
     let initial_revision = chat_changes.borrow().revision;
@@ -679,9 +690,9 @@ async fn overlay_events(
     Ok(Sse::new(changes).keep_alive(KeepAlive::new()))
 }
 
-#[route(POST "/api/webhook")]
+#[route(POST "/api/webhook", with(topcoat::router::BodyLimit::max(MAX_WEBHOOK_SIZE)))]
 async fn receive_webhook(cx: &Cx, body: Bytes) -> Result<Response> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     app.metrics.add_webhooks_received(1);
     if body.len() > MAX_WEBHOOK_SIZE {
         app.metrics.add_webhooks_rejected(1);
@@ -792,14 +803,14 @@ struct WebhookCrcResponse {
     response_token: String,
 }
 
-#[route(GET "/api/webhook")]
+#[route(GET "/api/webhook", with(topcoat::router::BodyLimit::max(MAX_WEBHOOK_SIZE)))]
 async fn verify_webhook_crc(cx: &Cx) -> Result<Response> {
     let query: WebhookCrcQuery =
         parse_query_params(cx).map_err(|_| bad_request("Missing crc_token"))?;
     if query.crc_token.is_empty() {
         return Err(bad_request("Missing crc_token").into());
     }
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let config = app.config.get();
     let secret = config
         .chat
@@ -860,16 +871,8 @@ mod tests {
         let app = Router::builder()
             .discover()
             .assets(test_asset_bundle())
-            .layer(topcoat::router::BodyLimit::max(MAX_WEBHOOK_SIZE).at("/api/webhook"))
-            .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config"))
-            .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import"))
-            .layer(
-                topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import-file"),
-            )
-            .layer(topcoat::router::BodyLimit::max(MAX_CHAT_TEST_BODY_SIZE).at("/api/chat/test"))
-            .layer(topcoat::router::BodyLimit::max(MAX_POMODORO_BODY_SIZE).at("/api/chat/pomodoro"))
-            .app_context(app_handle.clone())
-            .runtime()
+            .with(app_handle.clone())
+            .layer(topcoat::runtime::RuntimeLayer::new())
             .build();
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1081,16 +1084,8 @@ mod tests {
         let app = Router::builder()
             .discover()
             .assets(test_asset_bundle())
-            .layer(topcoat::router::BodyLimit::max(MAX_WEBHOOK_SIZE).at("/api/webhook"))
-            .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config"))
-            .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import"))
-            .layer(
-                topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import-file"),
-            )
-            .layer(topcoat::router::BodyLimit::max(MAX_CHAT_TEST_BODY_SIZE).at("/api/chat/test"))
-            .layer(topcoat::router::BodyLimit::max(MAX_POMODORO_BODY_SIZE).at("/api/chat/pomodoro"))
-            .app_context(app_handle.clone())
-            .runtime()
+            .with(app_handle.clone())
+            .layer(topcoat::runtime::RuntimeLayer::new())
             .build();
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1159,16 +1154,8 @@ mod tests {
         let app = Router::builder()
             .discover()
             .assets(test_asset_bundle())
-            .layer(topcoat::router::BodyLimit::max(MAX_WEBHOOK_SIZE).at("/api/webhook"))
-            .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config"))
-            .layer(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import"))
-            .layer(
-                topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE).at("/api/config/import-file"),
-            )
-            .layer(topcoat::router::BodyLimit::max(MAX_CHAT_TEST_BODY_SIZE).at("/api/chat/test"))
-            .layer(topcoat::router::BodyLimit::max(MAX_POMODORO_BODY_SIZE).at("/api/chat/pomodoro"))
-            .app_context(app_handle.clone())
-            .runtime()
+            .with(app_handle.clone())
+            .layer(topcoat::runtime::RuntimeLayer::new())
             .build();
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

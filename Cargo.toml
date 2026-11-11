@@ -22,7 +22,8 @@ serde_valid = "2.0"
 hmac = "0.12.1"
 sha2 = "0.10.9"
 time = { version = "0.3.54", features = ["parsing"] }
-topcoat = { version = "0.11.0", features = ["anyhow", "ui", "tailwind", "asset", "multipart", "runtime", "sse", "l10n-datetime", "l10n-number"] }
+topcoat = { version = "0.12.0", features = ["anyhow", "ui", "tailwind", "asset", "multipart", "runtime", "sse", "l10n-datetime", "l10n-number"] }
+topcoat-asset = "0.12.0"
 serde_qs = "1.1.2"
 toasty = { version = "0.11", features = ["sqlite", "migration"] }
 toasty-cli = { version = "0.11" }
@@ -35,11 +36,11 @@ aws-lc-rs = "1.17.3"
 srt-tokio = "0.4.4"
 
 [build-dependencies]
-topcoat = { version = "0.11.0", default-features = false, features = ["tailwind"] }
+topcoat = { version = "0.12.0", default-features = false, features = ["tailwind"] }
 
 [dev-dependencies]
 bytes = "1.0"
-topcoat-asset = { version = "0.11.0", features = ["bundler"] }
+topcoat-asset = { version = "0.12.0", features = ["bundler"] }
 
 [profile.release]
 opt-level = "z"

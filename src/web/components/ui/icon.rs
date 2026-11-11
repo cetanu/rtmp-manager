@@ -1,10 +1,11 @@
+use topcoat::context::Cx;
 use topcoat::{
     Result,
     view::{View, component, view},
 };
 
 #[component]
-pub async fn trash_icon() -> Result<impl View> {
+pub async fn trash_icon(cx: &Cx) -> Result<impl View> {
     Ok(view! {
         <svg
             aria-hidden="true"
@@ -23,7 +24,7 @@ pub async fn trash_icon() -> Result<impl View> {
 }
 
 #[component]
-pub async fn eye_icon(visible: topcoat::runtime::Signal<bool>) -> Result<impl View> {
+pub async fn eye_icon(cx: &Cx, visible: topcoat::runtime::Signal<bool>) -> Result<impl View> {
     Ok(view! {
         <svg
             :hidden=$(visible.get())

@@ -7,7 +7,7 @@ use crate::web::components::ui::{
 };
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::{Cx, context},
     runtime::{Event, connected, procedure, shard, signal},
     view::{View, attributes, component, element_id, emit, live, view},
 };
@@ -22,7 +22,7 @@ async fn save_automation(
     enabled: bool,
     consume: bool,
 ) -> Result<String> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     Ok(app
         .chat
         .save_automation(
@@ -42,7 +42,7 @@ async fn save_automation(
 }
 
 #[procedure]
-async fn test_automation(pattern: String, script: String, text: String) -> Result<String> {
+async fn test_automation(cx: &Cx, pattern: String, script: String, text: String) -> Result<String> {
     let result = tokio::task::spawn_blocking(move || {
         let definition = AutomationDefinition {
             name: "Test".into(),
@@ -84,7 +84,7 @@ async fn test_automation(pattern: String, script: String, text: String) -> Resul
 
 #[procedure]
 async fn toggle_automation(cx: &Cx, id: u64, enabled: bool) -> Result<String> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     Ok(app
         .chat
         .toggle_automation(id, enabled)
@@ -96,7 +96,7 @@ async fn toggle_automation(cx: &Cx, id: u64, enabled: bool) -> Result<String> {
 
 #[procedure]
 async fn delete_automation(cx: &Cx, id: u64) -> Result<String> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     Ok(app
         .chat
         .delete_automation(id)
@@ -410,7 +410,7 @@ async fn automation_row(
 #[shard]
 pub async fn chat_automations(cx: &Cx) -> Result<impl View> {
     Ok(live! {
-        let app: &AppHandle = app_context(cx);
+        let app: &AppHandle = context(cx);
         let mut changes = app.chat.subscribe_changes();
         let mut stream = app.stream.subscribe_status();
         loop {
@@ -430,7 +430,7 @@ pub async fn chat_automations(cx: &Cx) -> Result<impl View> {
 
 #[component]
 async fn automations_panel(cx: &Cx) -> Result<impl View> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let snapshot = app
         .chat
         .automations()

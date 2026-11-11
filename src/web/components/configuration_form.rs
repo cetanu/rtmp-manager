@@ -4,13 +4,14 @@ use crate::web::components::notifications::notifications;
 use crate::web::components::server_settings::server_settings;
 use crate::web::components::targets::targets;
 use crate::web::components::web_auth::web_auth;
+use topcoat::context::Cx;
 use topcoat::{
     Result,
     view::{View, component, view},
 };
 
 #[component]
-pub async fn configuration_form(active_page: &'static str) -> Result<impl View> {
+pub async fn configuration_form(cx: &Cx, active_page: &'static str) -> Result<impl View> {
     Ok(view! {
         <form id="configForm" method="post" action="/api/config" class="relative">
             <input

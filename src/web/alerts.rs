@@ -2,12 +2,13 @@
 use super::*;
 use crate::chat::automations::alerts;
 use base64::{Engine, engine::general_purpose::STANDARD};
+use topcoat::context::Cx;
 use topcoat::view::ViewExt;
 
 pub(crate) const SCRIPT: Asset = asset!("static/alerts.js");
 
 #[page("/overlay/alerts")]
-async fn alert_overlay() -> Result<impl View> {
+async fn alert_overlay(cx: &Cx) -> Result<impl View> {
     Ok(view! {
         <!DOCTYPE html>
         <html lang="en">
@@ -33,7 +34,7 @@ async fn alert_overlay() -> Result<impl View> {
 async fn alert_events(
     cx: &Cx,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<SseEvent>> + use<>>> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     // A new connection starts with future alerts only; reconnecting never replays old sounds.
     let receiver = app.chat.subscribe_alerts();
     let stream = futures_util::stream::unfold(receiver, |mut receiver| async move {
@@ -55,10 +56,15 @@ struct MediaQuery {
     name: String,
 }
 
-#[route(GET "/api/alerts/media")]
+#[route(
+    GET "/api/alerts/media",
+    with(topcoat::router::BodyLimit::max(
+        crate::chat::automations::alerts::MAX_MEDIA_BYTES + 64 * 1024,
+    ))
+)]
 async fn serve_alert_media(cx: &Cx) -> Result<Response> {
     let query: MediaQuery = parse_query_params(cx)?;
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let media = alerts::get(app.config.database(), &query.name)
         .await
         .map_err(|_| not_found())?;
@@ -80,9 +86,14 @@ async fn serve_alert_media(cx: &Cx) -> Result<Response> {
     Ok(response)
 }
 
-#[route(POST "/api/alerts/media")]
+#[route(
+    POST "/api/alerts/media",
+    with(topcoat::router::BodyLimit::max(
+        crate::chat::automations::alerts::MAX_MEDIA_BYTES + 64 * 1024,
+    ))
+)]
 async fn upload_alert_media(cx: &Cx, mut multipart: Multipart) -> Result<Response> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     while let Some(field) = multipart.next_field().await? {
         if field.name() != Some("media") {
             continue;
@@ -100,7 +111,7 @@ async fn upload_alert_media(cx: &Cx, mut multipart: Multipart) -> Result<Respons
 #[route(POST "/api/alerts/media/delete")]
 async fn delete_alert_media(cx: &Cx) -> Result<Response> {
     let query: MediaQuery = parse_query_params(cx)?;
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     alerts::delete(app.config.database(), &query.name)
         .await
         .map_err(|e| bad_request(e.to_string()))?;

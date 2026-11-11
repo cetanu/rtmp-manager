@@ -4,13 +4,13 @@ use crate::web::components::ui::form::{clearable_secret_field, form_field};
 use crate::web::components::ui::input::input;
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::{Cx, context},
     view::{View, attributes, component, view},
 };
 
 #[component]
 pub async fn chat_settings(cx: &Cx) -> Result<impl View> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let chat = app.config.get().chat.clone();
 
     Ok(view! {

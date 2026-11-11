@@ -1,14 +1,14 @@
 use crate::server::state::{AppHandle, StreamState};
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::{Cx, context},
     runtime::{Event, connected, procedure, shard, signal},
     view::{View, component, emit, live, view},
 };
 
 #[procedure]
 async fn toggle_publishing(cx: &Cx, is_live: bool) -> Result<String> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let result = if is_live {
         app.stream.stop_publishing().await
     } else {
@@ -23,7 +23,7 @@ async fn toggle_publishing(cx: &Cx, is_live: bool) -> Result<String> {
 #[shard]
 pub async fn publishing_controls(cx: &Cx) -> Result<impl View> {
     Ok(live! {
-        let app: &AppHandle = app_context(cx);
+        let app: &AppHandle = context(cx);
         let mut changed = app.stream.subscribe_status();
         loop {
             let token = emit! { publishing_buttons() }?;
@@ -36,7 +36,7 @@ pub async fn publishing_controls(cx: &Cx) -> Result<impl View> {
 
 #[component]
 async fn publishing_buttons(cx: &Cx) -> Result<impl View> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let status = app.stream.status();
     let is_live = status.state == StreamState::Live;
     let toggle_available = is_live

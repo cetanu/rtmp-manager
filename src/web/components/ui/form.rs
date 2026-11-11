@@ -12,6 +12,7 @@ use topcoat::{
 /// A labeled form field with consistent vertical spacing.
 #[component]
 pub async fn form_field(
+    cx: &Cx,
     #[into] control_id: String,
     #[into] label_text: String,
     #[default] mut attrs: Attributes,
@@ -31,6 +32,7 @@ pub async fn form_field(
 /// Supporting copy shown below a form control.
 #[component]
 pub async fn field_description(
+    cx: &Cx,
     #[default] mut attrs: Attributes,
     #[default] child: Child<'_>,
 ) -> Result<impl View> {
@@ -80,6 +82,7 @@ pub async fn secret_input(
 /// The existing secret is never rendered into the DOM: blank preserves it.
 #[component]
 pub async fn clearable_secret_field(
+    cx: &Cx,
     #[into] control_id: String,
     #[into] name: String,
     #[into] label_text: String,
@@ -126,6 +129,7 @@ pub async fn clearable_secret_field(
 /// A labeled switch aligned as a single setting row.
 #[component]
 pub async fn switch_field(
+    cx: &Cx,
     #[into] control_id: String,
     #[into] name: String,
     #[into] label_text: String,

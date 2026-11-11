@@ -3,7 +3,7 @@ use crate::web::components::ui::card::{card, card_content, card_header, card_tit
 use std::collections::HashMap;
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::{Cx, context},
     view::{View, attributes, component, view},
 };
 
@@ -31,7 +31,7 @@ fn format_bytes(bytes: u64) -> String {
 
 #[component]
 pub async fn metrics_page(cx: &Cx) -> Result<impl View> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let ingest_bps = app.metrics.current_ingest_bps();
     let ingest_bytes = app.metrics.current_ingest_bytes();
     let egress_bytes = app.metrics.current_egress_bytes();

@@ -7,14 +7,14 @@ use crate::web::components::ui::form::{form_field, secret_input};
 use crate::web::components::ui::input::input;
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::{Cx, context},
     runtime::{procedure, signal},
     view::{View, attributes, component, element_id, view},
 };
 
 #[procedure]
 async fn set_target_enabled(cx: &Cx, index: usize, name: String, enabled: bool) -> Result<String> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     match app
         .config
         .set_target_enabled(index, Some(&name), enabled)
@@ -30,7 +30,7 @@ async fn set_target_enabled(cx: &Cx, index: usize, name: String, enabled: bool) 
 
 #[component]
 pub async fn targets(cx: &Cx) -> Result<impl View> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let targets = app.config.get().targets.clone();
 
     Ok(view! {

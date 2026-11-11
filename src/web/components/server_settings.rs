@@ -4,13 +4,13 @@ use crate::web::components::ui::form::{form_field, secret_input, switch_field};
 use crate::web::components::ui::input::input;
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::{Cx, context},
     view::{View, attributes, component, view},
 };
 
 #[component]
 pub async fn server_settings(cx: &Cx) -> Result<impl View> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let config = app.config.get();
     Ok(view! {
         card(

@@ -4,13 +4,13 @@ use crate::web::components::ui::form::{field_description, form_field, secret_inp
 use crate::web::components::ui::input::input;
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::{Cx, context},
     view::{View, attributes, component, view},
 };
 
 #[component]
 pub async fn web_auth(cx: &Cx) -> Result<impl View> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let auth = app.config.get().web_auth.clone();
     Ok(view! {
         card(

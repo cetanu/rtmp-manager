@@ -1,3 +1,4 @@
+use topcoat::context::Cx;
 use topcoat::{
     Result,
     view::{Attributes, Child, Class, StaticClass, View, class, component, view},
@@ -82,6 +83,7 @@ pub fn button_variants(
 /// A styled button with configurable variant, size, attributes, and content.
 #[component]
 pub async fn button(
+    cx: &Cx,
     #[default] variant: ButtonVariant,
     #[default] size: ButtonSize,
     #[default] mut attrs: Attributes,
@@ -105,6 +107,7 @@ pub async fn button(
 /// A link rendered with the same variants and sizing as [`button`].
 #[component]
 pub async fn button_link(
+    cx: &Cx,
     #[default] variant: ButtonVariant,
     #[default] size: ButtonSize,
     #[default] mut attrs: Attributes,

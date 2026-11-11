@@ -1,3 +1,4 @@
+use topcoat::context::Cx;
 use topcoat::{
     Result,
     view::{Attributes, Child, StaticClass, View, class, component, view},
@@ -13,6 +14,7 @@ const LABEL: StaticClass = class!(
 /// A styled caption for a form control.
 #[component]
 pub async fn label(
+    cx: &Cx,
     #[default] mut attrs: Attributes,
     #[default] child: Child<'_>,
 ) -> Result<impl View> {

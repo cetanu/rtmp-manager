@@ -6,14 +6,14 @@ use crate::web::components::ui::button::{ButtonSize, ButtonVariant, button_varia
 use crate::web::components::ui::card::{card, card_content, card_footer};
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::{Cx, context},
     runtime::{Event, connected, procedure, record, shard, signal},
     view::{View, attributes, component, emit, live, view},
 };
 
 #[procedure]
 async fn acknowledge_chat(cx: &Cx, displayed_id: String) -> Result<()> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let displayed_id = displayed_id.parse().map_err(|error| {
         topcoat::router::error::bad_request(format!("Invalid displayed chat message ID: {error}"))
     })?;
@@ -33,7 +33,7 @@ async fn acknowledge_chat(cx: &Cx, displayed_id: String) -> Result<()> {
 
 #[procedure]
 async fn clear_chat_messages(cx: &Cx) -> Result<()> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     app.chat
         .clear_messages()
         .await
@@ -43,6 +43,7 @@ async fn clear_chat_messages(cx: &Cx) -> Result<()> {
 
 #[component]
 async fn chat_toggle(
+    cx: &Cx,
     label: &'static str,
     platform: String,
     enabled: &topcoat::runtime::Signal<bool>,
@@ -86,7 +87,7 @@ async fn chat_toggle(
 
 #[procedure("/api/chat/test-message")]
 async fn send_test_chat(cx: &Cx) -> Result<()> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     app.chat
         .enqueue_test(None)
         .await
@@ -96,7 +97,7 @@ async fn send_test_chat(cx: &Cx) -> Result<()> {
 
 #[procedure]
 async fn set_chat_toggle(cx: &Cx, platform: String, enabled: bool) -> Result<String> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     match platform.as_str() {
         "queue" => app
             .set_queue_mode(enabled)
@@ -125,7 +126,7 @@ async fn set_chat_toggle(cx: &Cx, platform: String, enabled: bool) -> Result<Str
 
 #[procedure]
 async fn start_pomodoro(cx: &Cx) -> Result<String> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let chat = app.config.get().chat.clone();
     match app
         .chat
@@ -142,7 +143,7 @@ async fn start_pomodoro(cx: &Cx) -> Result<String> {
 
 #[procedure]
 async fn stop_pomodoro(cx: &Cx) -> Result<()> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     app.chat
         .stop_pomodoro()
         .await
@@ -152,7 +153,7 @@ async fn stop_pomodoro(cx: &Cx) -> Result<()> {
 
 #[procedure]
 async fn start_poll(cx: &Cx, question: String, options_text: String) -> Result<String> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let options = options_text
         .lines()
         .map(str::trim)
@@ -175,7 +176,7 @@ async fn start_poll(cx: &Cx, question: String, options_text: String) -> Result<S
 
 #[procedure]
 async fn stop_poll(cx: &Cx) -> Result<()> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     app.chat
         .stop_poll()
         .await
@@ -185,7 +186,7 @@ async fn stop_poll(cx: &Cx) -> Result<()> {
 
 #[procedure]
 async fn clear_poll(cx: &Cx) -> Result<()> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     app.chat
         .clear_poll()
         .await
@@ -210,7 +211,7 @@ struct PollSetupSignals {
 }
 
 #[component]
-async fn poll_setup(signals: PollSetupSignals) -> Result<impl View> {
+async fn poll_setup(cx: &Cx, signals: PollSetupSignals) -> Result<impl View> {
     let PollSetupSignals {
         question,
         options,
@@ -313,7 +314,7 @@ struct InboxControls {
 #[shard]
 pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
     Ok(live! {
-        let app: &AppHandle = app_context(cx);
+        let app: &AppHandle = context(cx);
         let mut changed = app.chat.subscribe_changes();
         let mut config_changed = app.config.subscribe();
         loop {
@@ -333,7 +334,7 @@ pub async fn chat_inbox(cx: &Cx) -> Result<impl View> {
 
 #[component]
 async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let overlay_token = app.config.get().web_auth.overlay_token.clone();
     let initial_snapshot = app
         .chat
@@ -607,7 +608,7 @@ async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
 
 #[component]
 async fn inbox_messages(cx: &Cx) -> Result<impl View> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let queue_mode = app.config.get().chat.queue_mode;
     let snapshot = app
         .chat
@@ -784,7 +785,11 @@ async fn inbox_messages(cx: &Cx) -> Result<impl View> {
 }
 
 #[component]
-pub async fn chat_message_card(message: ChatMessage, highlighted: bool) -> Result<impl View> {
+pub async fn chat_message_card(
+    cx: &Cx,
+    message: ChatMessage,
+    highlighted: bool,
+) -> Result<impl View> {
     let row_class = if highlighted {
         "grid grid-cols-[1.25rem_minmax(0,1fr)] gap-2 rounded-md bg-primary/10 px-2 py-1.5 ring-1 ring-primary/30"
     } else {

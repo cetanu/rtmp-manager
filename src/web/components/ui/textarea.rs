@@ -1,3 +1,4 @@
+use topcoat::context::Cx;
 use topcoat::{
     Result,
     view::{Attributes, Child, StaticClass, View, class, component, view},
@@ -14,6 +15,7 @@ const TEXTAREA: StaticClass = class!(
 /// A styled multi-line input that forwards its attributes and child content.
 #[component]
 pub async fn textarea(
+    cx: &Cx,
     #[default] mut attrs: Attributes,
     #[default] child: Child<'_>,
 ) -> Result<impl View> {

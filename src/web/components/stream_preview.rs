@@ -3,13 +3,13 @@ use crate::web::components::publishing_controls::publishing_controls;
 use crate::web::components::ui::card::{card, card_content, card_header};
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::{Cx, context},
     runtime::{connected, shard},
     view::{Child, View, component, emit, live, view},
 };
 
 #[component]
-pub async fn stream_preview() -> Result<impl View> {
+pub async fn stream_preview(cx: &Cx) -> Result<impl View> {
     Ok(view! {
         card(
             card_header(publishing_controls())
@@ -19,7 +19,7 @@ pub async fn stream_preview() -> Result<impl View> {
 }
 
 #[component]
-pub async fn stream_preview_player(#[default] child: Child<'_>) -> Result<impl View> {
+pub async fn stream_preview_player(cx: &Cx, #[default] child: Child<'_>) -> Result<impl View> {
     Ok(view! {
         <rtmp-preview class="block">
             <div
@@ -46,7 +46,7 @@ pub async fn stream_preview_player(#[default] child: Child<'_>) -> Result<impl V
 #[shard]
 pub async fn stream_preview_status(cx: &Cx) -> Result<impl View> {
     Ok(live! {
-        let app: &AppHandle = app_context(cx);
+        let app: &AppHandle = context(cx);
         let mut changed = app.stream.subscribe_status();
         let mut metrics_changed = app.metrics.subscribe();
         loop {
@@ -64,7 +64,7 @@ pub async fn stream_preview_status(cx: &Cx) -> Result<impl View> {
 
 #[component]
 async fn preview_status(cx: &Cx) -> Result<impl View> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let status = app.stream.status();
     let ready = matches!(
         status.state,

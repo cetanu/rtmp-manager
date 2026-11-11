@@ -3,13 +3,13 @@ use crate::web::components::ui::floating::FloatingAlign;
 use crate::web::components::ui::popover::{popover, popover_content, popover_trigger};
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::{Cx, context},
     runtime::{connected, shard},
     view::{View, attributes, component, element_id, emit, live, view},
 };
 
 #[component]
-pub async fn webhook_audit() -> Result<impl View> {
+pub async fn webhook_audit(cx: &Cx) -> Result<impl View> {
     Ok(view! {
         <section class="mt-4" aria-labelledby="webhook-audit-heading">
             <div class="mb-2 flex items-center justify-between gap-4">
@@ -30,7 +30,7 @@ pub async fn webhook_audit() -> Result<impl View> {
 #[shard]
 async fn webhook_audit_table(cx: &Cx) -> Result<impl View> {
     Ok(live! {
-        let app: &AppHandle = app_context(cx);
+        let app: &AppHandle = context(cx);
         let mut changed = app.webhook_audit.subscribe();
         loop {
             let token = emit! { audit_entries() }?;
@@ -43,7 +43,7 @@ async fn webhook_audit_table(cx: &Cx) -> Result<impl View> {
 
 #[component]
 async fn audit_entries(cx: &Cx) -> Result<impl View> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let entries = app.webhook_audit.snapshot();
 
     Ok(view! {

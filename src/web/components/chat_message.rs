@@ -1,12 +1,17 @@
 use crate::chat::{ChatMessage, ChatMessagePart};
 use crate::web::components::chat_source::{chat_source_icon, source_color};
+use topcoat::context::Cx;
 use topcoat::{
     Result,
     view::{View, ViewExt, component, view},
 };
 
 #[component]
-async fn chat_message_part(part: ChatMessagePart, text_class: &'static str) -> Result<impl View> {
+async fn chat_message_part(
+    cx: &Cx,
+    part: ChatMessagePart,
+    text_class: &'static str,
+) -> Result<impl View> {
     Ok(match part {
         ChatMessagePart::Text(text) => view! { <span class=(text_class)>(text)</span> }.boxed(),
         ChatMessagePart::Emoji { alt, url } => view! {
@@ -24,6 +29,7 @@ async fn chat_message_part(part: ChatMessagePart, text_class: &'static str) -> R
 
 #[component]
 async fn chat_message_parts(
+    cx: &Cx,
     parts: Vec<ChatMessagePart>,
     text_class: &'static str,
 ) -> Result<impl View> {
@@ -36,6 +42,7 @@ async fn chat_message_parts(
 
 #[component]
 pub(crate) async fn chat_message_card(
+    cx: &Cx,
     message: ChatMessage,
     row_class: &'static str,
     highlighted: bool,

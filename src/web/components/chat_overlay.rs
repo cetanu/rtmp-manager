@@ -4,7 +4,7 @@ use crate::util::now_unix_ms;
 use crate::web::components::chat_message::chat_message_card;
 use topcoat::{
     Result,
-    context::{Cx, app_context},
+    context::{Cx, context},
     view::{View, ViewExt, component, view},
 };
 
@@ -183,7 +183,7 @@ body:not([data-theme]):not([data-highlight="false"]) .chat-overlay-message[data-
 "#;
 
 #[component]
-pub async fn chat_overlay_page() -> Result<impl View> {
+pub async fn chat_overlay_page(cx: &Cx) -> Result<impl View> {
     Ok(view! {
         <!DOCTYPE html>
         <html
@@ -219,7 +219,7 @@ pub async fn chat_overlay_page() -> Result<impl View> {
 
 #[component]
 pub async fn chat_overlay(cx: &Cx) -> Result<impl View> {
-    let app: &AppHandle = app_context(cx);
+    let app: &AppHandle = context(cx);
     let snapshot = app
         .chat
         .snapshot()
@@ -240,6 +240,7 @@ pub async fn chat_overlay(cx: &Cx) -> Result<impl View> {
 
 #[component]
 pub async fn chat_overlay_messages(
+    cx: &Cx,
     messages: Vec<ChatMessage>,
     pomodoro: Option<PomodoroState>,
     poll: Option<PollState>,
@@ -394,7 +395,7 @@ pub async fn render_chat_overlay_messages(
     queued: usize,
 ) -> Result<String> {
     let cx = Cx::default();
-    let __cx = &cx;
+    let cx = &cx;
     let view = view! {
         chat_overlay_messages(
             messages: messages,
@@ -415,7 +416,11 @@ pub(crate) fn overlay_message_class(highlighted: bool) -> &'static str {
 }
 
 #[component]
-pub async fn chat_overlay_message(message: ChatMessage, highlighted: bool) -> Result<impl View> {
+pub async fn chat_overlay_message(
+    cx: &Cx,
+    message: ChatMessage,
+    highlighted: bool,
+) -> Result<impl View> {
     let row_class = overlay_message_class(highlighted);
 
     Ok(view! {

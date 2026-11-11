@@ -1,4 +1,5 @@
 use crate::chat::Source;
+use topcoat::context::Cx;
 use topcoat::{
     Result,
     view::{View, component, view},
@@ -72,7 +73,7 @@ pub(crate) fn source_color(source: Source) -> &'static str {
 }
 
 #[component]
-pub(crate) async fn chat_source_icon(source: Source) -> Result<impl View> {
+pub(crate) async fn chat_source_icon(cx: &Cx, source: Source) -> Result<impl View> {
     let style = source_style(source);
 
     Ok(view! {

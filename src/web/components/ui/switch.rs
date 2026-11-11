@@ -1,3 +1,4 @@
+use topcoat::context::Cx;
 use topcoat::{
     Result,
     view::{Attributes, StaticClass, View, class, component, view},
@@ -17,7 +18,7 @@ const THUMB: StaticClass = class!(
 
 /// An accessible checkbox rendered as an on/off switch.
 #[component]
-pub async fn switch(#[default] mut attrs: Attributes) -> Result<impl View> {
+pub async fn switch(cx: &Cx, #[default] mut attrs: Attributes) -> Result<impl View> {
     Ok(view! {
         <span
             class=(class!(
