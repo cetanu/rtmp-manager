@@ -62,7 +62,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
-          tool: topcoat-cli@0.10.0
+          tool: topcoat-cli@0.12.1
       - run: topcoat fmt --check --rustfmt src build.rs tests
       - run: cargo clippy --all-targets --all-features -- -D warnings
 
@@ -91,7 +91,7 @@ jobs:
       - name: Install Topcoat CLI
         uses: taiki-e/install-action@v2
         with:
-          tool: topcoat-cli@0.10.0
+          tool: topcoat-cli@0.12.1
       - name: Install FFmpeg
         run: sudo apt-get update && sudo apt-get install --yes ffmpeg
       - name: Build release binary and assets

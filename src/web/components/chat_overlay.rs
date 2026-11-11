@@ -404,7 +404,7 @@ pub async fn render_chat_overlay_messages(
             queued: queued
         )
     };
-    Ok(view.single().await?.render(&cx))
+    Ok(view.single().await?.render(cx))
 }
 
 pub(crate) fn overlay_message_class(highlighted: bool) -> &'static str {
