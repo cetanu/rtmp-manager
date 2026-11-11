@@ -65,6 +65,11 @@ pub async fn run_web_server(
     let mut stream_status = app_handle.stream.subscribe_status();
     let app = Router::builder()
         .discover()
+        .with(
+            topcoat::metadata::Metadata::new()
+                .description("Configuration dashboard for the RTMP Stream Multiplexer.")
+                .theme_color("#0b0e14"),
+        )
         .assets(AssetBundle::load()?)
         .with(app_handle)
         .layer(topcoat::runtime::RuntimeLayer::new())
@@ -114,19 +119,6 @@ fn metrics_sample_interval(status: StreamStatus) -> Duration {
     }
 }
 
-fn page_title(page: &str) -> &'static str {
-    match page {
-        "metrics" => "Metrics",
-        "chat" => "Chat",
-        "media" => "Media",
-        "logs" => "Logs",
-        "settings" => "Settings",
-        "targets" => "Targets",
-        "export" => "Export",
-        _ => "Preview",
-    }
-}
-
 #[component]
 async fn app_page(cx: &Cx, active_page: &'static str) -> Result<impl View> {
     Ok(view! {
@@ -135,13 +127,8 @@ async fn app_page(cx: &Cx, active_page: &'static str) -> Result<impl View> {
             <head>
                 <meta charset="UTF-8" />
                 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-                <title>(format!("{} · RTMP Manager", page_title(active_page)))</title>
-                <meta
-                    name="description"
-                    content="Configuration dashboard for the RTMP Stream Multiplexer."
-                />
+                topcoat::metadata::tags()
                 <link rel="icon" type="image/png" href=(FAVICON) />
-                <meta name="theme-color" content="#0b0e14" />
                 <link rel="preconnect" href="https://fonts.googleapis.com" />
                 <link
                     rel="preconnect"
@@ -206,32 +193,41 @@ async fn app_page(cx: &Cx, active_page: &'static str) -> Result<impl View> {
     })
 }
 
-#[page("/")]
+#[page("/", with(topcoat::metadata::Metadata::new().title("Preview · RTMP Manager")))]
 async fn home(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "preview") })
 }
 
-#[page("/overview")]
+#[page(
+    "/overview",
+    with(topcoat::metadata::Metadata::new().title("Preview · RTMP Manager"))
+)]
 async fn overview_page(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "preview") })
 }
 
-#[page("/preview")]
+#[page(
+    "/preview",
+    with(topcoat::metadata::Metadata::new().title("Preview · RTMP Manager"))
+)]
 async fn preview_page(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "preview") })
 }
 
-#[page("/metrics")]
+#[page(
+    "/metrics",
+    with(topcoat::metadata::Metadata::new().title("Metrics · RTMP Manager"))
+)]
 async fn metrics_page_route(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "metrics") })
 }
 
-#[page("/chat")]
+#[page("/chat", with(topcoat::metadata::Metadata::new().title("Chat · RTMP Manager")))]
 async fn chat_page(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "chat") })
 }
 
-#[page("/media")]
+#[page("/media", with(topcoat::metadata::Metadata::new().title("Media · RTMP Manager")))]
 async fn media_page(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "media") })
 }
@@ -241,22 +237,31 @@ async fn chat_overlay_route(cx: &Cx) -> Result<impl View> {
     Ok(view! { chat_overlay_page() })
 }
 
-#[page("/logs")]
+#[page("/logs", with(topcoat::metadata::Metadata::new().title("Logs · RTMP Manager")))]
 async fn logs_page(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "logs") })
 }
 
-#[page("/settings")]
+#[page(
+    "/settings",
+    with(topcoat::metadata::Metadata::new().title("Settings · RTMP Manager"))
+)]
 async fn settings_page(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "settings") })
 }
 
-#[page("/targets")]
+#[page(
+    "/targets",
+    with(topcoat::metadata::Metadata::new().title("Targets · RTMP Manager"))
+)]
 async fn targets_page(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "targets") })
 }
 
-#[page("/export")]
+#[page(
+    "/export",
+    with(topcoat::metadata::Metadata::new().title("Export · RTMP Manager"))
+)]
 async fn export_page(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "export") })
 }
@@ -1187,6 +1192,7 @@ mod tests {
             .await
             .unwrap();
 
+        assert!(html_content.contains("<title>Chat · RTMP Manager</title>"));
         assert!(html_content.contains("chat-test-button"));
         assert!(html_content.contains("/api/chat/test-message"));
         let resp = client
