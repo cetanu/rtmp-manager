@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.2](https://github.com/cetanu/rtmp-manager/compare/v0.12.1...v0.12.2) - 2026-11-13
+
+### Fixed
+
+- *(overlay)* center alert positioning coordinates
+
+### Other
+
+- update deps
+- fix workspace versioning
+- add license
+
 ## [0.12.1](https://github.com/cetanu/rtmp-manager/compare/v0.12.0...v0.12.1) - 2026-11-13
 
 ### Added
