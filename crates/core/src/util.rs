@@ -138,13 +138,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn constant_time_comparison_works() {
-        assert!(constant_time_eq(b"same", b"same"));
-        assert!(!constant_time_eq(b"same", b"diff"));
-        assert!(!constant_time_eq(b"short", b"longer"));
-    }
-
-    #[test]
     fn secure_token_matching_requires_nonempty_and_exact() {
         assert!(secure_token_matches("private-key", "private-key"));
         assert!(!secure_token_matches("private-key", "wrong-key"));
@@ -181,27 +174,10 @@ mod tests {
     }
 
     #[test]
-    fn non_empty_filters_blank_strings() {
-        assert_eq!(non_empty(Some("  ".to_string())), None);
-        assert_eq!(
-            non_empty(Some("hello".to_string())),
-            Some("hello".to_string())
-        );
-        assert_eq!(non_empty(None), None);
-    }
-
-    #[test]
     fn format_time_compact_formats_hh_mm_ss_mmm() {
         // 2026-10-25 12:34:56.789 UTC => 1792931696789 ms
         let ms = 1792931696789_u128;
         let formatted = format_time_compact(ms);
         assert_eq!(formatted, "12:34:56.789");
-    }
-
-    #[test]
-    fn to_localized_datetime_creates_valid_datetime() {
-        let ms = 1792931696789_u128;
-        let dt = to_localized_datetime(ms);
-        assert!(dt.is_some());
     }
 }

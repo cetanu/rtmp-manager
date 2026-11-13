@@ -169,13 +169,19 @@ def check_chat_layout(browser, base_url, viewport):
         other.close()
 
         # The OBS viewport follows the latest message as content and size change.
-        page.get_by_role(
+        queue_switch = page.get_by_role(
             "switch", name="Toggle Queue incoming chat", exact=True
-        ).click()
+        )
+        queue_switch.click()
+        expect(queue_switch).to_have_attribute("aria-checked", "false")
+        expect(queue_switch).to_be_enabled()
         overlay_url = page.get_by_role("link", name="OBS Overlay").get_attribute("href")
         overlay = context.new_page()
         for direction in ("down", "up"):
-            overlay.goto(base_url + overlay_url + "&direction=" + direction)
+            with overlay.expect_response(
+                lambda response: "/api/overlay/events?" in response.url
+            ):
+                overlay.goto(base_url + overlay_url + "&direction=" + direction)
             expect(overlay.locator(".chat-overlay-message")).to_have_count(10)
 
             def assert_latest_visible():
@@ -192,12 +198,13 @@ def check_chat_layout(browser, base_url, viewport):
                 base_url + "/api/chat/test",
                 data={
                     "source": "twitch",
-                    "author": "Latest viewer",
-                    "text": "The latest message must stay visible.",
+                    "author": f"Latest viewer {direction}",
+                    "text": f"The latest {direction} message must stay visible.",
                 },
             )
             assert response.ok, response.text()
-            expect(overlay.locator(".chat-overlay-message")).to_have_count(10)
+            assert response.json()["queued"] == 11
+            expect(overlay.locator(".chat-overlay-message")).to_have_count(11)
             assert_latest_visible()
             overlay.set_viewport_size({**viewport, "height": 400})
             assert_latest_visible()

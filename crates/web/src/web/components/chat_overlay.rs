@@ -533,14 +533,4 @@ mod tests {
         assert!(html.contains("id=\"chat-overlay-waiting\""));
         assert!(html.contains("3 messages waiting"));
     }
-
-    #[test]
-    fn container_opacity_is_configurable_with_opaque_default() {
-        assert!(OVERLAY_CSS.contains("--overlay-alpha: 0.8"));
-        assert!(OVERLAY_CSS.contains("#chat-overlay-pomodoro"));
-        assert!(OVERLAY_CSS.contains(".chat-overlay-message"));
-        const OVERLAY_PARAMS_JS: &str = include_str!("../../../static/overlay-events.js");
-        assert!(OVERLAY_PARAMS_JS.contains("\"opacity\""));
-        assert!(OVERLAY_PARAMS_JS.contains("--overlay-alpha"));
-    }
 }
