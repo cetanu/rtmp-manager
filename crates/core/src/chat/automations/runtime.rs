@@ -47,7 +47,7 @@ overlay.show(#{
     text: result,
     // image: "your-uploaded-image.gif", // Uncomment after uploading it.
     // sound: "your-uploaded-sound.mp3", // Uncomment after uploading it.
-    position: #{x: 25, y: 20, width: 50, height: 60}, // Percent of OBS canvas.
+    position: #{x: 0, y: 0, width: 50, height: 60}, // Percent of OBS canvas.
     duration_ms: 8000
 });
 

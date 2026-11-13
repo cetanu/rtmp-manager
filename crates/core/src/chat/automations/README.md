@@ -72,7 +72,7 @@ if rolled == 1 {
         text: message.author + " WON!",
         image: "jackpot.gif",
         sound: "jackpot.mp3",
-        position: #{x: 70, y: 10, width: 25, height: 30},
+        position: #{x: -30, y: 10, width: 25, height: 30},
         duration_ms: 8000
     });
     message.author + " WON!"
@@ -92,15 +92,15 @@ updated or the file is uploaded again.
 
 Set the OBS Browser Source width and height to match your stream canvas, for
 example 1920 × 1080 for 1080p, and place it at the canvas origin. The optional
-`position` defines a rectangle as integer percentages of that canvas: `x` and
-`y` are its top-left corner, and `width` and `height` are its size. All four
-values are required; dimensions must be positive and the rectangle must fit
-inside the canvas. For example, the rectangle above starts 70% from the left
-and 10% from the top. Text and media start at the rectangle's top-left corner;
-images and videos keep their aspect ratio inside it. Text and visual media in
-the same alert share the rectangle. Omit
-`position` to use the whole canvas. Each `overlay.show` call can use a different
-rectangle.
+`position` defines a rectangle in integer percentages of the canvas. `x` and
+`y` offset its center from the canvas center: positive values move right and
+down, and negative values move left and up. `width` and `height` set its size.
+All four values are required; dimensions must be positive and the rectangle
+must fit inside the canvas. For example, the rectangle above is centered 30%
+left and 10% down from the canvas center. Text and media are centered within
+the rectangle, and images and videos keep their aspect ratio. Text and visual
+media in the same alert share the rectangle. Omit `position` to use the whole
+canvas. Each `overlay.show` call can use a different rectangle.
 
 Add `/overlay/alerts?key=YOUR_OVERLAY_TOKEN` as a separate OBS Browser Source,
 using **OBS overlay**. Alerts play sequentially, with audio stopped at

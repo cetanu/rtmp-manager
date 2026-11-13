@@ -128,8 +128,8 @@ pub struct Alert {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AlertPosition {
-    pub x: u8,
-    pub y: u8,
+    pub x: i8,
+    pub y: i8,
     pub width: u8,
     pub height: u8,
 }
@@ -140,9 +140,9 @@ impl Alert {
             ensure!(
                 position.width > 0
                     && position.height > 0
-                    && u16::from(position.x) + u16::from(position.width) <= 100
-                    && u16::from(position.y) + u16::from(position.height) <= 100,
-                "Alert position must fit within the canvas (percentages 0–100)"
+                    && 2 * i16::from(position.x).abs() + i16::from(position.width) <= 100
+                    && 2 * i16::from(position.y).abs() + i16::from(position.height) <= 100,
+                "Alert position must fit within the canvas (center offsets and dimensions are percentages)"
             );
         }
         ensure!(self.text.len() <= 4096, "Alert text exceeds 4 KiB");

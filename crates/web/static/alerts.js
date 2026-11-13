@@ -29,22 +29,21 @@
       const alert = queue.shift();
       if (!alert || stopped) return;
       const position = alert.position ?? { x: 0, y: 0, width: 100, height: 100 };
-      const positioned = alert.position != null;
       const content = document.createElement("div");
-      content.style.cssText = `position:absolute;left:${position.x}%;top:${position.y}%;width:${position.width}%;height:${position.height}%;display:flex;flex-direction:column;align-items:${positioned ? "flex-start" : "center"};justify-content:${positioned ? "flex-start" : "center"};overflow:hidden`;
+      content.style.cssText = `position:absolute;left:${50 + position.x}%;top:${50 + position.y}%;transform:translate(-50%, -50%);width:${position.width}%;height:${position.height}%;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden`;
       stage.append(content);
       if (alert.image) {
         const img = document.createElement("img");
         img.src = mediaUrl(alert.image);
         img.alt = "";
-        img.style.cssText = `width:100%;height:${alert.video ? (alert.text ? 35 : 50) : alert.text ? 65 : 100}%;object-fit:contain;object-position:${positioned ? "left top" : "center"};flex-shrink:0`;
+        img.style.cssText = `width:100%;height:${alert.video ? (alert.text ? 35 : 50) : alert.text ? 65 : 100}%;object-fit:contain;object-position:center;flex-shrink:0`;
         content.append(img);
       }
       if (alert.video) {
         video = document.createElement("video");
         video.src = mediaUrl(alert.video);
         video.playsInline = true;
-        video.style.cssText = `width:100%;height:${alert.image ? (alert.text ? 35 : 50) : alert.text ? 65 : 100}%;object-fit:contain;object-position:${positioned ? "left top" : "center"};flex-shrink:0`;
+        video.style.cssText = `width:100%;height:${alert.image ? (alert.text ? 35 : 50) : alert.text ? 65 : 100}%;object-fit:contain;object-position:center;flex-shrink:0`;
         content.append(video);
         const currentGeneration = generation;
         video.play().catch(() => {
@@ -57,7 +56,7 @@
       if (alert.text) {
         const text = document.createElement("div");
         text.textContent = alert.text;
-        text.style.cssText = `box-sizing:border-box;width:${positioned ? 100 : 80}%;max-height:25%;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;text-align:${positioned ? "left" : "center"};flex-shrink:0`;
+        text.style.cssText = `box-sizing:border-box;width:80%;max-height:25%;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;text-align:center;flex-shrink:0`;
         content.append(text);
       }
       if (alert.sound) {

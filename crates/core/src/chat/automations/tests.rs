@@ -376,10 +376,10 @@ fn overlay_actions_are_bounded_and_do_not_replace_text_output() {
     assert_eq!(result.alerts.len(), 1);
     assert_eq!(result.alerts[0].text, "Viewer WON!");
     let positioned = runtime::evaluate(
-        "overlay.show(#{image: \"winner.gif\", position: #{x: 70, y: 10, width: 25, height: 30}, duration_ms: 1000});",
+        "overlay.show(#{image: \"winner.gif\", position: #{x: -30, y: 10, width: 25, height: 30}, duration_ms: 1000});",
         &message("positioned"), vec![], Map::new(), Map::new(), 1,
     ).unwrap();
-    assert_eq!(positioned.alerts[0].position.as_ref().unwrap().x, 70);
+    assert_eq!(positioned.alerts[0].position.as_ref().unwrap().x, -30);
     for invalid in [
         "overlay.show(#{text: \"x\", duration_ms: 0});",
         "overlay.show(#{duration_ms: 1000});",
