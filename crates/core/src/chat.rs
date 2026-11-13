@@ -842,6 +842,8 @@ enum ChatCommand {
 /// Actor owning chat queue storage and background platform workers exclusively without mutexes.
 struct ChatActor {
     inbox: ChatInbox,
+    recent_messages: std::collections::HashMap<(Source, String, String), std::time::Instant>,
+    spam_window: Duration,
     stream_status: watch::Receiver<crate::server::preview::StreamStatus>,
     twitch_task: Option<JoinHandle<()>>,
     youtube_task: Option<JoinHandle<()>>,
@@ -1043,6 +1045,31 @@ impl ChatActor {
         {
             return Ok(EnqueueOutcome::Duplicate);
         }
+        let now = std::time::Instant::now();
+        self.recent_messages
+            .retain(|_, seen| now.duration_since(*seen) < self.spam_window);
+        let identity = message
+            .user_id
+            .as_deref()
+            .filter(|id| !id.trim().is_empty())
+            .map(|id| format!("id:{id}"))
+            .unwrap_or_else(|| format!("name:{}", message.author.trim().to_lowercase()));
+        let key = (message.source, identity, message.text.trim().to_lowercase());
+        if self.recent_messages.contains_key(&key) {
+            return Ok(EnqueueOutcome::Duplicate);
+        }
+        let outcome = self.handle_new_message(message, metrics).await?;
+        if outcome != EnqueueOutcome::Duplicate {
+            self.recent_messages.insert(key, now);
+        }
+        Ok(outcome)
+    }
+
+    async fn handle_new_message(
+        &mut self,
+        message: IncomingChatMessage,
+        metrics: &Metrics,
+    ) -> Result<EnqueueOutcome> {
         if self.stream_status.borrow().state == crate::server::preview::StreamState::Live {
             let outcome = automations::process(&self.inbox.database, &message).await?;
             for alert in outcome.alerts {
@@ -1236,6 +1263,7 @@ impl ChatActor {
             self.poll_results_secs = chat.poll_results_seconds;
         }
         self.inbox.resize(chat.queue_capacity).await?;
+        self.spam_window = Duration::from_secs(chat.spam_window_secs);
         self.inbox.set_queue_mode(chat.queue_mode).await?;
 
         if let Some(task) = self.twitch_task.take() {
@@ -1483,6 +1511,8 @@ impl ChatHandle {
 
         let actor = ChatActor {
             inbox,
+            recent_messages: Default::default(),
+            spam_window: Duration::from_secs(30),
             stream_status,
             twitch_task: None,
             youtube_task: None,
@@ -2036,6 +2066,8 @@ mod tests {
         .unwrap();
         let mut actor = ChatActor {
             inbox,
+            recent_messages: Default::default(),
+            spam_window: Duration::from_secs(30),
             stream_status: watch::channel(crate::server::preview::StreamStatus {
                 state: crate::server::preview::StreamState::Offline,
             })

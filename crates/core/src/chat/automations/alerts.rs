@@ -81,19 +81,21 @@ pub struct Media {
     pub name: String,
     pub content_type: String,
     pub data: String,
+    pub allow_repeats: bool,
 }
 
 pub async fn list(db: &toasty::Db) -> Result<Vec<Media>> {
     // Avoid loading media bodies to list the library.
     Ok(Media::all()
-        .select((Media::fields().name(), Media::fields().content_type()))
+        .select((Media::fields().name(), Media::fields().content_type(), Media::fields().allow_repeats()))
         .exec(&mut db.clone())
         .await?
         .into_iter()
-        .map(|(name, content_type)| Media {
+        .map(|(name, content_type, allow_repeats)| Media {
             name,
             content_type,
             data: String::new(),
+            allow_repeats,
         })
         .collect())
 }
@@ -173,10 +175,17 @@ pub async fn upload(db: &toasty::Db, name: String, bytes: &[u8]) -> Result<()> {
     toasty::create!(Media {
         name,
         content_type: content_type.to_owned(),
-        data: STANDARD.encode(bytes)
+        data: STANDARD.encode(bytes),
+        allow_repeats: true
     })
     .exec(&mut db.clone())
     .await?;
+    Ok(())
+}
+
+pub async fn set_allow_repeats(db: &toasty::Db, name: &str, allow: bool) -> Result<()> {
+    let mut media = get(db, name).await?;
+    media.update().allow_repeats(allow).exec(&mut db.clone()).await?;
     Ok(())
 }
 

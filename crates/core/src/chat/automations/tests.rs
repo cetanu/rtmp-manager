@@ -82,41 +82,75 @@ async fn handle(db: &toasty::Db, status: watch::Receiver<StreamStatus>) -> ChatH
 }
 
 #[tokio::test]
+async fn repeated_text_is_filtered_before_automation() {
+    let (db, _) = database().await;
+    let (_status, rx) = watch::channel(StreamStatus {
+        state: StreamState::Live,
+    });
+    let handle = handle(&db, rx).await;
+    handle.save_automation(None, definition()).await.unwrap();
+    assert_eq!(
+        handle.enqueue(message("one")).await.unwrap(),
+        EnqueueOutcome::Accepted
+    );
+    let mut repeated = message("two");
+    repeated.text = "  !POINT  ".into();
+    assert_eq!(
+        handle.enqueue(repeated).await.unwrap(),
+        EnqueueOutcome::Duplicate
+    );
+    let mut other = message("three");
+    other.user_id = Some("other".into());
+    assert_eq!(
+        handle.enqueue(other).await.unwrap(),
+        EnqueueOutcome::Accepted
+    );
+    assert_eq!(handle.automations().await.unwrap().recent.len(), 2);
+}
+
+#[tokio::test]
 async fn scripts_are_gated_by_live_state_and_enabled_flag() {
     let (db, _) = database().await;
     let (status, rx) = watch::channel(StreamStatus {
         state: StreamState::Offline,
     });
     let handle = handle(&db, rx).await;
-    handle.save_automation(None, definition()).await.unwrap();
+    let mut rule = definition();
+    rule.pattern = "(?i)^!point".into();
+    handle.save_automation(None, rule).await.unwrap();
+    let distinct = |id: &str| {
+        let mut incoming = message(id);
+        incoming.text = format!("!point {id}");
+        incoming
+    };
     let id = handle.automations().await.unwrap().automations[0].id;
-    handle.enqueue(message("offline")).await.unwrap();
+    handle.enqueue(distinct("offline")).await.unwrap();
     assert!(handle.automations().await.unwrap().recent.is_empty());
     status.send_replace(StreamStatus {
         state: StreamState::PreviewReady,
     });
-    handle.enqueue(message("preview")).await.unwrap();
+    handle.enqueue(distinct("preview")).await.unwrap();
     assert!(handle.automations().await.unwrap().recent.is_empty());
     status.send_replace(StreamStatus {
         state: StreamState::Live,
     });
     // A message already displayed while offline must not be executed on redelivery.
     assert_eq!(
-        handle.enqueue(message("offline")).await.unwrap(),
+        handle.enqueue(distinct("offline")).await.unwrap(),
         EnqueueOutcome::Duplicate
     );
     handle.clear_messages().await.unwrap();
-    handle.enqueue(message("live")).await.unwrap();
+    handle.enqueue(distinct("live")).await.unwrap();
     assert_eq!(handle.snapshot().await.unwrap().queued, 0);
     assert_eq!(data(&db, id, "twitch:123").await["points"], 1);
     handle.toggle_automation(id, false).await.unwrap();
-    handle.enqueue(message("disabled")).await.unwrap();
+    handle.enqueue(distinct("disabled")).await.unwrap();
     assert_eq!(data(&db, id, "twitch:123").await["points"], 1);
     handle.toggle_automation(id, true).await.unwrap();
     status.send_replace(StreamStatus {
         state: StreamState::Offline,
     });
-    handle.enqueue(message("stopped")).await.unwrap();
+    handle.enqueue(distinct("stopped")).await.unwrap();
     assert_eq!(handle.automations().await.unwrap().recent.len(), 1);
 }
 

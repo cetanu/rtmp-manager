@@ -19,6 +19,19 @@ pub async fn chat_settings(cx: &Cx) -> Result<impl View> {
             card_header(card_title("Chat Ingest"))
             card_content(
                 <div class="flex flex-col gap-6">
+                    form_field(
+                        control_id: "spam_window_secs",
+                        label_text: "Repeated message window (seconds)",
+                        input(
+                            attrs: attributes! {
+                                id="spam_window_secs"
+                                name="chat[spam_window_secs]"
+                                type="number"
+                                min="1"
+                                value=(chat.spam_window_secs.to_string())
+                            }
+                        )
+                    )
                     <div class="grid gap-6 md:grid-cols-2">
                         form_field(
                             control_id: "twitch_channel",
