@@ -454,25 +454,37 @@ async fn test_alerts_can_be_previewed_offline_and_missing_media_is_rejected() {
     });
     let handle = handle(&db, rx).await;
     let mut receiver = handle.subscribe_alerts();
-    let mut alert = alerts::Alert {
-        text: "Preview".into(),
-        image: String::new(),
-        video: String::new(),
-        sound: String::new(),
-        position: None,
-        duration_ms: 1000,
-    };
-    assert_eq!(
-        handle
-            .preview_alerts(vec![alert.clone()])
+    let test =
+        |script: &str| handle.test_automation("^hello$".into(), script.into(), "hello".into());
+    let draft =
+        test(r#"viewer.count = 1; overlay.show(#{text: "Preview", duration_ms: 1000}); "done""#)
             .await
-            .unwrap(),
-        1
-    );
+            .unwrap()
+            .unwrap();
+    assert_eq!(draft.result.output, "done");
+    assert_eq!(draft.result.viewer["count"], 1);
+    assert_eq!(draft.preview.unwrap().unwrap(), 1);
     assert_eq!(receiver.try_recv().unwrap().text, "Preview");
-    alert.image = "missing.png".into();
-    assert!(handle.preview_alerts(vec![alert]).await.is_err());
+    let draft = test(r#"overlay.show(#{image: "missing.png", duration_ms: 1000});"#)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(draft.preview.unwrap().is_err());
     assert!(receiver.try_recv().is_err());
+    assert!(
+        handle
+            .test_automation("^other$".into(), "1".into(), "hello".into())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        handle
+            .test_automation("[".into(), "1".into(), "hello".into())
+            .await
+            .is_err()
+    );
+    assert!(handle.automations().await.unwrap().recent.is_empty());
 }
 
 #[tokio::test]

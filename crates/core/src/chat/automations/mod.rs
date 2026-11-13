@@ -32,9 +32,47 @@ impl AutomationEngine {
         self.queue.subscribe()
     }
 
-    pub async fn preview_alerts(&self, alerts: Vec<alerts::Alert>) -> Result<usize> {
-        alerts::validate_media(&self.db, &alerts).await?;
-        self.queue.enqueue(alerts).await
+    pub async fn test_draft(
+        &self,
+        pattern: String,
+        script: String,
+        text: String,
+    ) -> Result<Option<DraftResult>> {
+        let result = tokio::task::spawn_blocking(move || {
+            let definition = AutomationDefinition {
+                name: "Test".into(),
+                pattern,
+                script,
+                enabled: false,
+                consume: false,
+            };
+            let message = IncomingChatMessage {
+                source: crate::chat::Source::Twitch,
+                external_id: "test-message".into(),
+                author: "test_viewer".into(),
+                user_id: Some("test-viewer".into()),
+                text,
+                parts: vec![],
+                avatar_url: None,
+                sent_at: None,
+            };
+            runtime::test_message(&definition, &message)
+        })
+        .await??;
+        let Some(result) = result else {
+            return Ok(None);
+        };
+        let preview = if result.alerts.is_empty() {
+            None
+        } else {
+            Some(
+                match alerts::validate_media(&self.db, &result.alerts).await {
+                    Ok(()) => self.queue.enqueue(result.alerts.clone()).await,
+                    Err(error) => Err(error),
+                },
+            )
+        };
+        Ok(Some(DraftResult { result, preview }))
     }
 
     pub async fn process_message(
@@ -57,6 +95,11 @@ impl AutomationEngine {
         }
         Ok(Some(outcome))
     }
+}
+
+pub struct DraftResult {
+    pub result: runtime::ScriptResult,
+    pub preview: Option<Result<usize>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

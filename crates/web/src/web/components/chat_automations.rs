@@ -44,43 +44,20 @@ async fn save_automation(
 #[procedure]
 async fn test_automation(cx: &Cx, pattern: String, script: String, text: String) -> Result<String> {
     let app: &AppHandle = context(cx);
-    let result = tokio::task::spawn_blocking(move || {
-        let definition = AutomationDefinition {
-            name: "Test".into(),
-            pattern,
-            script,
-            enabled: false,
-            consume: false,
-        };
-        let message = rtmp_core::chat::IncomingChatMessage {
-            source: rtmp_core::chat::Source::Twitch,
-            external_id: "test-message".into(),
-            author: "test_viewer".into(),
-            user_id: Some("test-viewer".into()),
-            text,
-            parts: vec![],
-            avatar_url: None,
-            sent_at: None,
-        };
-        rtmp_core::chat::automations::runtime::test_message(&definition, &message)
-    })
-    .await;
+    let result = app.chat.test_automation(pattern, script, text).await;
     Ok(match result {
-        Ok(Ok(Some(result))) => {
-            let preview_status = if !result.alerts.is_empty() {
-                match app
-                    .chat
-                    .preview_alerts(result.alerts.clone())
-                    .await
-                {
-                    Ok(0) => {
-                        "\n\nNo alert queued (no overlay connected, duplicate media, or queue full).".to_owned()
-                    }
-                    Ok(count) => format!("\n\nTest alerts queued for {count} connected overlay(s)."),
-                    Err(error) => format!("\n\nOverlay preview error: {error}"),
+        Ok(Some(draft)) => {
+            let result = draft.result;
+            let preview_status = match draft.preview {
+                None => String::new(),
+                Some(Ok(0)) => {
+                    "\n\nNo alert queued (no overlay connected, duplicate media, or queue full)."
+                        .to_owned()
                 }
-            } else {
-                String::new()
+                Some(Ok(count)) => {
+                    format!("\n\nTest alerts queued for {count} connected overlay(s).")
+                }
+                Some(Err(error)) => format!("\n\nOverlay preview error: {error}"),
             };
             format!(
                 "Output: {}\n\nGlobal state: {}\nViewer state: {}\n\nAlerts: {}{}",
@@ -95,8 +72,7 @@ async fn test_automation(cx: &Cx, pattern: String, script: String, text: String)
                 preview_status,
             )
         }
-        Ok(Ok(None)) => "Not matched.".into(),
-        Ok(Err(error)) => format!("Error: {error}"),
+        Ok(None) => "Not matched.".into(),
         Err(error) => format!("Error: {error}"),
     })
 }

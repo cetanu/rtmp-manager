@@ -1360,8 +1360,13 @@ impl ChatHandle {
         self.automation.subscribe_alerts()
     }
 
-    pub async fn preview_alerts(&self, alerts: Vec<automations::alerts::Alert>) -> Result<usize> {
-        self.automation.preview_alerts(alerts).await
+    pub async fn test_automation(
+        &self,
+        pattern: String,
+        script: String,
+        text: String,
+    ) -> Result<Option<automations::DraftResult>> {
+        self.automation.test_draft(pattern, script, text).await
     }
 
     pub async fn save_automation(
