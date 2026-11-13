@@ -16,9 +16,9 @@ async fn main() -> anyhow::Result<()> {
     let db_path = std::env::var_os("CONFIG_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("config.sqlite3"));
-    let db_path = rtmp_proxy::config::ConfigStore::database_path(db_path)?;
+    let db_path = rtmp_core::config::ConfigStore::database_path(db_path)?;
 
-    let db = rtmp_proxy::db::connect(&db_path).await?;
+    let db = rtmp_core::db::connect(&db_path).await?;
 
     toasty_cli::ToastyCli::with_config(db, config)
         .parse_and_run()

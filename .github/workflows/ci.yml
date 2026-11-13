@@ -63,8 +63,8 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: topcoat-cli@0.12.1
-      - run: topcoat fmt --check --rustfmt src build.rs tests
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: topcoat fmt --check --rustfmt src crates tests
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   test:
     name: Test release (${{ matrix.arch }})
@@ -96,7 +96,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes ffmpeg
       - name: Build release binary and assets
         run: topcoat asset bundle --release --bin rtmp-proxy
-      - run: cargo test --release --all-targets --all-features --locked
+      - run: cargo test --workspace --release --all-targets --all-features --locked
       - uses: actions/setup-python@v6
         if: matrix.arch == 'x86_64'
         with:

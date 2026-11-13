@@ -1,4 +1,4 @@
-<img src="./rtmp.png" alt="rtmp-manager logo" width="180">
+<img src="./crates/web/rtmp.png" alt="rtmp-manager logo" width="180">
 
 # rtmp-manager
 

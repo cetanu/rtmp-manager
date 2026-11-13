@@ -2599,14 +2599,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "rtmp-proxy"
+name = "rtmp-core"
 version = "0.12.0"
 dependencies = [
  "anyhow",
  "aws-lc-rs",
  "base64 0.22.1",
  "bytes",
- "clap",
  "futures-util",
  "hmac",
  "parking_lot",
@@ -2622,6 +2621,23 @@ dependencies = [
  "srt-tokio",
  "time",
  "toasty",
+ "tokio",
+ "topcoat",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "rtmp-proxy"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "clap",
+ "reqwest",
+ "rtmp-core",
+ "rtmp-web",
+ "time",
  "toasty-cli",
  "tokio",
  "topcoat",
@@ -2638,6 +2654,24 @@ checksum = "9f9a35e0314cc5227da644bbb830caeaeed84a4043c6633345b3c369ed6bfd60"
 dependencies = [
  "bytes",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "rtmp-web"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "futures-util",
+ "reqwest",
+ "rtmp-core",
+ "serde",
+ "serde_json",
+ "serde_qs",
+ "time",
+ "tokio",
+ "topcoat",
  "tracing",
 ]
 

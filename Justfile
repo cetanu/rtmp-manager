@@ -10,7 +10,7 @@ dev:
     topcoat dev
 
 fmt:
-    topcoat fmt --rustfmt src build.rs tests
+    topcoat fmt --rustfmt src crates tests
 
 check:
     cargo check

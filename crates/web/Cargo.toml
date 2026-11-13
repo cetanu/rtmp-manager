@@ -1,0 +1,23 @@
+[package]
+name = "rtmp-web"
+version = "0.12.0"
+edition = "2024"
+rust-version = "1.99"
+
+[dependencies]
+rtmp-core = { path = "../core" }
+tokio = { version = "1.38", features = ["full"] }
+tracing = "0.1"
+anyhow = "1.0"
+serde = { version = "1.0.229", features = ["derive"] }
+reqwest = { version = "0.13.4", features = ["form", "json", "query"] }
+serde_json = "1.0.151"
+time = { version = "0.3.54", features = ["parsing"] }
+topcoat = { version = "0.12.0", features = ["anyhow", "ui", "tailwind", "asset", "multipart", "runtime", "sse", "l10n-datetime", "l10n-number"] }
+serde_qs = "1.1.2"
+base64 = "0.22.1"
+futures-util = "0.3"
+
+
+[build-dependencies]
+topcoat = { version = "0.12.0", default-features = false, features = ["tailwind"] }

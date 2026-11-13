@@ -30,7 +30,7 @@
 
 ### GOAL-203: Envelope Encryption for Destination Stream Keys & OAuth Tokens
 - **Objective:** Encrypt third-party stream keys and OAuth refresh tokens at rest in the database.
-- **Current State:** Target stream keys and API secrets are stored as plaintext in SQLite ([`src/config.rs`](src/config.rs)).
+- **Current State:** Target stream keys and API secrets are stored as plaintext in SQLite ([`crates/core/src/config.rs`](crates/core/src/config.rs)).
 - **Technical Requirements:**
   1. Implement AES-256-GCM envelope encryption for sensitive fields in the database schema.
   2. Support master key derivation via environment variable (`MASTER_ENCRYPTION_KEY`) or cloud KMS (AWS KMS / GCP KMS / HashiCorp Vault).
@@ -42,7 +42,7 @@
 
 ### GOAL-204: Database Abstraction & PostgreSQL Migration Support
 - **Objective:** Provide support for PostgreSQL in multi-node/SaaS deployments while retaining SQLite for single-node self-hosters.
-- **Current State:** SQLite is coupled directly via `rusqlite` / `toasty` ([`src/config.rs`](src/config.rs), [`src/chat.rs`](src/chat.rs)).
+- **Current State:** SQLite is coupled directly via `rusqlite` / `toasty` ([`crates/core/src/config.rs`](crates/core/src/config.rs), [`crates/core/src/chat.rs`](crates/core/src/chat.rs)).
 - **Technical Requirements:**
   1. Define database traits/repository layers or utilize an async SQL toolkit (e.g., `sqlx` or `sea-orm`) supporting both SQLite and PostgreSQL drivers.
   2. Create versioned database migrations for both backends.
@@ -109,7 +109,7 @@
 
 ### GOAL-401: Distributed Quota-Aware YouTube Chat Polling Worker
 - **Objective:** Prevent YouTube Data API quota exhaustion across multiple concurrent streamers.
-- **Current State:** Individual polling loops run per active stream ([`src/chat/youtube.rs`](src/chat/youtube.rs)), consuming default API quota units rapidly.
+- **Current State:** Individual polling loops run per active stream ([`crates/core/src/chat/youtube.rs`](crates/core/src/chat/youtube.rs)), consuming default API quota units rapidly.
 - **Technical Requirements:**
   1. Implement dynamic polling backoff based on stream viewer activity and YouTube's `pollingIntervalMillis` response header.
   2. Support custom user-provided Google Cloud API credentials or OAuth user tokens to partition quota usage per user.
@@ -121,7 +121,7 @@
 
 ### GOAL-402: Webhook Multiplexing for Kick & Twitch EventSub
 - **Objective:** Receive platform webhooks at a central edge and route verified events to appropriate tenant chat queues.
-- **Current State:** Kick webhooks are processed on a single local broadcast channel ([`src/chat/kick.rs`](src/chat/kick.rs)).
+- **Current State:** Kick webhooks are processed on a single local broadcast channel ([`crates/core/src/chat/kick.rs`](crates/core/src/chat/kick.rs)).
 - **Technical Requirements:**
   1. Implement a unified webhook dispatcher at `/api/v1/webhooks/:platform`.
   2. Verify HMAC signatures per tenant (using tenant-specific secret keys).
@@ -133,7 +133,7 @@
 
 ### GOAL-403: Bidirectional Cross-Platform Chat Relaying
 - **Objective:** Allow streamers to mirror chat messages across platforms (e.g. reposting YouTube comments into Twitch and Kick chats).
-- **Current State:** Read-only ingestion and aggregation of chat messages into a local display queue ([`src/chat.rs`](src/chat.rs)).
+- **Current State:** Read-only ingestion and aggregation of chat messages into a local display queue ([`crates/core/src/chat.rs`](crates/core/src/chat.rs)).
 - **Technical Requirements:**
   1. Implement authenticated bot client dispatchers for Twitch (IRC / Helix API), Kick, and YouTube Live Chat API.
   2. Add user configuration for relay rules (e.g., "[YouTube] {author}: {message}" -> send to Twitch).

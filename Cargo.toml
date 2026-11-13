@@ -1,3 +1,8 @@
+[workspace]
+members = ["crates/core", "crates/web"]
+default-members = [".", "crates/core", "crates/web"]
+resolver = "3"
+
 [package]
 name = "rtmp-proxy"
 version = "0.12.0"
@@ -9,36 +14,19 @@ description = "Self-hosted RTMP multiplexer and management dashboard"
 repository = "https://github.com/cetanu/rtmp-manager"
 
 [dependencies]
+rtmp-core = { path = "crates/core" }
+rtmp-web = { path = "crates/web" }
 tokio = { version = "1.38", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4.5", features = ["derive", "env"] }
 anyhow = "1.0"
-rtmp-rs = "0.5.0"
-serde = { version = "1.0.229", features = ["derive"] }
 reqwest = { version = "0.13.4", features = ["form", "json", "query"] }
-serde_json = "1.0.151"
-serde_valid = "2.0"
-hmac = "0.12.1"
-sha2 = "0.10.9"
 time = { version = "0.3.54", features = ["parsing"] }
-topcoat = { version = "0.12.0", features = ["anyhow", "ui", "tailwind", "asset", "multipart", "runtime", "sse", "l10n-datetime", "l10n-number"] }
-topcoat-asset = "0.12.0"
-serde_qs = "1.1.2"
-toasty = { version = "0.11", features = ["sqlite", "migration"] }
 toasty-cli = { version = "0.11" }
-base64 = "0.22.1"
-futures-util = "0.3"
-regex = "1.10"
-rhai = { version = "1.21", features = ["sync", "serde", "no_module"] }
-parking_lot = "0.12"
-aws-lc-rs = "1.17.3"
-srt-tokio = "0.4.4"
-
-[build-dependencies]
-topcoat = { version = "0.12.0", default-features = false, features = ["tailwind"] }
 
 [dev-dependencies]
+topcoat = { version = "0.12.0", features = ["asset", "runtime"] }
 bytes = "1.0"
 topcoat-asset = { version = "0.12.0", features = ["bundler"] }
 
