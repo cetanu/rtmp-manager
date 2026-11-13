@@ -96,8 +96,9 @@ example 1920 × 1080 for 1080p, and place it at the canvas origin. The optional
 `y` are its top-left corner, and `width` and `height` are its size. All four
 values are required; dimensions must be positive and the rectangle must fit
 inside the canvas. For example, the rectangle above starts 70% from the left
-and 10% from the top. Images and videos keep their aspect ratio inside the
-rectangle. Text and visual media in the same alert share the rectangle. Omit
+and 10% from the top. Text and media start at the rectangle's top-left corner;
+images and videos keep their aspect ratio inside it. Text and visual media in
+the same alert share the rectangle. Omit
 `position` to use the whole canvas. Each `overlay.show` call can use a different
 rectangle.
 
