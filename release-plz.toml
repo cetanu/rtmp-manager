@@ -8,11 +8,11 @@ git_release_draft = true
 # This application is distributed through GitHub releases, not crates.io.
 publish = false
 
-# Determine unpublished versions from Git tags instead of the crates.io registry.
-git_only = true
-
 [[package]]
 name = "rtmp-proxy"
+# Determine unpublished versions from Git tags matching v*
+git_only = true
+git_tag_name = "v{{ version }}"
 # Include commits from workspace crates in the server release changelog
 changelog_include = ["rtmp-core", "rtmp-web"]
 
