@@ -169,9 +169,29 @@ pub async fn automation_media(cx: &Cx) -> Result<impl View> {
                                         <div
                                             class="flex flex-wrap items-center justify-between gap-2"
                                         >
-                                            <form method="post" action=(format!("/api/alerts/media/repeats?name={}&allow={}", media.name, !media.allow_repeats)) data-media-form="">
-                                                <button type="submit" class=(outline.clone()) aria-label=(format!("{} repeats for {}", if media.allow_repeats { "Disable" } else { "Allow" }, media.name))>
-                                                    (if media.allow_repeats { "Repeats allowed" } else { "Repeats blocked" })
+                                            <form
+                                                method="post"
+                                                action=(format!(
+                                                    "/api/alerts/media/repeats?name={}&allow={}",
+                                                    media.name,
+                                                    !media.allow_repeats,
+                                                ))
+                                                data-media-form=""
+                                            >
+                                                <button
+                                                    type="submit"
+                                                    class=(outline.clone())
+                                                    aria-label=(format!(
+                                                        "{} repeats for {}",
+                                                        if media.allow_repeats { "Disable" } else { "Allow" },
+                                                        media.name,
+                                                    ))
+                                                >
+                                                    (if media.allow_repeats {
+                                                        "Repeats allowed"
+                                                    } else {
+                                                        "Repeats blocked"
+                                                    })
                                                 </button>
                                             </form>
                                             <button

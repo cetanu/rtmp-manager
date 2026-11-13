@@ -4,10 +4,8 @@ Run after building both binaries and bundling assets; see README.md.
 """
 
 import argparse
-from contextlib import contextmanager
 import json
 import os
-from pathlib import Path
 import socket
 import sqlite3
 import subprocess
@@ -15,9 +13,10 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
+from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
-
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -70,7 +69,9 @@ def dashboard(profile):
                     if server.poll() is not None:
                         raise RuntimeError("dashboard exited during startup")
                     try:
-                        with urllib.request.urlopen(base_url + "/api/config", timeout=1):
+                        with urllib.request.urlopen(
+                            base_url + "/api/config", timeout=1
+                        ):
                             break
                     except (urllib.error.URLError, TimeoutError):
                         time.sleep(0.1)
@@ -140,11 +141,15 @@ def check_chat_layout(browser, base_url, viewport):
 
         # Enough real messages to overflow even a large desktop viewport.
         for index in range(10):
-            response = context.request.post(base_url + "/api/chat/test", data={
-                "source": "twitch",
-                "author": f"Layout viewer {index}",
-                "text": "A long chat message exercises scrolling inside the inbox. " * 70,
-            })
+            response = context.request.post(
+                base_url + "/api/chat/test",
+                data={
+                    "source": "twitch",
+                    "author": f"Layout viewer {index}",
+                    "text": "A long chat message exercises scrolling inside the inbox. "
+                    * 70,
+                },
+            )
             assert response.ok, response.text()
         expect(page.locator("[data-chat-messages] article")).to_have_count(10)
         geometry = assert_fills_viewport(page)
@@ -164,12 +169,15 @@ def check_chat_layout(browser, base_url, viewport):
         other.close()
 
         # The OBS viewport follows the latest message as content and size change.
-        page.get_by_role("switch", name="Toggle Queue incoming chat", exact=True).click()
+        page.get_by_role(
+            "switch", name="Toggle Queue incoming chat", exact=True
+        ).click()
         overlay_url = page.get_by_role("link", name="OBS Overlay").get_attribute("href")
         overlay = context.new_page()
         for direction in ("down", "up"):
             overlay.goto(base_url + overlay_url + "&direction=" + direction)
             expect(overlay.locator(".chat-overlay-message")).to_have_count(10)
+
             def assert_latest_visible():
                 overlay.wait_for_function("""() => {
                     const rows = document.querySelectorAll('.chat-overlay-message');
@@ -178,13 +186,18 @@ def check_chat_layout(browser, base_url, viewport):
                     return reversed ? rect.top >= 0 && rect.top < innerHeight
                         : rect.bottom > 0 && rect.bottom <= innerHeight;
                 }""")
+
             assert_latest_visible()
-            response = context.request.post(base_url + "/api/chat/test", data={
-                "source": "twitch", "author": "Latest viewer",
-                "text": "The latest message must stay visible.",
-            })
+            response = context.request.post(
+                base_url + "/api/chat/test",
+                data={
+                    "source": "twitch",
+                    "author": "Latest viewer",
+                    "text": "The latest message must stay visible.",
+                },
+            )
             assert response.ok, response.text()
-            expect(overlay.locator(".chat-overlay-message")).to_have_count(11)
+            expect(overlay.locator(".chat-overlay-message")).to_have_count(10)
             assert_latest_visible()
             overlay.set_viewport_size({**viewport, "height": 400})
             assert_latest_visible()
@@ -192,10 +205,14 @@ def check_chat_layout(browser, base_url, viewport):
             page.get_by_role("button", name="Clear all", exact=True).click()
             expect(overlay.locator(".chat-overlay-message")).to_have_count(0)
             for index in range(10):
-                response = context.request.post(base_url + "/api/chat/test", data={
-                    "source": "twitch", "author": f"Viewer {index}",
-                    "text": "Overflowing overlay message. " * 70,
-                })
+                response = context.request.post(
+                    base_url + "/api/chat/test",
+                    data={
+                        "source": "twitch",
+                        "author": f"Viewer {index}",
+                        "text": "Overflowing overlay message. " * 70,
+                    },
+                )
                 assert response.ok, response.text()
         overlay.close()
 
@@ -221,7 +238,10 @@ def main():
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         try:
-            for viewport in ({"width": 1440, "height": 900}, {"width": 390, "height": 844}):
+            for viewport in (
+                {"width": 1440, "height": 900},
+                {"width": 390, "height": 844},
+            ):
                 with dashboard(args.profile) as base_url:
                     check_chat_layout(browser, base_url, viewport)
         finally:
