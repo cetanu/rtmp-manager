@@ -10,3 +10,16 @@ publish = false
 
 # Determine unpublished versions from Git tags instead of the crates.io registry.
 git_only = true
+
+[[package]]
+name = "rtmp-proxy"
+# Include commits from workspace crates in the server release changelog
+changelog_include = ["rtmp-core", "rtmp-web"]
+
+[[package]]
+name = "rtmp-core"
+release = false
+
+[[package]]
+name = "rtmp-web"
+release = false
