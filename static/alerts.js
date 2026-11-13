@@ -30,32 +30,36 @@
       const alert = queue.shift();
       if (!alert || stopped) { playing = false; return; }
       playing = true;
+      const position = alert.position ?? { x: 0, y: 0, width: 100, height: 100 };
+      const content = document.createElement("div");
+      content.style.cssText = `position:absolute;left:${position.x}%;top:${position.y}%;width:${position.width}%;height:${position.height}%;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden`;
+      stage.append(content);
       if (alert.image) {
         const img = document.createElement("img");
         img.src = mediaUrl(alert.image);
         img.alt = "";
-        img.style.cssText = "max-width:90%;max-height:65%;object-fit:contain;flex-shrink:0";
-        stage.append(img);
+        img.style.cssText = `width:100%;height:${alert.video ? (alert.text ? 35 : 50) : alert.text ? 65 : 100}%;object-fit:contain;flex-shrink:0`;
+        content.append(img);
       }
       if (alert.video) {
         video = document.createElement("video");
         video.src = mediaUrl(alert.video);
         video.playsInline = true;
-        video.style.cssText = "max-width:90%;max-height:65%;object-fit:contain;flex-shrink:0";
-        stage.append(video);
+        video.style.cssText = `width:100%;height:${alert.image ? (alert.text ? 35 : 50) : alert.text ? 65 : 100}%;object-fit:contain;flex-shrink:0`;
+        content.append(video);
         const currentGeneration = generation;
         video.play().catch(() => {
           if (stopped || generation !== currentGeneration) return;
           const status = document.createElement("small");
           status.textContent = "Video unavailable. Check the media file and browser playback permissions.";
-          stage.append(status);
+          content.append(status);
         });
       }
       if (alert.text) {
         const text = document.createElement("div");
         text.textContent = alert.text;
         text.style.cssText = "box-sizing:border-box;width:80%;max-height:25%;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;text-align:center;flex-shrink:0";
-        stage.append(text);
+        content.append(text);
       }
       if (alert.sound) {
         audio = new Audio(mediaUrl(alert.sound));
@@ -64,7 +68,7 @@
           if (stopped || generation !== currentGeneration) return;
           const status = document.createElement("small");
           status.textContent = "Audio unavailable. Check the media file and browser audio permissions.";
-          stage.append(status);
+          content.append(status);
         });
       }
       timer = setTimeout(next, alert.duration_ms);

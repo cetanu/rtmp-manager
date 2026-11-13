@@ -341,11 +341,18 @@ fn overlay_actions_are_bounded_and_do_not_replace_text_output() {
     assert_eq!(result.viewer["winner"], true);
     assert_eq!(result.alerts.len(), 1);
     assert_eq!(result.alerts[0].text, "Viewer WON!");
+    let positioned = runtime::evaluate(
+        "overlay.show(#{image: \"winner.gif\", position: #{x: 70, y: 10, width: 25, height: 30}, duration_ms: 1000});",
+        &message("positioned"), vec![], Map::new(), Map::new(), 1,
+    ).unwrap();
+    assert_eq!(positioned.alerts[0].position.as_ref().unwrap().x, 70);
     for invalid in [
         "overlay.show(#{text: \"x\", duration_ms: 0});",
         "overlay.show(#{duration_ms: 1000});",
         "overlay.show(#{image: \"../secret\", duration_ms: 1000});",
         "overlay.show(#{text: \"x\", duration_ms: 1000, typo: true});",
+        "overlay.show(#{text: \"x\", position: #{x: 80, y: 0, width: 30, height: 10}, duration_ms: 1000});",
+        "overlay.show(#{text: \"x\", position: #{x: 0, y: 0, width: 0, height: 10}, duration_ms: 1000});",
         "for i in 0..9 { overlay.show(#{text: \"x\", duration_ms: 1000}); }",
     ] {
         assert!(
@@ -406,6 +413,35 @@ async fn alerts_publish_after_commit_and_failed_scripts_publish_nothing() {
 }
 
 #[tokio::test]
+async fn test_alerts_can_be_previewed_offline_and_missing_media_is_rejected() {
+    let (db, _) = database().await;
+    let (_status, rx) = watch::channel(StreamStatus {
+        state: StreamState::Offline,
+    });
+    let handle = handle(&db, rx).await;
+    let mut receiver = handle.subscribe_alerts();
+    let mut alert = alerts::Alert {
+        text: "Preview".into(),
+        image: String::new(),
+        video: String::new(),
+        sound: String::new(),
+        position: None,
+        duration_ms: 1000,
+    };
+    assert_eq!(
+        handle
+            .preview_alerts(&db, vec![alert.clone()])
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(receiver.try_recv().unwrap().text, "Preview");
+    alert.image = "missing.png".into();
+    assert!(handle.preview_alerts(&db, vec![alert]).await.is_err());
+    assert!(receiver.try_recv().is_err());
+}
+
+#[tokio::test]
 async fn media_library_preserves_bytes_and_checks_references() {
     use base64::Engine;
     let (db, _) = database().await;
@@ -441,6 +477,7 @@ async fn media_library_preserves_bytes_and_checks_references() {
         image: "winner.gif".into(),
         video: String::new(),
         sound: String::new(),
+        position: None,
         duration_ms: 1000,
     };
     alerts::validate_media(&db, &[alert.clone()]).await.unwrap();
@@ -454,6 +491,7 @@ async fn media_library_preserves_bytes_and_checks_references() {
         image: String::new(),
         video: "winner.mp4".into(),
         sound: String::new(),
+        position: None,
         duration_ms: 1000,
     };
     assert_eq!(

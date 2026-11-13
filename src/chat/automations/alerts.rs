@@ -16,11 +16,31 @@ pub struct Alert {
     pub video: String,
     #[serde(default)]
     pub sound: String,
+    #[serde(default)]
+    pub position: Option<AlertPosition>,
     pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AlertPosition {
+    pub x: u8,
+    pub y: u8,
+    pub width: u8,
+    pub height: u8,
 }
 
 impl Alert {
     pub fn validate(&self) -> Result<()> {
+        if let Some(position) = &self.position {
+            ensure!(
+                position.width > 0
+                    && position.height > 0
+                    && u16::from(position.x) + u16::from(position.width) <= 100
+                    && u16::from(position.y) + u16::from(position.height) <= 100,
+                "Alert position must fit within the canvas (percentages 0–100)"
+            );
+        }
         ensure!(self.text.len() <= 4096, "Alert text exceeds 4 KiB");
         ensure!(
             (250..=60_000).contains(&self.duration_ms),

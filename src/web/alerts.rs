@@ -23,7 +23,7 @@ async fn alert_overlay(cx: &Cx) -> Result<impl View> {
             >
                 <div
                     id="alert-stage"
-                    style="height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;color:white;font: bold 48px sans-serif;text-align:center;text-shadow:0 2px 6px black"
+                    style="position:relative;width:100vw;height:100vh;color:white;font:bold 48px sans-serif;text-align:center;text-shadow:0 2px 6px black"
                 ></div>
             </body>
         </html>

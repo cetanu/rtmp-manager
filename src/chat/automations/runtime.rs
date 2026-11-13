@@ -42,11 +42,12 @@ let roll = random_int(100); // A random integer from 1 through 100.
 let result = author + " rolled " + roll.to_string();
 
 // Alerts appear on the OBS alert overlay. At least one of text, image or
-// sound is required; duration_ms must be between 250 and 60000.
+// video or sound is required; duration_ms must be between 250 and 60000.
 overlay.show(#{
     text: result,
     // image: "your-uploaded-image.gif", // Uncomment after uploading it.
     // sound: "your-uploaded-sound.mp3", // Uncomment after uploading it.
+    position: #{x: 25, y: 20, width: 50, height: 60}, // Percent of OBS canvas.
     duration_ms: 8000
 });
 

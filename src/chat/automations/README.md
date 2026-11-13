@@ -72,6 +72,7 @@ if rolled == 1 {
         text: message.author + " WON!",
         image: "jackpot.gif",
         sound: "jackpot.mp3",
+        position: #{x: 70, y: 10, width: 25, height: 30},
         duration_ms: 8000
     });
     message.author + " WON!"
@@ -89,16 +90,30 @@ An invalid alert fails the script and discards its state changes and alerts.
 Deleting media makes scripts that reference it fail until their references are
 updated or the file is uploaded again.
 
+Set the OBS Browser Source width and height to match your stream canvas, for
+example 1920 × 1080 for 1080p, and place it at the canvas origin. The optional
+`position` defines a rectangle as integer percentages of that canvas: `x` and
+`y` are its top-left corner, and `width` and `height` are its size. All four
+values are required; dimensions must be positive and the rectangle must fit
+inside the canvas. For example, the rectangle above starts 70% from the left
+and 10% from the top. Images and videos keep their aspect ratio inside the
+rectangle. Text and visual media in the same alert share the rectangle. Omit
+`position` to use the whole canvas. Each `overlay.show` call can use a different
+rectangle.
+
 Add `/overlay/alerts?key=YOUR_OVERLAY_TOKEN` as a separate OBS Browser Source,
-using **OBS overlay** . Alerts play sequentially, with audio stopped at
+using **OBS overlay**. Alerts play sequentially, with audio stopped at
 the end of each alert. Enable **Control audio via OBS** to mix it through OBS.
 Alerts are published only after the execution commits. They are live events:
 disconnected overlays miss alerts, and refreshing or reconnecting never replays
 old alerts. Each connected browser source plays its own copy. A slow client has
 a bounded queue (64 waiting alerts); additional alerts are dropped.
 
-**Send test message** lists collected alerts without publishing them or saving
-state.
+**Send test message** runs the editor draft with fresh state, even while offline,
+and shows its output, state and alerts without saving anything. Test alerts play
+on every connected OBS overlay, including any visible in a live scene. Open the
+overlay before testing to see and hear them. Media references are checked before
+playback.
 
 For local testing while live, POST JSON to the authenticated `/api/chat/test`
 endpoint, for example:

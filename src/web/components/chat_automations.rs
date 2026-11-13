@@ -43,6 +43,7 @@ async fn save_automation(
 
 #[procedure]
 async fn test_automation(cx: &Cx, pattern: String, script: String, text: String) -> Result<String> {
+    let app: &AppHandle = context(cx);
     let result = tokio::task::spawn_blocking(move || {
         let definition = AutomationDefinition {
             name: "Test".into(),
@@ -65,17 +66,35 @@ async fn test_automation(cx: &Cx, pattern: String, script: String, text: String)
     })
     .await;
     Ok(match result {
-        Ok(Ok(Some(result))) => format!(
-            "Output: {}\n\nGlobal state: {}\nViewer state: {}\n\nAlerts: {}",
-            if result.output.is_empty() {
-                "(no output)"
+        Ok(Ok(Some(result))) => {
+            let preview_status = if !result.alerts.is_empty() {
+                match app
+                    .chat
+                    .preview_alerts(app.config.database(), result.alerts.clone())
+                    .await
+                {
+                    Ok(0) => {
+                        "\n\nNo overlay connected; open the OBS overlay before testing.".to_owned()
+                    }
+                    Ok(count) => format!("\n\nTest alerts sent to {count} connected overlay(s)."),
+                    Err(error) => format!("\n\nOverlay preview error: {error}"),
+                }
             } else {
-                &result.output
-            },
-            serde_json::to_string_pretty(&result.state).unwrap_or_default(),
-            serde_json::to_string_pretty(&result.viewer).unwrap_or_default(),
-            serde_json::to_string(&result.alerts).unwrap_or_default(),
-        ),
+                String::new()
+            };
+            format!(
+                "Output: {}\n\nGlobal state: {}\nViewer state: {}\n\nAlerts: {}{}",
+                if result.output.is_empty() {
+                    "(no output)"
+                } else {
+                    &result.output
+                },
+                serde_json::to_string_pretty(&result.state).unwrap_or_default(),
+                serde_json::to_string_pretty(&result.viewer).unwrap_or_default(),
+                serde_json::to_string(&result.alerts).unwrap_or_default(),
+                preview_status,
+            )
+        }
         Ok(Ok(None)) => "Not matched.".into(),
         Ok(Err(error)) => format!("Error: {error}"),
         Err(error) => format!("Error: {error}"),
@@ -211,6 +230,9 @@ async fn automation_editor(
                                     ))
                             />
                         </label>
+                        <p class="text-xs text-muted-foreground">
+                            "Works offline. Test alerts appear on every connected overlay, including live scenes. Test state is not saved."
+                        </p>
                         <button
                             type="button"
                             class=(outline.clone())

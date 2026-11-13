@@ -1337,6 +1337,19 @@ impl ChatHandle {
         self.alerts.subscribe()
     }
 
+    pub(crate) async fn preview_alerts(
+        &self,
+        db: &toasty::Db,
+        alerts: Vec<automations::alerts::Alert>,
+    ) -> Result<usize> {
+        automations::alerts::validate_media(db, &alerts).await?;
+        let mut listeners = 0;
+        for alert in alerts {
+            listeners = self.alerts.send(alert).unwrap_or(0);
+        }
+        Ok(listeners)
+    }
+
     pub async fn save_automation(
         &self,
         id: Option<u64>,

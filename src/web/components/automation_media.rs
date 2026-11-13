@@ -74,6 +74,9 @@ pub async fn automation_media(cx: &Cx) -> Result<impl View> {
                     <p class="mb-4 text-xs text-muted-foreground">
                         "Supported formats: PNG, GIF, JPEG, WebP, MP4, MP3, WAV or Ogg · Size limit: 10 MiB"
                     </p>
+                    <p class="mb-4 text-xs text-muted-foreground">
+                        "Set the OBS browser source to your stream canvas size. Use position: #{x: 70, y: 10, width: 25, height: 30} in overlay.show to place an alert using canvas percentages."
+                    </p>
                     <p
                         data-media-status=""
                         role="status"
@@ -95,7 +98,7 @@ pub async fn automation_media(cx: &Cx) -> Result<impl View> {
                                 let video = media.content_type.starts_with("video/");
                                 let url = format!("/api/alerts/media?name={}", media.name);
                                 let snippet = format!(
-                                    "overlay.show(#{{ {}: \"{}\", duration_ms: 8000 }});",
+                                    "overlay.show(#{{ {}: \"{}\", position: #{{x: 25, y: 25, width: 50, height: 50}}, duration_ms: 8000 }});",
                                     if image {
                                         "image"
                                     } else if video {
