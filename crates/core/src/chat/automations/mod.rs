@@ -8,6 +8,57 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use toasty::Executor;
 
+/// Owns live execution and the shared alert schedule.
+#[derive(Clone)]
+pub struct AutomationEngine {
+    db: toasty::Db,
+    status: tokio::sync::watch::Receiver<crate::server::preview::StreamStatus>,
+    queue: alerts::AlertQueue,
+}
+
+impl AutomationEngine {
+    pub fn new(
+        db: toasty::Db,
+        status: tokio::sync::watch::Receiver<crate::server::preview::StreamStatus>,
+    ) -> Self {
+        Self {
+            db: db.clone(),
+            status,
+            queue: alerts::AlertQueue::new(db),
+        }
+    }
+
+    pub fn subscribe_alerts(&self) -> tokio::sync::broadcast::Receiver<alerts::Alert> {
+        self.queue.subscribe()
+    }
+
+    pub async fn preview_alerts(&self, alerts: Vec<alerts::Alert>) -> Result<usize> {
+        alerts::validate_media(&self.db, &alerts).await?;
+        self.queue.enqueue(alerts).await
+    }
+
+    pub async fn process_message(
+        &self,
+        message: &IncomingChatMessage,
+    ) -> Result<Option<ProcessOutcome>> {
+        if was_processed(&self.db, message).await? {
+            return Ok(None);
+        }
+        if self.status.borrow().state != crate::server::preview::StreamState::Live {
+            return Ok(Some(ProcessOutcome::empty()));
+        }
+        let mut outcome = process(&self.db, message).await?;
+        if let Err(error) = self
+            .queue
+            .enqueue(std::mem::take(&mut outcome.alerts))
+            .await
+        {
+            tracing::warn!("Could not queue committed automation alerts: {error:#}");
+        }
+        Ok(Some(outcome))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AutomationDefinition {
     pub name: String,
@@ -272,6 +323,18 @@ pub struct ProcessOutcome {
     pub failed: u64,
     pub consumed: bool,
     pub alerts: Vec<alerts::Alert>,
+}
+
+impl ProcessOutcome {
+    fn empty() -> Self {
+        Self {
+            executed: false,
+            succeeded: 0,
+            failed: 0,
+            consumed: false,
+            alerts: Vec::new(),
+        }
+    }
 }
 
 /// The actor calls this only while Live. All matching scripts run in ID order.

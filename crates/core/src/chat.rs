@@ -255,7 +255,6 @@ pub struct ChatInbox {
     capacity: usize,
     queue_mode: bool,
     database: toasty::Db,
-    alerts: tokio::sync::broadcast::Sender<automations::alerts::Alert>,
 }
 
 impl ChatInbox {
@@ -284,7 +283,6 @@ impl ChatInbox {
         let mut inbox = Self {
             capacity,
             queue_mode: true,
-            alerts: tokio::sync::broadcast::channel(128).0,
             database,
         };
         inbox.trim_to_capacity().await?;
@@ -844,7 +842,7 @@ struct ChatActor {
     inbox: ChatInbox,
     recent_messages: std::collections::HashMap<(Source, String, String), std::time::Instant>,
     spam_window: Duration,
-    stream_status: watch::Receiver<crate::server::preview::StreamStatus>,
+    automation: automations::AutomationEngine,
     twitch_task: Option<JoinHandle<()>>,
     youtube_task: Option<JoinHandle<()>>,
     pomodoro_timer: Option<JoinHandle<()>>,
@@ -1040,9 +1038,7 @@ impl ChatActor {
         metrics: &Metrics,
     ) -> Result<EnqueueOutcome> {
         let message = message.normalized()?;
-        if message_seen(&mut self.inbox.database.clone(), &message).await?
-            || automations::was_processed(&self.inbox.database, &message).await?
-        {
+        if message_seen(&mut self.inbox.database.clone(), &message).await? {
             return Ok(EnqueueOutcome::Duplicate);
         }
         let now = std::time::Instant::now();
@@ -1070,11 +1066,10 @@ impl ChatActor {
         message: IncomingChatMessage,
         metrics: &Metrics,
     ) -> Result<EnqueueOutcome> {
-        if self.stream_status.borrow().state == crate::server::preview::StreamState::Live {
-            let outcome = automations::process(&self.inbox.database, &message).await?;
-            for alert in outcome.alerts {
-                let _ = self.inbox.alerts.send(alert);
-            }
+        {
+            let Some(outcome) = self.automation.process_message(&message).await? else {
+                return Ok(EnqueueOutcome::Duplicate);
+            };
             metrics.add_automations_executed(outcome.succeeded);
             metrics.add_automations_failed(outcome.failed);
             if outcome.executed {
@@ -1357,25 +1352,16 @@ pub struct ChatHandle {
     state_rx: watch::Receiver<ChatState>,
     metrics: Arc<Metrics>,
     test_message_sequence: Arc<AtomicU64>,
-    alerts: tokio::sync::broadcast::Sender<automations::alerts::Alert>,
+    automation: automations::AutomationEngine,
 }
 
 impl ChatHandle {
     pub fn subscribe_alerts(&self) -> tokio::sync::broadcast::Receiver<automations::alerts::Alert> {
-        self.alerts.subscribe()
+        self.automation.subscribe_alerts()
     }
 
-    pub async fn preview_alerts(
-        &self,
-        db: &toasty::Db,
-        alerts: Vec<automations::alerts::Alert>,
-    ) -> Result<usize> {
-        automations::alerts::validate_media(db, &alerts).await?;
-        let mut listeners = 0;
-        for alert in alerts {
-            listeners = self.alerts.send(alert).unwrap_or(0);
-        }
-        Ok(listeners)
+    pub async fn preview_alerts(&self, alerts: Vec<automations::alerts::Alert>) -> Result<usize> {
+        self.automation.preview_alerts(alerts).await
     }
 
     pub async fn save_automation(
@@ -1467,12 +1453,13 @@ impl ChatHandle {
         let (state_tx, state_rx) = watch::channel(ChatState::default());
         let (sender, receiver) = mpsc::channel(ACTOR_COMMAND_CAPACITY);
 
+        let automation = automations::AutomationEngine::new(inbox.database.clone(), stream_status);
         let handle = Self {
             sender,
             state_rx,
             metrics,
             test_message_sequence: Arc::new(AtomicU64::new(1)),
-            alerts: inbox.alerts.clone(),
+            automation: automation.clone(),
         };
 
         // Rehydrate focus mode persisted before a restart, if it has not
@@ -1513,7 +1500,7 @@ impl ChatHandle {
             inbox,
             recent_messages: Default::default(),
             spam_window: Duration::from_secs(30),
-            stream_status,
+            automation,
             twitch_task: None,
             youtube_task: None,
             pomodoro_timer,
@@ -2065,13 +2052,16 @@ mod tests {
         .await
         .unwrap();
         let mut actor = ChatActor {
-            inbox,
             recent_messages: Default::default(),
             spam_window: Duration::from_secs(30),
-            stream_status: watch::channel(crate::server::preview::StreamStatus {
-                state: crate::server::preview::StreamState::Offline,
-            })
-            .1,
+            automation: automations::AutomationEngine::new(
+                inbox.database.clone(),
+                watch::channel(crate::server::preview::StreamStatus {
+                    state: crate::server::preview::StreamState::Offline,
+                })
+                .1,
+            ),
+            inbox,
             twitch_task: None,
             youtube_task: None,
             pomodoro_timer: None,

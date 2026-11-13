@@ -56,6 +56,22 @@ struct MediaQuery {
     name: String,
 }
 
+#[derive(Deserialize)]
+struct RepeatQuery {
+    name: String,
+    allow: bool,
+}
+
+#[route(POST "/api/alerts/media/repeats")]
+async fn set_media_repeats(cx: &Cx) -> Result<Response> {
+    let query: RepeatQuery = parse_query_params(cx)?;
+    let app: &AppHandle = context(cx);
+    alerts::set_allow_repeats(app.config.database(), &query.name, query.allow)
+        .await
+        .map_err(|e| bad_request(e.to_string()))?;
+    media_library_response(cx).await
+}
+
 #[route(
     GET "/api/alerts/media",
     with(topcoat::router::BodyLimit::max(

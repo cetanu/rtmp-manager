@@ -12,7 +12,6 @@
   // One player per surface keeps image, text and audio on the same timeline.
   const player = (stage) => {
     const queue = [];
-    let playing = false;
     let stopped = false;
     let timer;
     let audio;
@@ -28,8 +27,7 @@
     const next = () => {
       clear();
       const alert = queue.shift();
-      if (!alert || stopped) { playing = false; return; }
-      playing = true;
+      if (!alert || stopped) return;
       const position = alert.position ?? { x: 0, y: 0, width: 100, height: 100 };
       const content = document.createElement("div");
       content.style.cssText = `position:absolute;left:${position.x}%;top:${position.y}%;width:${position.width}%;height:${position.height}%;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden`;
@@ -74,7 +72,7 @@
       timer = setTimeout(next, alert.duration_ms);
     };
     return {
-      push(alert) { if (!stopped && queue.length < 64) { queue.push(alert); if (!playing) next(); } },
+      push(alert) { if (!stopped) { queue.push(alert); next(); } },
       stop() { stopped = true; queue.length = 0; clear(); },
     };
   };
@@ -106,7 +104,7 @@
     const body = new FormData(form);
     library.setAttribute("aria-busy", "true");
     status.classList.remove("hidden", "text-destructive");
-    status.textContent = form.querySelector("input[type=file]") ? "Uploading media…" : "Deleting media…";
+    status.textContent = form.querySelector("input[type=file]") ? "Uploading media…" : "Updating media…";
     library.querySelectorAll("button, input").forEach(control => { control.disabled = true; });
     try {
       const response = await fetch(form.action, { method: "POST", body });

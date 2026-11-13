@@ -464,15 +464,67 @@ async fn test_alerts_can_be_previewed_offline_and_missing_media_is_rejected() {
     };
     assert_eq!(
         handle
-            .preview_alerts(&db, vec![alert.clone()])
+            .preview_alerts(vec![alert.clone()])
             .await
             .unwrap(),
         1
     );
     assert_eq!(receiver.try_recv().unwrap().text, "Preview");
     alert.image = "missing.png".into();
-    assert!(handle.preview_alerts(&db, vec![alert]).await.is_err());
+    assert!(handle.preview_alerts(vec![alert]).await.is_err());
     assert!(receiver.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn shared_queue_respects_media_repeat_policy_and_duration() {
+    let (db, _) = database().await;
+    alerts::upload(&db, "winner.gif".into(), b"GIF89atest")
+        .await
+        .unwrap();
+    alerts::set_allow_repeats(&db, "winner.gif", false)
+        .await
+        .unwrap();
+    let queue = alerts::AlertQueue::new(db.clone());
+    let alert = alerts::Alert {
+        text: "first".into(),
+        image: "winner.gif".into(),
+        video: String::new(),
+        sound: String::new(),
+        position: None,
+        duration_ms: 250,
+    };
+    assert_eq!(queue.enqueue(vec![alert.clone()]).await.unwrap(), 0);
+    let mut first = queue.subscribe();
+    let mut second = queue.subscribe();
+    assert_eq!(queue.enqueue(vec![alert.clone()]).await.unwrap(), 2);
+    assert_eq!(first.recv().await.unwrap().text, "first");
+    assert_eq!(second.recv().await.unwrap().text, "first");
+    assert_eq!(queue.enqueue(vec![alert.clone()]).await.unwrap(), 0);
+    alerts::set_allow_repeats(&db, "winner.gif", true)
+        .await
+        .unwrap();
+    let mut next = alert;
+    next.text = "second".into();
+    assert_eq!(queue.enqueue(vec![next]).await.unwrap(), 2);
+    alerts::set_allow_repeats(&db, "winner.gif", false)
+        .await
+        .unwrap();
+    let duplicate = alerts::Alert {
+        text: "suppressed".into(),
+        image: "winner.gif".into(),
+        video: String::new(),
+        sound: String::new(),
+        position: None,
+        duration_ms: 250,
+    };
+    assert_eq!(queue.enqueue(vec![duplicate]).await.unwrap(), 0);
+    assert!(first.try_recv().is_err());
+    let received = tokio::time::timeout(std::time::Duration::from_secs(2), first.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(received.text, "second");
+    assert_eq!(second.recv().await.unwrap().text, "second");
 }
 
 #[tokio::test]

@@ -1035,6 +1035,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(uploaded.status(), reqwest::StatusCode::OK);
+        let repeat_url =
+            format!("http://{local_addr}/api/alerts/media/repeats?name=winner.gif&allow=false");
+        let denied = client
+            .post(&repeat_url)
+            .query(&[("key", "overlay-token-for-tests")])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), reqwest::StatusCode::UNAUTHORIZED);
+        let updated = client
+            .post(&repeat_url)
+            .basic_auth("admin", Some("secretpassword123"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(updated.status(), reqwest::StatusCode::OK);
+        assert!(updated.text().await.unwrap().contains("Repeats blocked"));
         for auth_with_token in [true, false] {
             let mut request = client.get(format!(
                 "http://{local_addr}/api/alerts/media?name=winner.gif"

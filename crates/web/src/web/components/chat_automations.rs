@@ -70,13 +70,13 @@ async fn test_automation(cx: &Cx, pattern: String, script: String, text: String)
             let preview_status = if !result.alerts.is_empty() {
                 match app
                     .chat
-                    .preview_alerts(app.config.database(), result.alerts.clone())
+                    .preview_alerts(result.alerts.clone())
                     .await
                 {
                     Ok(0) => {
-                        "\n\nNo overlay connected; open the OBS overlay before testing.".to_owned()
+                        "\n\nNo alert queued (no overlay connected, duplicate media, or queue full).".to_owned()
                     }
-                    Ok(count) => format!("\n\nTest alerts sent to {count} connected overlay(s)."),
+                    Ok(count) => format!("\n\nTest alerts queued for {count} connected overlay(s)."),
                     Err(error) => format!("\n\nOverlay preview error: {error}"),
                 }
             } else {

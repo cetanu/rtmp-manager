@@ -2,8 +2,112 @@
 use anyhow::{Result, anyhow, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
+use std::{
+    collections::{HashSet, VecDeque},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+use tokio::sync::broadcast;
 
 pub const MAX_MEDIA_BYTES: usize = 10 * 1024 * 1024;
+
+#[derive(Clone)]
+pub struct AlertQueue {
+    db: toasty::Db,
+    sender: broadcast::Sender<Alert>,
+    state: Arc<Mutex<QueueState>>,
+}
+
+#[derive(Default)]
+struct QueueState {
+    playing: Option<Alert>,
+    waiting: VecDeque<Alert>,
+}
+
+fn names(alert: &Alert) -> impl Iterator<Item = &str> {
+    [&alert.image, &alert.video, &alert.sound]
+        .into_iter()
+        .map(String::as_str)
+        .filter(|name| !name.is_empty())
+}
+
+impl AlertQueue {
+    pub fn new(db: toasty::Db) -> Self {
+        Self {
+            db,
+            sender: broadcast::channel(128).0,
+            state: Arc::new(Mutex::new(QueueState::default())),
+        }
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<Alert> {
+        self.sender.subscribe()
+    }
+
+    pub async fn enqueue(&self, alerts: Vec<Alert>) -> Result<usize> {
+        let listeners = self.sender.receiver_count();
+        if listeners == 0 || alerts.is_empty() {
+            return Ok(0);
+        }
+        let restricted: HashSet<String> = list(&self.db)
+            .await?
+            .into_iter()
+            .filter(|media| !media.allow_repeats)
+            .map(|media| media.name)
+            .collect();
+        let mut state = self.state.lock().unwrap();
+        let mut accepted = false;
+        for alert in alerts {
+            let duplicate = names(&alert).any(|name| {
+                restricted.contains(name)
+                    && state
+                        .playing
+                        .iter()
+                        .chain(state.waiting.iter())
+                        .any(|queued| names(queued).any(|existing| existing == name))
+            });
+            if duplicate || state.waiting.len() >= 64 {
+                continue;
+            }
+            accepted = true;
+            if state.playing.is_none() {
+                let _ = self.sender.send(alert.clone());
+                state.playing = Some(alert);
+                let queue = self.clone();
+                tokio::spawn(async move {
+                    queue.run().await;
+                });
+            } else {
+                state.waiting.push_back(alert);
+            }
+        }
+        Ok(if accepted { listeners } else { 0 })
+    }
+
+    async fn run(self) {
+        loop {
+            let duration = {
+                let state = self.state.lock().unwrap();
+                match &state.playing {
+                    Some(alert) => alert.duration_ms,
+                    None => return,
+                }
+            };
+            tokio::time::sleep(Duration::from_millis(duration)).await;
+            let mut state = self.state.lock().unwrap();
+            state.playing = None;
+            while let Some(next) = state.waiting.pop_front() {
+                if self.sender.send(next.clone()).is_ok() {
+                    state.playing = Some(next);
+                    break;
+                }
+            }
+            if state.playing.is_none() {
+                return;
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -87,7 +191,11 @@ pub struct Media {
 pub async fn list(db: &toasty::Db) -> Result<Vec<Media>> {
     // Avoid loading media bodies to list the library.
     Ok(Media::all()
-        .select((Media::fields().name(), Media::fields().content_type(), Media::fields().allow_repeats()))
+        .select((
+            Media::fields().name(),
+            Media::fields().content_type(),
+            Media::fields().allow_repeats(),
+        ))
         .exec(&mut db.clone())
         .await?
         .into_iter()
@@ -185,7 +293,11 @@ pub async fn upload(db: &toasty::Db, name: String, bytes: &[u8]) -> Result<()> {
 
 pub async fn set_allow_repeats(db: &toasty::Db, name: &str, allow: bool) -> Result<()> {
     let mut media = get(db, name).await?;
-    media.update().allow_repeats(allow).exec(&mut db.clone()).await?;
+    media
+        .update()
+        .allow_repeats(allow)
+        .exec(&mut db.clone())
+        .await?;
     Ok(())
 }
 
