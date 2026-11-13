@@ -2600,7 +2600,7 @@ dependencies = [
 
 [[package]]
 name = "rtmp-core"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "aws-lc-rs",
@@ -2659,7 +2659,7 @@ dependencies = [
 
 [[package]]
 name = "rtmp-web"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

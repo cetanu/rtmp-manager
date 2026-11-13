@@ -3,9 +3,12 @@ members = ["crates/core", "crates/web"]
 default-members = [".", "crates/core", "crates/web"]
 resolver = "3"
 
+[workspace.package]
+version = "0.12.1"
+
 [package]
 name = "rtmp-proxy"
-version = "0.12.1"
+version.workspace = true
 edition = "2024"
 default-run = "rtmp-proxy"
 rust-version = "1.99"
