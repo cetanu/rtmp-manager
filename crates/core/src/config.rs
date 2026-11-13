@@ -119,6 +119,9 @@ pub struct WebAuthSettings {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Validate)]
 pub struct ChatSettings {
+    #[serde(default = "default_spam_window_secs")]
+    #[validate(minimum = 1)]
+    pub spam_window_secs: u64,
     #[serde(default = "default_true")]
     pub queue_mode: bool,
     #[serde(default = "default_chat_queue_capacity")]
@@ -176,6 +179,10 @@ fn default_chat_queue_capacity() -> usize {
     500
 }
 
+fn default_spam_window_secs() -> u64 {
+    30
+}
+
 fn default_youtube_min_poll_interval_secs() -> u64 {
     5
 }
@@ -199,6 +206,7 @@ pub fn default_poll_results_seconds() -> u64 {
 impl Default for ChatSettings {
     fn default() -> Self {
         Self {
+            spam_window_secs: default_spam_window_secs(),
             queue_mode: true,
             queue_capacity: default_chat_queue_capacity(),
             twitch_channel: None,
@@ -381,6 +389,9 @@ fn merge_web_auth(config: &mut AppConfig, form: WebAuthForm) {
 
 fn merge_chat(config: &mut AppConfig, form: ChatForm) {
     config.chat = ChatSettings {
+        spam_window_secs: form
+            .spam_window_secs
+            .unwrap_or(config.chat.spam_window_secs),
         queue_mode: config.chat.queue_mode,
         queue_capacity: form.queue_capacity.unwrap_or(config.chat.queue_capacity),
         twitch_channel: non_empty(form.twitch_channel)
@@ -740,6 +751,7 @@ pub struct WebAuthForm {
 
 #[derive(Debug, Default, Deserialize)]
 pub struct ChatForm {
+    pub spam_window_secs: Option<u64>,
     pub queue_capacity: Option<usize>,
     pub twitch_channel: Option<String>,
     pub youtube_api_key: Option<String>,
