@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1](https://github.com/cetanu/rtmp-manager/compare/v0.12.0...v0.12.1) - 2026-11-13
+
+### Added
+
+- *(automations)* centralize alert queue and repeat controls
+- dedupe chat messages
+- overlay takes up entire canvas, media can be positioned
+
+### Fixed
+
+- *(overlay)* align positioned alerts to their origin
+- *(chat)* persist repeated message window
+- *(release)* scope git_only and tag template to rtmp-proxy
+
+### Other
+
+- stabilize chat layout and prune trivial checks
+- formatting
+- *(automations)* own draft testing and previews
+- *(release)* configure release-plz for single binary release
+- split backend and dashboard into workspace crates
+
 ## [0.12.0](https://github.com/cetanu/rtmp-manager/compare/v0.11.0...v0.12.0) - 2026-11-11
 
 ### Added
