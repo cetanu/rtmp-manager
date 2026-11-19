@@ -383,6 +383,74 @@ async fn get_config(cx: &Cx) -> Result<Response> {
         .into_response(cx)
 }
 
+#[derive(Deserialize)]
+struct SecretExportForm {
+    passphrase: String,
+}
+
+#[route(POST "/api/config/export-secrets", with(topcoat::router::BodyLimit::max(8192)))]
+async fn export_config_secrets(cx: &Cx, body: Bytes) -> Result<Response> {
+    static EXPORT_SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+    let Ok(permit) = EXPORT_SLOT.try_acquire() else {
+        return (
+            topcoat::router::StatusCode::TOO_MANY_REQUESTS,
+            "An export is already in progress",
+        )
+            .into_response(cx);
+    };
+    let app: &AppHandle = context(cx);
+    let config = app.config.get();
+    if config.web_auth.username.is_empty() || config.web_auth.password.is_empty() {
+        return (
+            topcoat::router::StatusCode::FORBIDDEN,
+            "Configure dashboard authentication before exporting secrets",
+        )
+            .into_response(cx);
+    }
+    // Require a browser origin for this sensitive download, in addition to the auth middleware.
+    let request_headers = headers(cx);
+    let origin = request_headers.get("origin").and_then(|v| v.to_str().ok());
+    let host = request_headers.get("host").and_then(|v| v.to_str().ok());
+    if !origin.zip(host).is_some_and(|(origin, host)| {
+        origin
+            .strip_prefix("https://")
+            .or_else(|| origin.strip_prefix("http://"))
+            == Some(host)
+    }) {
+        return (
+            topcoat::router::StatusCode::FORBIDDEN,
+            "Same-origin request required",
+        )
+            .into_response(cx);
+    }
+    let form: SecretExportForm = serde_qs::Config::new()
+        .use_form_encoding(true)
+        .deserialize_bytes(&body)
+        .map_err(|_| bad_request("Invalid export form"))?;
+    let encrypted = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        rtmp_core::backup::encrypted_export(&config, form.passphrase)
+    })
+    .await
+    .map_err(|_| bad_request("Backup export failed"))?
+    .map_err(|_| bad_request("Unable to export: check your backup passphrase"))?;
+    (
+        [
+            (topcoat::router::header::CACHE_CONTROL, "no-store, private"),
+            (
+                topcoat::router::header::CONTENT_TYPE,
+                "application/octet-stream",
+            ),
+            (
+                topcoat::router::header::CONTENT_DISPOSITION,
+                "attachment; filename=rtmp-config.json.age",
+            ),
+        ],
+        encrypted,
+    )
+        .into_response(cx)
+}
+
 #[route(
     POST "/api/config/import",
     with(topcoat::router::BodyLimit::max(MAX_CONFIG_BODY_SIZE))
@@ -935,6 +1003,8 @@ mod tests {
         );
 
         let mut authed_config = app_handle.config.get().as_ref().clone();
+        authed_config.web_auth.backup_passphrase_hash =
+            rtmp_core::backup::hash_passphrase("a separate backup passphrase").unwrap();
         authed_config.web_auth.username = "admin".into();
         authed_config.web_auth.password = "secretpassword123".into();
         app_handle
@@ -942,6 +1012,49 @@ mod tests {
             .import(&serde_json::to_vec(&authed_config).unwrap())
             .await
             .unwrap();
+
+        for (origin, passphrase, expected) in [
+            (
+                None,
+                "a separate backup passphrase",
+                reqwest::StatusCode::FORBIDDEN,
+            ),
+            (
+                Some("https://attacker.example".to_owned()),
+                "a separate backup passphrase",
+                reqwest::StatusCode::FORBIDDEN,
+            ),
+            (
+                Some(format!("http://{local_addr}")),
+                "wrong",
+                reqwest::StatusCode::BAD_REQUEST,
+            ),
+            (
+                Some(format!("http://{local_addr}")),
+                "a separate backup passphrase",
+                reqwest::StatusCode::OK,
+            ),
+        ] {
+            let mut request = client
+                .post(format!("http://{local_addr}/api/config/export-secrets"))
+                .basic_auth("admin", Some("secretpassword123"))
+                .form(&[("passphrase", passphrase)]);
+            if let Some(origin) = origin {
+                request = request.header("Origin", origin);
+            }
+            let response = request.send().await.unwrap();
+            assert_eq!(response.status(), expected);
+            if expected == reqwest::StatusCode::OK {
+                assert_eq!(response.headers()["cache-control"], "no-store, private");
+                assert_eq!(
+                    response.headers()["content-disposition"],
+                    "attachment; filename=rtmp-config.json.age"
+                );
+                let bytes = response.bytes().await.unwrap();
+                assert!(bytes.starts_with(b"age-encryption.org/v1"));
+                assert!(!String::from_utf8_lossy(&bytes).contains("secretpassword123"));
+            }
+        }
 
         let unauthed_dashboard = client
             .get(format!("http://{local_addr}/chat"))

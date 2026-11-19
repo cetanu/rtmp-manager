@@ -18,6 +18,9 @@ pub async fn config_transfer(cx: &Cx) -> Result<impl View> {
     let outline_button = button_variants(ButtonVariant::Outline, ButtonSize::Md);
     let export_open = signal(cx, || false);
     let import_open = signal(cx, || false);
+    let secrets_open = signal(cx, || false);
+    let app: &AppHandle = context(cx);
+    let backup_configured = !app.config.get().web_auth.backup_passphrase_hash.is_empty();
 
     Ok(view! {
         card(
@@ -44,6 +47,27 @@ pub async fn config_transfer(cx: &Cx) -> Result<impl View> {
                         "Open raw JSON"
                     )
                 </div>
+
+                if backup_configured {
+                    <div class="mt-5">
+                        <button type="button" class=(button_variants(ButtonVariant::Outline, ButtonSize::Md))
+                            @click=$(|_event| secrets_open.set(!secrets_open.get()))>
+                            "Export with secrets"
+                        </button>
+                        <form method="post" action="/api/config/export-secrets" class="mt-4 flex flex-col gap-3" :hidden=$(!secrets_open.get())>
+                            form_field(
+                                control_id: "export_passphrase",
+                                label_text: "Backup passphrase",
+                                input(attrs: attributes! {
+                                    id="export_passphrase" name="passphrase" type="password"
+                                    autocomplete="off" required="required" maxlength="1024"
+                                })
+                            )
+                            <p class="text-sm text-muted-foreground">"Downloads an encrypted .json.age file containing all credentials. Keep your passphrase to decrypt it. Use HTTPS for remote access."</p>
+                            button(variant: ButtonVariant::Primary, attrs: attributes! { type="submit" class="self-start" }, "Download encrypted backup")
+                        </form>
+                    </div>
+                }
 
                 exported_config(open: $(export_open.get()))
 

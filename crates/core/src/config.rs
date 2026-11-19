@@ -110,6 +110,8 @@ pub struct TargetConfig {
 #[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq)]
 pub struct WebAuthSettings {
     #[serde(default)]
+    pub backup_passphrase_hash: String,
+    #[serde(default)]
     pub username: String,
     #[serde(default)]
     pub password: String,
@@ -262,6 +264,7 @@ impl AppConfig {
             target.stream_key.clear();
         }
         redacted.web_auth.password.clear();
+        redacted.web_auth.backup_passphrase_hash.clear();
         redacted.web_auth.overlay_token.clear();
         redacted.chat.youtube_api_key = None;
         redacted.chat.x_api_key = None;
@@ -297,7 +300,7 @@ impl AppConfig {
             merge_notifications(&mut config, notification_fields);
         }
         if let Some(auth_fields) = form.web_auth {
-            merge_web_auth(&mut config, auth_fields);
+            merge_web_auth(&mut config, auth_fields)?;
         }
         if let Some(chat) = form.chat {
             merge_chat(&mut config, chat);
@@ -350,8 +353,12 @@ fn merge_server(config: &mut AppConfig, form: ServerForm) -> Result<()> {
         test_stream_duration_secs: form
             .test_stream_duration_secs
             .unwrap_or(config.server.test_stream_duration_secs),
-        ingest_stream_key: non_empty(form.ingest_stream_key)
-            .unwrap_or_else(|| config.server.ingest_stream_key.clone()),
+        ingest_stream_key: updated_secret(
+            form.ingest_stream_key,
+            form.clear_ingest_stream_key,
+            Some(config.server.ingest_stream_key.clone()),
+        )
+        .unwrap_or_default(),
     };
     Ok(())
 }
@@ -374,17 +381,36 @@ fn merge_notifications(config: &mut AppConfig, form: NotificationsForm) {
     };
 }
 
-fn merge_web_auth(config: &mut AppConfig, form: WebAuthForm) {
+fn merge_web_auth(config: &mut AppConfig, form: WebAuthForm) -> Result<()> {
+    let backup_passphrase_hash = if form.clear_backup_passphrase {
+        String::new()
+    } else {
+        match form.backup_passphrase.filter(|p| !p.is_empty()) {
+            Some(passphrase) => crate::backup::hash_passphrase(&passphrase)?,
+            None => config.web_auth.backup_passphrase_hash.clone(),
+        }
+    };
     config.web_auth = WebAuthSettings {
+        backup_passphrase_hash,
         username: form
             .username
             .unwrap_or_else(|| config.web_auth.username.clone())
             .trim()
             .to_string(),
-        password: non_empty(form.password).unwrap_or_else(|| config.web_auth.password.clone()),
-        overlay_token: non_empty(form.overlay_token)
-            .unwrap_or_else(|| config.web_auth.overlay_token.clone()),
+        password: updated_secret(
+            form.password,
+            form.clear_password,
+            Some(config.web_auth.password.clone()),
+        )
+        .unwrap_or_default(),
+        overlay_token: updated_secret(
+            form.overlay_token,
+            form.clear_overlay_token,
+            Some(config.web_auth.overlay_token.clone()),
+        )
+        .unwrap_or_default(),
     };
+    Ok(())
 }
 
 fn merge_chat(config: &mut AppConfig, form: ChatForm) {
@@ -729,6 +755,8 @@ pub struct ServerForm {
     pub api_listen: Option<String>,
     pub test_stream_duration_secs: Option<u64>,
     pub ingest_stream_key: Option<String>,
+    #[serde(default)]
+    pub clear_ingest_stream_key: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -744,9 +772,16 @@ pub struct NotificationsForm {
 
 #[derive(Debug, Default, Deserialize)]
 pub struct WebAuthForm {
+    pub backup_passphrase: Option<String>,
+    #[serde(default)]
+    pub clear_backup_passphrase: bool,
     pub username: Option<String>,
     pub password: Option<String>,
+    #[serde(default)]
+    pub clear_password: bool,
     pub overlay_token: Option<String>,
+    #[serde(default)]
+    pub clear_overlay_token: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1149,6 +1184,9 @@ fn restore_redacted_secrets(current: &AppConfig, mut imported: AppConfig) -> App
     if imported.notifications.webhook_url.is_none() {
         imported.notifications.webhook_url = current.notifications.webhook_url.clone();
     }
+    if imported.web_auth.backup_passphrase_hash.is_empty() {
+        imported.web_auth.backup_passphrase_hash = current.web_auth.backup_passphrase_hash.clone();
+    }
     if imported.web_auth.password.is_empty() {
         imported.web_auth.password = current.web_auth.password.clone();
     }
@@ -1218,6 +1256,7 @@ mod tests {
                 enabled: true,
             }],
             web_auth: WebAuthSettings {
+                backup_passphrase_hash: String::new(),
                 username: "operator".into(),
                 password: "correct horse battery staple".into(),
                 overlay_token: "overlay-token-for-tests".into(),
@@ -1313,6 +1352,7 @@ mod tests {
         config.server.ingest_stream_key = "new-ingest-key".into();
         config.notifications.live_message = "saved in sqlite".into();
         config.web_auth = WebAuthSettings {
+            backup_passphrase_hash: String::new(),
             username: "operator".into(),
             password: "correct horse battery staple".into(),
             overlay_token: "overlay-token-for-tests".into(),
@@ -1589,6 +1629,28 @@ mod tests {
             updated.notifications.webhook_url.as_deref(),
             Some("https://192.0.2.2/hook")
         );
+    }
+
+    #[test]
+    fn explicit_clear_removes_server_and_web_auth_secrets() {
+        let mut config = populated_config();
+        config.web_auth.backup_passphrase_hash = "configured-hash".into();
+        let form: ConfigForm = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str(
+                "server[clear_ingest_stream_key]=true&\
+                 web_auth[username]=&web_auth[clear_password]=true&\
+                 web_auth[clear_overlay_token]=true&\
+                 web_auth[clear_backup_passphrase]=true&action=save",
+            )
+            .unwrap();
+        let updated = config.merge_form(form).unwrap();
+
+        assert!(updated.server.ingest_stream_key.is_empty());
+        assert!(updated.web_auth.password.is_empty());
+        assert!(updated.web_auth.overlay_token.is_empty());
+        assert!(updated.web_auth.backup_passphrase_hash.is_empty());
+        updated.validate().unwrap();
     }
 
     #[test]

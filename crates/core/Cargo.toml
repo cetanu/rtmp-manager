@@ -6,6 +6,7 @@ rust-version = "1.99"
 publish = false
 
 [dependencies]
+age = { version = "0.12.1", default-features = false }
 tokio = { version = "1.38", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
