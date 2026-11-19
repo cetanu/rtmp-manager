@@ -51,15 +51,7 @@ pub async fn secret_input(
     #[into] control_id: String,
     #[default] attrs: Attributes,
 ) -> Result<impl View> {
-    Ok(view! {
-        input(
-            attrs: attributes! {
-                type="password"
-                id=(control_id)
-                (attrs)
-            }
-        )
-    })
+    Ok(view! { input(attrs: attributes! { type="password" id=(control_id) (attrs) }) })
 }
 
 /// A password field whose configured value can be replaced or cleared.
@@ -117,7 +109,16 @@ pub async fn clearable_secret_field(
                     :hidden=$(cleared.get())
                     @click=$(move |_event| cleared.set(true))
                 >
-                    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                    <svg
+                        aria-hidden="true"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                    >
                         <path d="m6 6 12 12M6 18 18 6" />
                     </svg>
                 </button>

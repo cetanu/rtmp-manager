@@ -673,7 +673,9 @@ async fn inbox_messages(cx: &Cx) -> Result<impl View> {
                     >
                         (if poll.is_active() { "Poll" } else { "Poll results" })
                     </div>
-                    <div class="text-center text-xl font-semibold [overflow-wrap:anywhere]">
+                    <div
+                        class="text-center text-xl font-semibold [overflow-wrap:anywhere]"
+                    >
                         (poll.question.clone())
                     </div>
                     <div class="flex flex-col gap-2">
