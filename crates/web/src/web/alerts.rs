@@ -84,6 +84,27 @@ async fn serve_alert_media(cx: &Cx) -> Result<Response> {
     let media = alerts::get(app.config.database(), &query.name)
         .await
         .map_err(|_| not_found())?;
+    let etag = alerts::etag(&media);
+    let matches_etag = headers(cx)
+        .get(topcoat::router::header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|header| {
+            header.split(',').map(str::trim).any(|tag| {
+                tag == "*" || tag == etag || tag.strip_prefix("W/") == Some(etag.as_str())
+            })
+        });
+    if matches_etag {
+        let mut response = Response::new(topcoat::router::Body::empty());
+        *response.status_mut() = topcoat::router::StatusCode::NOT_MODIFIED;
+        response
+            .headers_mut()
+            .insert(topcoat::router::header::ETAG, etag.parse()?);
+        response.headers_mut().insert(
+            topcoat::router::header::CACHE_CONTROL,
+            "private, no-cache".parse()?,
+        );
+        return Ok(response);
+    }
     let bytes = STANDARD
         .decode(&media.data)
         .map_err(internal_server_error)?;
@@ -92,9 +113,12 @@ async fn serve_alert_media(cx: &Cx) -> Result<Response> {
         topcoat::router::header::CONTENT_TYPE,
         media.content_type.parse()?,
     );
+    response
+        .headers_mut()
+        .insert(topcoat::router::header::ETAG, etag.parse()?);
     response.headers_mut().insert(
         topcoat::router::header::CACHE_CONTROL,
-        "private, max-age=3600".parse()?,
+        "private, no-cache".parse()?,
     );
     response.headers_mut().insert(
         topcoat::router::header::X_CONTENT_TYPE_OPTIONS,

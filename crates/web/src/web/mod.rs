@@ -1179,8 +1179,24 @@ mod tests {
             let response = request.send().await.unwrap();
             assert_eq!(response.status(), reqwest::StatusCode::OK);
             assert_eq!(response.headers()["content-type"], "image/gif");
-            assert_eq!(response.headers()["cache-control"], "private, max-age=3600");
+            assert_eq!(response.headers()["cache-control"], "private, no-cache");
+            let etag = response.headers()["etag"].to_str().unwrap().to_owned();
             assert_eq!(response.bytes().await.unwrap().as_ref(), b"GIF89aexample");
+
+            let mut revalidated = client
+                .get(format!(
+                    "http://{local_addr}/api/alerts/media?name=winner.gif"
+                ))
+                .header(reqwest::header::IF_NONE_MATCH, &etag);
+            if auth_with_token {
+                revalidated = revalidated.query(&[("key", "overlay-token-for-tests")]);
+            } else {
+                revalidated = revalidated.basic_auth("admin", Some("secretpassword123"));
+            }
+            let cached = revalidated.send().await.unwrap();
+            assert_eq!(cached.status(), reqwest::StatusCode::NOT_MODIFIED);
+            assert_eq!(cached.headers()["etag"], etag);
+            assert!(cached.bytes().await.unwrap().is_empty());
         }
         let denied = client
             .get(format!(

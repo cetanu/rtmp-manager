@@ -217,6 +217,23 @@ pub async fn get(db: &toasty::Db, name: &str) -> Result<Media> {
         .ok_or_else(|| anyhow!("Media '{name}' does not exist"))
 }
 
+pub fn etag(media: &Media) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(media.content_type.as_bytes());
+    hasher.update([0]);
+    hasher.update(media.data.as_bytes());
+    let digest = hasher.finalize();
+    let mut hex = String::with_capacity(66);
+    hex.push('"');
+    for byte in digest {
+        use std::fmt::Write;
+        let _ = write!(&mut hex, "{byte:02x}");
+    }
+    hex.push('"');
+    hex
+}
+
 pub async fn validate_media(db: &toasty::Db, alerts: &[Alert]) -> Result<()> {
     let library = list(db).await?;
     for alert in alerts {
