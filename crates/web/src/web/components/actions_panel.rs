@@ -68,38 +68,36 @@ pub async fn actions_panel(cx: &Cx) -> Result<impl View> {
 
     Ok(view! {
         <div
-            class="flex flex-col sm:flex-row gap-4 justify-between items-center bg-surface p-4 border rounded-xl"
+            class="flex flex-col gap-3 rounded-sm border border-border bg-panel p-3 sm:flex-row sm:items-center sm:justify-between"
         >
-            <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <div class="flex gap-4">
-                    button(
-                        variant: ButtonVariant::Outline,
-                        attrs: attributes! {
-                            type="submit"
-                            formaction="/api/test-stream"
-                            formmethod="post"
-                        },
-                        "Test Stream"
-                    )
-                    button(
-                        variant: ButtonVariant::Outline,
-                        attrs: attributes! {
-                            type="button"
-                            :disabled=$(testing.get())
-                            @click=$(async |_event: Event| {
-                                testing.set(true);
-                                send_test_webhooks().await;
-                                testing.set(false);
-                            })
-                        },
-                        "Test Webhooks"
-                    )
-                </div>
+            <div class="flex flex-wrap gap-2">
+                button(
+                    variant: ButtonVariant::Outline,
+                    attrs: attributes! {
+                        type="submit"
+                        formaction="/api/test-stream"
+                        formmethod="post"
+                    },
+                    "Test Stream"
+                )
+                button(
+                    variant: ButtonVariant::Outline,
+                    attrs: attributes! {
+                        type="button"
+                        :disabled=$(testing.get())
+                        @click=$(async |_event: Event| {
+                            testing.set(true);
+                            send_test_webhooks().await;
+                            testing.set(false);
+                        })
+                    },
+                    "Test Webhooks"
+                )
             </div>
-            <div class="flex gap-4 w-full sm:w-auto">
+            <div class="flex flex-wrap gap-2">
                 button(
                     variant: ButtonVariant::Secondary,
-                    attrs: attributes! { type="reset" class="w-full sm:w-auto" },
+                    attrs: attributes! { type="reset" },
                     "Revert"
                 )
                 button(
@@ -109,7 +107,6 @@ pub async fn actions_panel(cx: &Cx) -> Result<impl View> {
                         id="saveBtn"
                         name="action"
                         value="save"
-                        class="w-full sm:w-auto min-w-[120px]"
                         formaction="/api/config"
                     },
                     "Save Configuration"

@@ -36,8 +36,9 @@ pub async fn targets(cx: &Cx) -> Result<impl View> {
     Ok(view! {
         card(
             card_content(
+                attrs: attributes! { class="pt-4" },
                 if !targets.is_empty() {
-                    <div id="targetsContainer">
+                    <div id="targetsContainer" class="grid gap-3 sm:grid-cols-2">
                         #[key(index)]
                         for (index, target) in targets.into_iter().enumerate() {
                             target_item(index: index, target: target)
@@ -77,127 +78,124 @@ pub async fn target_item(cx: &Cx, index: usize, target: TargetConfig) -> Result<
 
     Ok(view! {
         <div
-            class="mb-4 flex flex-col items-start gap-6 border bg-surface p-6 transition-all hover:border-primary hover:bg-foreground/5 hover:shadow-sm md:flex-row md:items-center"
+            class="min-w-0 rounded-sm border border-border bg-background/40 p-3 transition-colors hover:border-signal/50 hover:bg-signal/5 focus-within:border-signal/50 focus-within:bg-signal/5"
         >
             <input
                 type="hidden"
                 name=(format!("targets[{index}][original_index]"))
                 value=(index.to_string())
             />
-            <div class="flex w-full flex-1 flex-col gap-1">
-                <div class="grid gap-1 md:grid-cols-2">
-                    form_field(
-                        control_id: name_id.clone(),
-                        label_text: "Target Name",
-                        input(
-                            attrs: attributes! {
-                                type="text"
-                                id=(name_id)
-                                name=(format!("targets[{index}][name]"))
-                                value=(target.name.clone())
-                                placeholder="e.g. Twitch, YouTube"
-                                required="required"
-                            }
-                        )
-                    )
-                    form_field(
-                        control_id: public_url_id.clone(),
-                        label_text: "Public URL (Optional)",
-                        input(
-                            attrs: attributes! {
-                                type="url"
-                                id=(public_url_id)
-                                name=(format!("targets[{index}][public_url]"))
-                                value=(target.public_url.clone().unwrap_or_default())
-                                placeholder="https://twitch.tv/mychannel"
-                            }
-                        )
-                    )
-                </div>
-                <div class="grid gap-1 md:grid-cols-2">
-                    form_field(
-                        control_id: url_id.clone(),
-                        label_text: "RTMP URL Base",
-                        input(
-                            attrs: attributes! {
-                                type="url"
-                                id=(url_id)
-                                name=(format!("targets[{index}][url]"))
-                                value=(target.url.clone())
-                                placeholder="rtmp://live.twitch.tv/app"
-                                required="required"
-                            }
-                        )
-                    )
-                    form_field(
-                        control_id: key_id.clone(),
-                        label_text: "Stream Key",
-                        secret_input(
-                            control_id: key_id,
-                            attrs: attributes! {
-                                name=(format!("targets[{index}][stream_key]"))
-                                value=""
-                                autocomplete="new-password"
-                                placeholder=(if target.stream_key.is_empty() {
-                                    "Optional when already included in the RTMP URL".to_string()
-                                } else {
-                                    "Configured — leave blank to keep".to_string()
-                                })
-                            }
-                        )
-                    )
-                </div>
-                <div class="mt-4 flex items-center justify-between gap-3">
-                    <div class="flex items-center">
-                        <input
-                            type="checkbox"
-                            class="sr-only"
-                            tabindex="-1"
-                            aria-hidden="true"
-                            name=(format!("targets[{index}][enabled]"))
-                            value="true"
-                            checked=(target.enabled)
-                            :checked=$(enabled.get())
-                        />
-                        <button
-                            type="button"
-                            role="switch"
-                            aria-label=(format!("Toggle Enabled for {}", target.name))
-                            class="group inline-flex h-8 cursor-pointer items-center gap-2 rounded-sm border border-border bg-white/5 px-3 font-mono text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase shadow-xs transition-colors outline-none hover:border-signal/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 data-[checked=true]:border-signal/50 data-[checked=true]:bg-signal/10 data-[checked=true]:text-signal"
-                            :aria-checked=$(if enabled.get() { "true" } else { "false" })
-                            :data-checked=$(enabled.get())
-                            :disabled=$(pending.get())
-                            @click=$(async move |_event| {
-                                let next_enabled = !enabled.get();
-                                enabled.set(next_enabled);
-                                pending.set(true);
-                                let next_error = set_target_enabled(
-                                    index,
-                                    target_name.clone(),
-                                    next_enabled,
-                                ).await;
-                                if !next_error.is_empty() {
-                                    enabled.set(!next_enabled);
-                                }
-                                pending.set(false);
-                            })
-                        >
-                            <span
-                                class="hud-dot bg-white/30 text-white/30 group-data-[checked=true]:bg-signal group-data-[checked=true]:text-signal"
-                            ></span>
-                            <span>"Enabled"</span>
-                        </button>
-                    </div>
-                    confirm_delete(
+            <div class="grid gap-3 lg:grid-cols-2">
+                form_field(
+                    control_id: name_id.clone(),
+                    label_text: "Target Name",
+                    input(
                         attrs: attributes! {
-                            type="submit"
-                            name="action"
-                            value=(format!("remove_target:{index}"))
-                            formaction="/api/config"
-                            formnovalidate="formnovalidate"
+                            type="text"
+                            id=(name_id)
+                            name=(format!("targets[{index}][name]"))
+                            value=(target.name.clone())
+                            placeholder="e.g. Twitch, YouTube"
+                            required="required"
                         }
                     )
+                )
+                form_field(
+                    control_id: public_url_id.clone(),
+                    label_text: "Public URL (Optional)",
+                    input(
+                        attrs: attributes! {
+                            type="url"
+                            id=(public_url_id)
+                            name=(format!("targets[{index}][public_url]"))
+                            value=(target.public_url.clone().unwrap_or_default())
+                            placeholder="https://twitch.tv/mychannel"
+                        }
+                    )
+                )
+
+                form_field(
+                    control_id: url_id.clone(),
+                    label_text: "RTMP URL Base",
+                    input(
+                        attrs: attributes! {
+                            type="url"
+                            id=(url_id)
+                            name=(format!("targets[{index}][url]"))
+                            value=(target.url.clone())
+                            placeholder="rtmp://live.twitch.tv/app"
+                            required="required"
+                        }
+                    )
+                )
+                form_field(
+                    control_id: key_id.clone(),
+                    label_text: "Stream Key",
+                    secret_input(
+                        control_id: key_id,
+                        attrs: attributes! {
+                            name=(format!("targets[{index}][stream_key]"))
+                            value=""
+                            autocomplete="new-password"
+                            placeholder=(if target.stream_key.is_empty() {
+                                "Optional when already included in the RTMP URL".to_string()
+                            } else {
+                                "••••••••••••••••••••••••".to_string()
+                            })
+                        }
+                    )
+                )
+            </div>
+            <div class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+                <div class="flex items-center">
+                    <input
+                        type="checkbox"
+                        class="sr-only"
+                        tabindex="-1"
+                        aria-hidden="true"
+                        name=(format!("targets[{index}][enabled]"))
+                        value="true"
+                        checked=(target.enabled)
+                        :checked=$(enabled.get())
+                    />
+                    <button
+                        type="button"
+                        role="switch"
+                        aria-label=(format!("Toggle Enabled for {}", target.name))
+                        class="group inline-flex h-8 cursor-pointer items-center gap-2 rounded-sm border border-border bg-white/5 px-3 font-mono text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase shadow-xs transition-colors outline-none hover:border-signal/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 data-[checked=true]:border-signal/50 data-[checked=true]:bg-signal/10 data-[checked=true]:text-signal"
+                        :aria-checked=$(if enabled.get() { "true" } else { "false" })
+                        :data-checked=$(enabled.get())
+                        :disabled=$(pending.get())
+                        @click=$(async move |_event| {
+                            let next_enabled = !enabled.get();
+                            enabled.set(next_enabled);
+                            pending.set(true);
+                            let next_error = set_target_enabled(
+                                index,
+                                target_name.clone(),
+                                next_enabled,
+                            ).await;
+                            if !next_error.is_empty() {
+                                enabled.set(!next_enabled);
+                            }
+                            pending.set(false);
+                        })
+                    >
+                        <span
+                            class="hud-dot bg-white/30 text-white/30 group-data-[checked=true]:bg-signal group-data-[checked=true]:text-signal"
+                        ></span>
+                        <span>"Enabled"</span>
+                    </button>
                 </div>
+                confirm_delete(
+                    attrs: attributes! {
+                        type="submit"
+                        name="action"
+                        value=(format!("remove_target:{index}"))
+                        formaction="/api/config"
+                        formnovalidate="formnovalidate"
+                    }
+                )
             </div>
         </div>
     })

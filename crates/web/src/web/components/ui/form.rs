@@ -1,4 +1,3 @@
-use crate::web::components::ui::icon::eye_icon;
 use crate::web::components::ui::input::input;
 use crate::web::components::ui::label::label;
 use crate::web::components::ui::switch::switch;
@@ -50,35 +49,20 @@ pub async fn field_description(
 pub async fn secret_input(
     cx: &Cx,
     #[into] control_id: String,
-    #[default] mut attrs: Attributes,
+    #[default] attrs: Attributes,
 ) -> Result<impl View> {
-    let visible = signal(cx, || false);
     Ok(view! {
-        <div class="relative">
-            input(
-                attrs: attributes! {
-                    :type=$(if visible.get() { "text" } else { "password" })
-                    id=(control_id.clone())
-                    class=(class!("pr-11", attrs.remove("class")))
-                    (attrs)
-                }
-            )
-            <button
-                type="button"
-                aria-controls=(control_id)
-                :aria-pressed=$(if visible.get() { "true" } else { "false" })
-                :aria-label=$(if visible.get() { "Hide value" } else { "Show value" })
-                :title=$(if visible.get() { "Hide value" } else { "Show value" })
-                @click=$(|_event| visible.set(!visible.get()))
-                class="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-                eye_icon(visible: visible)
-            </button>
-        </div>
+        input(
+            attrs: attributes! {
+                type="password"
+                id=(control_id)
+                (attrs)
+            }
+        )
     })
 }
 
-/// A password field whose configured value can be revealed, edited, or cleared.
+/// A password field whose configured value can be replaced or cleared.
 /// The existing secret is never rendered into the DOM: blank preserves it.
 #[component]
 pub async fn clearable_secret_field(
@@ -88,6 +72,7 @@ pub async fn clearable_secret_field(
     #[into] label_text: String,
     #[into] empty_placeholder: String,
     #[into] value: String,
+    #[default] attrs: Attributes,
 ) -> Result<impl View> {
     let clear_name = name
         .strip_suffix(']')
@@ -95,8 +80,9 @@ pub async fn clearable_secret_field(
         .map(|(group, field)| format!("{group}[clear_{field}]"))
         .unwrap_or_else(|| format!("clear_{name}"));
     let configured = !value.is_empty();
+    let cleared = signal(cx, || false);
     let placeholder = if configured {
-        "Configured — leave blank to keep".to_string()
+        "••••••••••••••••••••••••".to_string()
     } else {
         empty_placeholder
     };
@@ -104,24 +90,38 @@ pub async fn clearable_secret_field(
         form_field(
             control_id: control_id.clone(),
             label_text: label_text,
-            secret_input(
-                control_id: control_id,
-                attrs: attributes! {
-                    name=(name)
-                    value=""
-                    autocomplete="new-password"
-                    placeholder=(placeholder)
-                }
-            )
-            <label class="flex items-center gap-2 text-xs text-muted-foreground">
+            <div class="group relative" :data-cleared=$(cleared.get())>
+                secret_input(
+                    control_id: control_id,
+                    attrs: attributes! {
+                        (attrs)
+                        name=(name)
+                        value=""
+                        autocomplete="new-password"
+                        placeholder=(placeholder)
+                        class="pr-9 group-data-[cleared=true]:placeholder:text-transparent"
+                    }
+                )
                 <input
-                    type="checkbox"
+                    type="hidden"
                     name=(clear_name)
-                    value="true"
-                    disabled=(!configured)
+                    value="false"
+                    :value=$(if cleared.get() { "true" } else { "false" })
                 />
-                "Clear configured value"
-            </label>
+                <button
+                    type="button"
+                    class="absolute inset-y-0 right-0 flex w-8 items-center justify-center rounded-r-sm text-red-400/60 transition-colors hover:bg-red-400/10 hover:text-red-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-400/60 disabled:pointer-events-none disabled:opacity-30"
+                    aria-label="Clear configured value"
+                    title="Clear configured value"
+                    disabled=(!configured)
+                    :hidden=$(cleared.get())
+                    @click=$(move |_event| cleared.set(true))
+                >
+                    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                        <path d="m6 6 12 12M6 18 18 6" />
+                    </svg>
+                </button>
+            </div>
         )
     })
 }

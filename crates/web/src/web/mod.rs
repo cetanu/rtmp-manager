@@ -51,6 +51,7 @@ pub(crate) const STREAM_PREVIEW_SCRIPT: Asset = asset!("static/stream-preview.js
 pub(crate) const METRICS_CHARTS_SCRIPT: Asset = asset!("static/metrics-charts.js");
 pub(crate) const CONNECTION_STATUS_SCRIPT: Asset = asset!("static/connection-status.js");
 pub(crate) const ERROR_TOAST_SCRIPT: Asset = asset!("static/error-toast.js");
+const SETTINGS_PANELS_SCRIPT: Asset = asset!("static/settings-panels.js");
 const MAX_WEBHOOK_SIZE: usize = 128 * 1024;
 const MAX_CONFIG_BODY_SIZE: usize = 1024 * 1024;
 const MAX_CHAT_TEST_BODY_SIZE: usize = 64 * 1024;
@@ -147,6 +148,7 @@ async fn app_page(cx: &Cx, active_page: &'static str) -> Result<impl View> {
                 <script src=(METRICS_CHARTS_SCRIPT) defer="defer"></script>
                 <script src=(CONNECTION_STATUS_SCRIPT) defer="defer"></script>
                 <script src=(ERROR_TOAST_SCRIPT) defer="defer"></script>
+                <script src=(SETTINGS_PANELS_SCRIPT) defer="defer"></script>
                 <script src=(alerts::SCRIPT) defer="defer"></script>
             </head>
             <body
