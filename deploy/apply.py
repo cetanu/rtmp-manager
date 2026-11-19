@@ -17,7 +17,14 @@ for binary in ['ffmpeg', 'ffprobe']:
 shared = Path('/opt/apps/rtmp-proxy/shared')
 shared.mkdir(parents=True, exist_ok=True)
 shared.chmod(0o700)
+# Provision an empty SQLite database; the application applies its embedded schema
+# and creates defaults on first start. Never replace existing application data.
+database = shared / 'config.sqlite3'
+if not database.exists():
+    database.touch(mode=0o600)
 changed = release(app['release_url'], app['release_url'] + '.sha256', '/opt/apps/rtmp-proxy', 'rtmp-proxy')
 changed |= ffmpeg_changed
 changed |= unit(HERE / 'files/rtmp-proxy.service', 'rtmp-proxy.service')
 service('rtmp-proxy.service', changed, ['/opt/apps/rtmp-proxy/current/rtmp-proxy', '/usr/local/bin/ffmpeg', '/usr/local/bin/ffprobe', '/etc/systemd/system/rtmp-proxy.service'])
+
+run('curl', '--fail', '--silent', '--show-error', '--retry', '30', '--retry-delay', '1', '--retry-connrefused', 'http://127.0.0.1:3000/')
