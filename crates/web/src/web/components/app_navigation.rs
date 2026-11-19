@@ -6,7 +6,7 @@ use topcoat::{
     view::{View, component, emit, live, view},
 };
 
-const ACTIVE_LINK: &str = "rounded-[3px] bg-foreground px-2.5 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-background transition-colors";
+const ACTIVE_LINK: &str = "rounded-[3px] bg-foreground/10 px-2.5 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-foreground transition-colors";
 const INACTIVE_LINK: &str = "rounded-[3px] px-2.5 py-1.5 font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground";
 
 const NAV_ITEMS: &[(&str, &str, &(dyn HrefTarget + Sync))] = &[
