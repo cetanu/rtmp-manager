@@ -68,6 +68,7 @@ jobs:
 
   test:
     name: Test release (${{ matrix.arch }})
+    needs: [commitlint, audit, check]
     strategy:
       matrix:
         include:
