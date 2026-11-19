@@ -92,9 +92,10 @@ async fn serve_alert_media(cx: &Cx) -> Result<Response> {
         topcoat::router::header::CONTENT_TYPE,
         media.content_type.parse()?,
     );
-    response
-        .headers_mut()
-        .insert(topcoat::router::header::CACHE_CONTROL, "no-store".parse()?);
+    response.headers_mut().insert(
+        topcoat::router::header::CACHE_CONTROL,
+        "private, max-age=3600".parse()?,
+    );
     response.headers_mut().insert(
         topcoat::router::header::X_CONTENT_TYPE_OPTIONS,
         "nosniff".parse()?,

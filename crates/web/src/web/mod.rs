@@ -1064,6 +1064,7 @@ mod tests {
             let response = request.send().await.unwrap();
             assert_eq!(response.status(), reqwest::StatusCode::OK);
             assert_eq!(response.headers()["content-type"], "image/gif");
+            assert_eq!(response.headers()["cache-control"], "private, max-age=3600");
             assert_eq!(response.bytes().await.unwrap().as_ref(), b"GIF89aexample");
         }
         let denied = client
