@@ -223,15 +223,9 @@ async fn poll_setup(cx: &Cx, signals: PollSetupSignals) -> Result<impl View> {
     Ok(view! {
         card_content(
             attrs: attributes! {
-                class="!px-6 flex min-h-0 flex-1 flex-col justify-center"
+                class="flex flex-1 flex-col justify-center !px-3 py-4 sm:!px-6"
             },
-            <div class="mx-auto flex w-full max-w-2xl flex-col gap-6">
-                <div>
-                    <h2 class="text-lg font-semibold">"Start a poll"</h2>
-                    <p class="mt-1 text-sm text-muted-foreground">
-                        "Chatters vote by sending the number of their choice. Add one option per line."
-                    </p>
-                </div>
+            <div class="mx-auto flex w-full max-w-2xl flex-col gap-4">
                 <label for="chat-poll-question" class="text-sm font-medium">
                     "Question"
                     <input
@@ -239,7 +233,7 @@ async fn poll_setup(cx: &Cx, signals: PollSetupSignals) -> Result<impl View> {
                         type="text"
                         maxlength="280"
                         placeholder="What should we do next?"
-                        class="mt-2 h-10 w-full rounded-lg border border-border bg-background px-3"
+                        class="mt-2 h-10 w-full rounded-lg border border-border bg-background px-3 text-base sm:text-sm"
                         @input=$(move |event: Event| question.set(event.target.value))
                     />
                 </label>
@@ -247,9 +241,9 @@ async fn poll_setup(cx: &Cx, signals: PollSetupSignals) -> Result<impl View> {
                     "Options (2–6, one per line)"
                     <textarea
                         id="chat-poll-options"
-                        rows="6"
-                        placeholder="Option one&#10;Option two"
-                        class="mt-2 min-h-32 w-full rounded-lg border border-border bg-background px-3 py-2"
+                        rows="4"
+                        placeholder="Option one\nOption two"
+                        class="mt-2 block w-full max-w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-base sm:text-sm"
                         @input=$(move |event: Event| options.set(event.target.value))
                     ></textarea>
                 </label>
@@ -390,7 +384,7 @@ async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
         card(
             attrs: attributes! {
                 data-chat-inbox="true"
-                class="mb-2 h-full min-h-[18rem] !gap-2 !py-0"
+                class="mb-2 h-full min-h-[18rem] !gap-2 !py-0 has-[#chat-poll-question]:h-auto"
             },
             if poll_form_open.get() {
                 poll_setup(signals: poll_setup_signals.clone())
@@ -399,9 +393,9 @@ async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
             }
             card_footer(
                 attrs: attributes! {
-                    class="!px-3 !pt-2 !pb-2 justify-between flex-wrap gap-y-2"
+                    class="!px-3 !pt-2 !pb-2 justify-between flex-wrap gap-2"
                 },
-                <div class="flex items-center gap-2">
+                <div class="flex min-w-0 flex-wrap items-center gap-2">
                     <button
                         id="chat-pomodoro-focus"
                         type="button"
@@ -491,7 +485,7 @@ async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
                     </p>
                 </div>
                 <div
-                    class="ml-auto flex items-center gap-2"
+                    class="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2"
                     :hidden=$(poll_form_open.get())
                 >
                     <button
@@ -679,7 +673,7 @@ async fn inbox_messages(cx: &Cx) -> Result<impl View> {
                     >
                         (if poll.is_active() { "Poll" } else { "Poll results" })
                     </div>
-                    <div class="text-center text-xl font-semibold">
+                    <div class="text-center text-xl font-semibold [overflow-wrap:anywhere]">
                         (poll.question.clone())
                     </div>
                     <div class="flex flex-col gap-2">
