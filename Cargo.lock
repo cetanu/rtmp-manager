@@ -2965,7 +2965,7 @@ dependencies = [
 
 [[package]]
 name = "rtmp-core"
-version = "0.12.3"
+version = "0.12.4"
 dependencies = [
  "age",
  "anyhow",
@@ -2995,7 +2995,7 @@ dependencies = [
 
 [[package]]
 name = "rtmp-proxy"
-version = "0.12.3"
+version = "0.12.4"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3025,7 +3025,7 @@ dependencies = [
 
 [[package]]
 name = "rtmp-web"
-version = "0.12.3"
+version = "0.12.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
