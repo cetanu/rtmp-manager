@@ -205,6 +205,7 @@ pub async fn chat_overlay_page(cx: &Cx) -> Result<impl View> {
                 />
                 <link rel="stylesheet" href=(crate::web::TAILWIND_STYLESHEET) />
                 <script src=(crate::web::OVERLAY_EVENTS_SCRIPT) defer="defer"></script>
+                <script src=(crate::web::POMODORO_HOURGLASS_SCRIPT) defer="defer"></script>
                 <style>(OVERLAY_CSS)</style>
             </head>
             <body
@@ -273,10 +274,20 @@ pub async fn chat_overlay_messages(
                     >
                         (state.message.clone())
                     </div>
+                    <canvas
+                        data-pomodoro-hourglass="true"
+                        data-started-at=(state.started_at_unix_ms.to_string())
+                        data-ends-at=(state.ends_at_unix_ms.to_string())
+                        width="85"
+                        height="127"
+                        aria-hidden="true"
+                        class="mt-5 h-[254px] w-[170px]"
+                        style="image-rendering: pixelated;"
+                    ></canvas>
                     <div
                         data-pomodoro-countdown="true"
                         data-ends-at=(state.ends_at_unix_ms.to_string())
-                        class="mt-4 text-7xl font-bold tabular-nums text-zinc-100"
+                        class="mt-3 font-mono text-2xl font-semibold tabular-nums text-zinc-300"
                     >
                         (state.remaining_mm_ss(now))
                     </div>

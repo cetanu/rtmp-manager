@@ -46,6 +46,7 @@ use components::{
 pub(crate) const TAILWIND_STYLESHEET: Asset = stylesheet!();
 pub(crate) const FAVICON: Asset = asset!("rtmp.png");
 pub(crate) const OVERLAY_EVENTS_SCRIPT: Asset = asset!("static/overlay-events.js");
+pub(crate) const POMODORO_HOURGLASS_SCRIPT: Asset = asset!("static/pomodoro-hourglass.js");
 pub(crate) const HLS_PLAYER_SCRIPT: Asset = asset!("static/hls.min.js");
 pub(crate) const STREAM_PREVIEW_SCRIPT: Asset = asset!("static/stream-preview.js");
 pub(crate) const METRICS_CHARTS_SCRIPT: Asset = asset!("static/metrics-charts.js");
@@ -149,6 +150,7 @@ async fn app_page(cx: &Cx, active_page: &'static str) -> Result<impl View> {
                 <script src=(CONNECTION_STATUS_SCRIPT) defer="defer"></script>
                 <script src=(ERROR_TOAST_SCRIPT) defer="defer"></script>
                 <script src=(SETTINGS_PANELS_SCRIPT) defer="defer"></script>
+                <script src=(POMODORO_HOURGLASS_SCRIPT) defer="defer"></script>
                 <script src=(alerts::SCRIPT) defer="defer"></script>
             </head>
             <body

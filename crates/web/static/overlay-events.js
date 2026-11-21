@@ -1,7 +1,7 @@
 (() => {
   const pad = (value) => String(value).padStart(2, "0");
   const formatRemaining = (endsAt) => {
-    const secs = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
+    const secs = Math.max(0, Math.floor((endsAt - Date.now()) / 1000));
     return `${pad(Math.floor(secs / 60))}:${pad(secs % 60)}`;
   };
   const tickCountdowns = () => {

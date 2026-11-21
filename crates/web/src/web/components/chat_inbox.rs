@@ -617,6 +617,7 @@ async fn inbox_messages(cx: &Cx) -> Result<impl View> {
         .map(|state| {
             (
                 state.message.clone(),
+                state.started_at_unix_ms.to_string(),
                 state.ends_at_unix_ms.to_string(),
                 state.remaining_mm_ss(now),
             )
@@ -632,7 +633,7 @@ async fn inbox_messages(cx: &Cx) -> Result<impl View> {
     Ok(view! {
         card_content(
             attrs: attributes! { class="!px-3 !pb-2 flex min-h-0 flex-1 flex-col gap-1" },
-            if let Some((message, ends_at, remaining)) = pomodoro {
+            if let Some((message, started_at, ends_at, remaining)) = pomodoro {
                 <div
                     id="chat-pomodoro-status"
                     data-ends-at=(ends_at.clone())
@@ -644,10 +645,20 @@ async fn inbox_messages(cx: &Cx) -> Result<impl View> {
                         "Focus mode"
                     </div>
                     <div class="text-lg font-semibold">(message)</div>
+                    <canvas
+                        data-pomodoro-hourglass="true"
+                        data-started-at=(started_at)
+                        data-ends-at=(ends_at.clone())
+                        width="85"
+                        height="127"
+                        aria-hidden="true"
+                        class="mt-2 h-[191px] w-[128px]"
+                        style="image-rendering: pixelated;"
+                    ></canvas>
                     <div
                         data-pomodoro-countdown="true"
                         data-ends-at=(ends_at)
-                        class="mt-1 text-4xl font-bold tabular-nums"
+                        class="mt-1 font-mono text-lg font-semibold tabular-nums text-muted-foreground"
                     >
                         (remaining)
                     </div>
