@@ -1559,7 +1559,7 @@ impl ChatHandle {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
-            .unwrap_or_else(|| sample.2.to_string());
+            .unwrap_or_else(|| format!("{} (#{})", sample.2, seq + 1));
 
         let message = IncomingChatMessage {
             source,

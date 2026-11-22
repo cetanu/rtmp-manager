@@ -344,6 +344,7 @@ async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
     .into_iter()
     .any(|value| value.as_ref().is_some_and(|value| !value.trim().is_empty()));
     let outline_button = button_variants(ButtonVariant::Outline, ButtonSize::Md);
+    let icon_button = button_variants(ButtonVariant::Outline, ButtonSize::Icon);
     let primary_button = button_variants(ButtonVariant::Primary, ButtonSize::Md);
 
     let controls = InboxControls {
@@ -488,6 +489,32 @@ async fn chat_inbox_panel(cx: &Cx) -> Result<impl View> {
                     class="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2"
                     :hidden=$(poll_form_open.get())
                 >
+                    <div
+                        class="inline-flex items-center gap-1"
+                        role="group"
+                        aria-label="Chat message size"
+                    >
+                        <button
+                            id="chat-text-size-decrease"
+                            type="button"
+                            data-chat-size-step="-1"
+                            aria-label="Decrease chat message size"
+                            title="Decrease chat message size"
+                            class=(icon_button.clone())
+                        >
+                            "-"
+                        </button>
+                        <button
+                            id="chat-text-size-increase"
+                            type="button"
+                            data-chat-size-step="1"
+                            aria-label="Increase chat message size"
+                            title="Increase chat message size"
+                            class=(icon_button)
+                        >
+                            "+"
+                        </button>
+                    </div>
                     <button
                         id="chat-test-button"
                         type="button"

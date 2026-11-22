@@ -155,6 +155,26 @@ def check_chat_layout(browser, base_url, viewport):
         geometry = assert_fills_viewport(page)
         assert geometry["messageScrollHeight"] > geometry["messageHeight"], geometry
 
+        # +- buttons adjust only chat message text size, leaving other text unchanged.
+        initial_sizes = page.evaluate("""() => ({
+            message: parseFloat(getComputedStyle(document.querySelector('[data-chat-messages] article p')).fontSize),
+            button: parseFloat(getComputedStyle(document.getElementById('chat-test-button')).fontSize),
+        })""")
+        page.locator("#chat-text-size-increase").click()
+        larger_sizes = page.evaluate("""() => ({
+            message: parseFloat(getComputedStyle(document.querySelector('[data-chat-messages] article p')).fontSize),
+            button: parseFloat(getComputedStyle(document.getElementById('chat-test-button')).fontSize),
+        })""")
+        assert larger_sizes["message"] > initial_sizes["message"], (initial_sizes, larger_sizes)
+        assert larger_sizes["button"] == initial_sizes["button"], (initial_sizes, larger_sizes)
+        page.locator("#chat-text-size-decrease").click()
+        restored_sizes = page.evaluate("""() => ({
+            message: parseFloat(getComputedStyle(document.querySelector('[data-chat-messages] article p')).fontSize),
+            button: parseFloat(getComputedStyle(document.getElementById('chat-test-button')).fontSize),
+        })""")
+        assert restored_sizes["message"] == initial_sizes["message"], (initial_sizes, restored_sizes)
+        assert restored_sizes["button"] == initial_sizes["button"], (initial_sizes, restored_sizes)
+
         # Focus controls must switch on the live page, including another tab.
         other = context.new_page()
         other.goto(base_url + "/chat")

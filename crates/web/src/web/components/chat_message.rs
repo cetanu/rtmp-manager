@@ -66,7 +66,7 @@ pub(crate) async fn chat_message_card(
         >
             chat_source_icon(source: message.source)
             <p class="min-w-0 break-words text-sm leading-snug">
-                <span class=(format!("mr-1 font-semibold {author_color}"))>
+                <span class=(format!("mr-2 font-semibold {author_color}"))>
                     (message.author)
                 </span>
                 chat_message_parts(parts: parts, text_class: text_class)

@@ -193,3 +193,8 @@
     @apply overflow-hidden rounded-sm border border-border bg-black/70;
   }
 }
+
+/* Adjustable chat message text size on the chat page only (unlayered to beat .text-sm). */
+[data-chat-messages] article p {
+  font-size: var(--chat-message-size, 0.875rem);
+}
