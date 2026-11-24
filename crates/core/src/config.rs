@@ -395,7 +395,9 @@ fn merge_web_auth(config: &mut AppConfig, form: WebAuthForm) -> Result<()> {
                 .as_deref()
                 .unwrap_or_default();
             if !crate::backup::verify_passphrase(&config.web_auth.backup_passphrase_hash, current) {
-                bail!("Current backup passphrase is required and must be correct to change or clear it");
+                bail!(
+                    "Current backup passphrase is required and must be correct to change or clear it"
+                );
             }
 
             if is_clearing {

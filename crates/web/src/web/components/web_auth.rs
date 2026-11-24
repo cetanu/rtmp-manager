@@ -59,7 +59,11 @@ pub async fn web_auth(cx: &Cx) -> Result<impl View> {
             clearable_secret_field(
                 control_id: "backup_passphrase",
                 name: "web_auth[backup_passphrase]",
-                label_text: if backup_configured { "New backup passphrase" } else { "Backup passphrase" },
+                label_text: if backup_configured {
+                    "New backup passphrase"
+                } else {
+                    "Backup passphrase"
+                },
                 empty_placeholder: "At least 12 characters",
                 value: auth.backup_passphrase_hash,
                 attrs: attributes! { minlength="12" maxlength="1024" }
