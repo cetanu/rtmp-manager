@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.5](https://github.com/cetanu/rtmp-manager/compare/v0.12.4...v0.12.5) - 2026-11-24
+
+### Fixed
+
+- disallow overwriting the backup passphrase without supplying the old one
+
+### Other
+
+- formatting
+- update cookie dependency
+- add screenshots
+
 ## [0.12.4](https://github.com/cetanu/rtmp-manager/compare/v0.12.3...v0.12.4) - 2026-11-22
 
 ### Added
