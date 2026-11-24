@@ -63,7 +63,7 @@ pub async fn config_transfer(cx: &Cx) -> Result<impl View> {
                         <form
                             method="post"
                             action="/api/config/export-secrets"
-                            class="mt-4 flex flex-col gap-3"
+                            class="mt-4 flex max-w-md flex-col gap-3"
                             :hidden=$(!secrets_open.get())
                         >
                             form_field(

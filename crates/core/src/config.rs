@@ -382,12 +382,37 @@ fn merge_notifications(config: &mut AppConfig, form: NotificationsForm) {
 }
 
 fn merge_web_auth(config: &mut AppConfig, form: WebAuthForm) -> Result<()> {
-    let backup_passphrase_hash = if form.clear_backup_passphrase {
+    let backup_passphrase_hash = if !config.web_auth.backup_passphrase_hash.is_empty() {
+        let is_clearing = form.clear_backup_passphrase;
+        let is_changing = form
+            .backup_passphrase
+            .as_deref()
+            .is_some_and(|p| !p.is_empty());
+
+        if is_clearing || is_changing {
+            let current = form
+                .current_backup_passphrase
+                .as_deref()
+                .unwrap_or_default();
+            if !crate::backup::verify_passphrase(&config.web_auth.backup_passphrase_hash, current) {
+                bail!("Current backup passphrase is required and must be correct to change or clear it");
+            }
+
+            if is_clearing {
+                String::new()
+            } else {
+                let new_passphrase = form.backup_passphrase.unwrap();
+                crate::backup::hash_passphrase(&new_passphrase)?
+            }
+        } else {
+            config.web_auth.backup_passphrase_hash.clone()
+        }
+    } else if form.clear_backup_passphrase {
         String::new()
     } else {
         match form.backup_passphrase.filter(|p| !p.is_empty()) {
             Some(passphrase) => crate::backup::hash_passphrase(&passphrase)?,
-            None => config.web_auth.backup_passphrase_hash.clone(),
+            None => String::new(),
         }
     };
     config.web_auth = WebAuthSettings {
@@ -772,6 +797,7 @@ pub struct NotificationsForm {
 
 #[derive(Debug, Default, Deserialize)]
 pub struct WebAuthForm {
+    pub current_backup_passphrase: Option<String>,
     pub backup_passphrase: Option<String>,
     #[serde(default)]
     pub clear_backup_passphrase: bool,
@@ -1634,15 +1660,18 @@ mod tests {
     #[test]
     fn explicit_clear_removes_server_and_web_auth_secrets() {
         let mut config = populated_config();
-        config.web_auth.backup_passphrase_hash = "configured-hash".into();
+        let current_backup_passphrase = "initial-backup-passphrase";
+        config.web_auth.backup_passphrase_hash =
+            crate::backup::hash_passphrase(current_backup_passphrase).unwrap();
         let form: ConfigForm = serde_qs::Config::new()
             .use_form_encoding(true)
-            .deserialize_str(
+            .deserialize_str(&format!(
                 "server[clear_ingest_stream_key]=true&\
                  web_auth[username]=&web_auth[clear_password]=true&\
                  web_auth[clear_overlay_token]=true&\
-                 web_auth[clear_backup_passphrase]=true&action=save",
-            )
+                 web_auth[current_backup_passphrase]={current_backup_passphrase}&\
+                 web_auth[clear_backup_passphrase]=true&action=save"
+            ))
             .unwrap();
         let updated = config.merge_form(form).unwrap();
 

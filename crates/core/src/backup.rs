@@ -32,7 +32,7 @@ pub fn hash_passphrase(passphrase: &str) -> Result<String> {
     ))
 }
 
-fn verify_passphrase(stored: &str, passphrase: &str) -> bool {
+pub fn verify_passphrase(stored: &str, passphrase: &str) -> bool {
     let Some((salt, hash)) = stored.split_once(':') else {
         return false;
     };
@@ -90,6 +90,72 @@ mod tests {
             .deserialize_str("web_auth%5Bbackup_passphrase%5D=short")
             .unwrap();
         assert!(updated.merge_form(short).is_err());
+    }
+
+    #[test]
+    fn settings_require_current_passphrase_to_change_or_clear() {
+        let initial_passphrase = "initial-backup-passphrase";
+        let mut config = AppConfig::default();
+        config.web_auth.backup_passphrase_hash = hash_passphrase(initial_passphrase).unwrap();
+
+        // Attempting to change without current passphrase fails
+        let change_no_current = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str("web_auth%5Bbackup_passphrase%5D=new-valid-backup-passphrase")
+            .unwrap();
+        assert!(config.merge_form(change_no_current).is_err());
+
+        // Attempting to change with wrong current passphrase fails
+        let change_wrong_current = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str(
+                "web_auth%5Bcurrent_backup_passphrase%5D=wrong-passphrase&\
+                 web_auth%5Bbackup_passphrase%5D=new-valid-backup-passphrase",
+            )
+            .unwrap();
+        assert!(config.merge_form(change_wrong_current).is_err());
+
+        // Attempting to change with correct current passphrase succeeds
+        let change_correct_current = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str(
+                "web_auth%5Bcurrent_backup_passphrase%5D=initial-backup-passphrase&\
+                 web_auth%5Bbackup_passphrase%5D=new-valid-backup-passphrase",
+            )
+            .unwrap();
+        let changed = config.merge_form(change_correct_current).unwrap();
+        assert!(verify_passphrase(
+            &changed.web_auth.backup_passphrase_hash,
+            "new-valid-backup-passphrase"
+        ));
+
+        // Attempting to clear without current passphrase fails
+        let clear_no_current = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str("web_auth%5Bclear_backup_passphrase%5D=true")
+            .unwrap();
+        assert!(changed.merge_form(clear_no_current).is_err());
+
+        // Attempting to clear with wrong current passphrase fails
+        let clear_wrong_current = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str(
+                "web_auth%5Bcurrent_backup_passphrase%5D=wrong-passphrase&\
+                 web_auth%5Bclear_backup_passphrase%5D=true",
+            )
+            .unwrap();
+        assert!(changed.merge_form(clear_wrong_current).is_err());
+
+        // Attempting to clear with correct current passphrase succeeds
+        let clear_correct_current = serde_qs::Config::new()
+            .use_form_encoding(true)
+            .deserialize_str(
+                "web_auth%5Bcurrent_backup_passphrase%5D=new-valid-backup-passphrase&\
+                 web_auth%5Bclear_backup_passphrase%5D=true",
+            )
+            .unwrap();
+        let cleared = changed.merge_form(clear_correct_current).unwrap();
+        assert!(cleared.web_auth.backup_passphrase_hash.is_empty());
     }
 
     #[test]
