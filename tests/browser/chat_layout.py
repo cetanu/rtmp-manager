@@ -124,7 +124,7 @@ def check_chat_layout(browser, base_url, viewport):
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     try:
-        response = page.goto(base_url + "/chat")
+        response = page.goto(base_url + "/comms")
         assert response.status == 200
         expect(page.locator("[data-chat-inbox]")).to_be_visible()
         assert_fills_viewport(page)
@@ -133,8 +133,8 @@ def check_chat_layout(browser, base_url, viewport):
         page.evaluate("window.chatLayoutDocument = true")
         page.get_by_role("link", name="Settings", exact=True).click()
         page.wait_for_url("**/settings")
-        page.get_by_role("link", name="Chat", exact=True).click()
-        page.wait_for_url("**/chat")
+        page.get_by_role("link", name="Comms", exact=True).click()
+        page.wait_for_url("**/comms")
         expect(page.locator("[data-chat-inbox]")).to_be_visible()
         assert page.evaluate("window.chatLayoutDocument === true")
         assert_fills_viewport(page)
@@ -177,7 +177,7 @@ def check_chat_layout(browser, base_url, viewport):
 
         # Focus controls must switch on the live page, including another tab.
         other = context.new_page()
-        other.goto(base_url + "/chat")
+        other.goto(base_url + "/comms")
         page.locator("#chat-pomodoro-focus").click()
         for tab in (page, other):
             expect(tab.locator("#chat-pomodoro-stop")).to_be_visible()
@@ -249,7 +249,7 @@ def check_chat_layout(browser, base_url, viewport):
         page.get_by_role("link", name="Settings", exact=True).click()
         page.wait_for_url("**/settings")
         page.go_back()
-        page.wait_for_url("**/chat")
+        page.wait_for_url("**/comms")
         expect(page.locator("[data-chat-inbox]")).to_be_visible()
         assert_fills_viewport(page)
         assert not errors, errors

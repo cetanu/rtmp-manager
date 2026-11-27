@@ -28,14 +28,20 @@ def check_automations(browser, base_url, viewport):
     page.on("pageerror", lambda error: errors.append(str(error)))
     stream = None
     try:
-        page.goto(base_url + "/chat")
+        page.goto(base_url + "/comms")
         panel = page.locator("#chat-automations")
         inbox = page.locator("[data-chat-inbox]")
-        # The automations are a sibling section below the complete chat panel.
+        audit = page.locator("#webhook-audit")
+        # The automations are a sibling section below the complete chat panel,
+        # and webhook audit sits underneath automations.
         assert panel.evaluate("node => !node.closest('[data-chat-inbox]')")
         assert (
             panel.bounding_box()["y"]
             >= inbox.bounding_box()["y"] + inbox.bounding_box()["height"]
+        )
+        assert (
+            audit.bounding_box()["y"]
+            >= panel.bounding_box()["y"] + panel.bounding_box()["height"]
         )
         listing = panel.locator("[data-automation-list]").bounding_box()
         log = panel.locator("[data-automation-log]").bounding_box()

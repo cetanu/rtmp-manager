@@ -164,6 +164,7 @@ mod tests {
         assert!(!is_public_path("/assets/tailwind-123.css"));
         assert!(!is_public_path("/_topcoat/runtime/shards/chat"));
         assert!(!is_public_path("/"));
+        assert!(!is_public_path("/comms"));
         assert!(!is_public_path("/chat"));
         assert!(!is_public_path("/settings"));
         assert!(!is_public_path("/targets"));

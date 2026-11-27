@@ -172,16 +172,16 @@ async fn app_page(cx: &Cx, active_page: &'static str) -> Result<impl View> {
                         "metrics" => {
                             metrics_page()
                         }
-                        "chat" => {
+                        "comms" => {
                             chat_inbox()
                             crate::web::components::chat_automations::chat_automations()
+                            webhook_audit()
                         }
                         "media" => {
                             crate::web::components::automation_media::automation_media()
                         }
                         "logs" => {
                             log_viewer()
-                            webhook_audit()
                         }
                         "settings" | "targets" => {
                             configuration_form(active_page: active_page)
@@ -228,9 +228,14 @@ async fn metrics_page_route(cx: &Cx) -> Result<impl View> {
     Ok(view! { app_page(active_page: "metrics") })
 }
 
-#[page("/chat", with(topcoat::metadata::Metadata::new().title("Chat · RTMP Manager")))]
+#[page("/comms", with(topcoat::metadata::Metadata::new().title("Comms · RTMP Manager")))]
+async fn comms_page(cx: &Cx) -> Result<impl View> {
+    Ok(view! { app_page(active_page: "comms") })
+}
+
+#[page("/chat", with(topcoat::metadata::Metadata::new().title("Comms · RTMP Manager")))]
 async fn chat_page(cx: &Cx) -> Result<impl View> {
-    Ok(view! { app_page(active_page: "chat") })
+    Ok(view! { app_page(active_page: "comms") })
 }
 
 #[page("/media", with(topcoat::metadata::Metadata::new().title("Media · RTMP Manager")))]
@@ -801,7 +806,7 @@ async fn receive_webhook(cx: &Cx, body: Bytes) -> Result<Response> {
     };
     let message = match platform {
         Platform::Kick => match rtmp_core::chat::kick::process_event(&settings, &event) {
-            Ok(message) => Some(message),
+            Ok(message) => message,
             Err(error) => {
                 app.metrics.add_webhooks_rejected(1);
                 tracing::warn!("Rejected Kick webhook: {error:#}");
@@ -817,7 +822,7 @@ async fn receive_webhook(cx: &Cx, body: Bytes) -> Result<Response> {
             }
         },
     };
-    if let Some(message) = message {
+    let should_record_and_automate = if let Some(message) = message {
         let outcome = app
             .chat
             .enqueue(message)
@@ -826,23 +831,28 @@ async fn receive_webhook(cx: &Cx, body: Bytes) -> Result<Response> {
             .map_err(internal_server_error)?;
         match outcome {
             rtmp_core::chat::EnqueueOutcome::Accepted
-            | rtmp_core::chat::EnqueueOutcome::Dropped => {
-                app.webhook_audit.record(
-                    platform.as_str(),
-                    event.header("content-type"),
-                    &event.body,
-                );
-            }
+            | rtmp_core::chat::EnqueueOutcome::Dropped => true,
             rtmp_core::chat::EnqueueOutcome::Duplicate => {
                 tracing::info!(
                     platform = platform.as_str(),
                     "Ignored duplicate webhook event"
                 );
+                false
             }
         }
     } else {
+        true
+    };
+    if should_record_and_automate {
         app.webhook_audit
             .record(platform.as_str(), event.header("content-type"), &event.body);
+        let webhook =
+            rtmp_core::chat::automations::IncomingWebhook::from_event(platform.as_str(), &event);
+        app.chat
+            .process_webhook(webhook)
+            .await
+            .map_err(topcoat::Error::from_anyhow)
+            .map_err(internal_server_error)?;
     }
     tracing::info!(platform = platform.as_str(), body_bytes, "Webhook accepted");
     topcoat::router::StatusCode::OK.into_response(cx)
@@ -1338,7 +1348,7 @@ mod tests {
         }
 
         let html_content = client
-            .get(format!("http://{local_addr}/chat"))
+            .get(format!("http://{local_addr}/comms"))
             .send()
             .await
             .unwrap()
@@ -1346,9 +1356,28 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(html_content.contains("<title>Chat · RTMP Manager</title>"));
+        assert!(html_content.contains("<title>Comms · RTMP Manager</title>"));
         assert!(html_content.contains("chat-test-button"));
         assert!(html_content.contains("/api/chat/test-message"));
+        let automations_pos = html_content
+            .find("id=\"chat-automations\"")
+            .expect("comms page should contain automations");
+        let audit_pos = html_content
+            .find("id=\"webhook-audit\"")
+            .expect("comms page should contain webhook audit");
+        assert!(
+            audit_pos > automations_pos,
+            "webhook audit must appear underneath automations"
+        );
+        let logs_html = client
+            .get(format!("http://{local_addr}/logs"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert!(!logs_html.contains("id=\"webhook-audit\""));
         let resp = client
             .post(format!("http://{local_addr}/api/chat/test"))
             .send()
@@ -1391,6 +1420,31 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(proc_resp.status(), reqwest::StatusCode::OK);
+
+        // Verify signed non-chat X webhook is audited and accepted by /api/webhook.
+        let mut x_config = app_handle.config.get().as_ref().clone();
+        x_config.chat.x_webhook_enabled = true;
+        x_config.chat.x_api_secret = Some("webhook-test-secret".into());
+        app_handle
+            .config
+            .import(&serde_json::to_vec(&x_config).unwrap())
+            .await
+            .unwrap();
+        let webhook_body = r#"{"data":{"event_uuid":"evt-x-1","event_type":"follow","payload":{"message_id":"m1","message":"hi","author":{"data":{"id":"u1","username":"Follower"}}}}}"#;
+        let signature =
+            rtmp_core::chat::x::response_token(webhook_body, "webhook-test-secret").unwrap();
+        let webhook_resp = client
+            .post(format!("http://{local_addr}/api/webhook"))
+            .header("Content-Type", "application/json")
+            .header("x-twitter-webhooks-signature", signature)
+            .body(webhook_body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(webhook_resp.status(), reqwest::StatusCode::OK);
+        let audit_entries = app_handle.webhook_audit.snapshot();
+        assert_eq!(audit_entries.len(), 1);
+        assert_eq!(audit_entries[0].platform, "x");
 
         server_task.abort();
         let _ = std::fs::remove_dir_all(temp_dir);

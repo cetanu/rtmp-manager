@@ -34,3 +34,8 @@ snapshot_name = "0005_snapshot.toml"
 id = 4712437930413935625
 name = "0006_media_repeat_policy.sql"
 snapshot_name = "0006_snapshot.toml"
+
+[[migrations]]
+id = 6323877022664884908
+name = "0007_add_automation_trigger.sql"
+snapshot_name = "0007_snapshot.toml"

@@ -785,6 +785,10 @@ enum ChatCommand {
     AutomationSnapshot {
         respond_to: oneshot::Sender<Result<automations::AutomationSnapshot>>,
     },
+    ProcessWebhook {
+        webhook: automations::IncomingWebhook,
+        respond_to: oneshot::Sender<Result<bool>>,
+    },
     Enqueue {
         message: IncomingChatMessage,
         respond_to: oneshot::Sender<Result<EnqueueOutcome>>,
@@ -888,6 +892,24 @@ impl ChatActor {
                 }
                 ChatCommand::AutomationSnapshot { respond_to } => {
                     let _ = respond_to.send(automations::snapshot(&self.inbox.database).await);
+                }
+                ChatCommand::ProcessWebhook {
+                    webhook,
+                    respond_to,
+                } => {
+                    let result = match self.automation.process_webhook(&webhook).await {
+                        Ok(Some(outcome)) => {
+                            handle.metrics.add_automations_executed(outcome.succeeded);
+                            handle.metrics.add_automations_failed(outcome.failed);
+                            if outcome.executed {
+                                self.notify_changed();
+                            }
+                            Ok(true)
+                        }
+                        Ok(None) => Ok(false),
+                        Err(error) => Err(error),
+                    };
+                    let _ = respond_to.send(result);
                 }
                 ChatCommand::Enqueue {
                     message,
@@ -1362,11 +1384,25 @@ impl ChatHandle {
 
     pub async fn test_automation(
         &self,
+        trigger: automations::AutomationTrigger,
         pattern: String,
         script: String,
         text: String,
     ) -> Result<Option<automations::DraftResult>> {
-        self.automation.test_draft(pattern, script, text).await
+        self.automation
+            .test_draft(trigger, pattern, script, text)
+            .await
+    }
+
+    pub async fn process_webhook(&self, webhook: automations::IncomingWebhook) -> Result<bool> {
+        self.call(
+            |respond_to| ChatCommand::ProcessWebhook {
+                webhook,
+                respond_to,
+            },
+            "Chat actor dropped webhook automation response",
+        )
+        .await
     }
 
     pub async fn save_automation(

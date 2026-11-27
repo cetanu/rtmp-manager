@@ -3,7 +3,7 @@ use crate::web::components::ui::{
     card::{card, card_content, card_header, card_title},
     confirm_delete::confirm_delete,
 };
-use rtmp_core::chat::automations::AutomationDefinition;
+use rtmp_core::chat::automations::{AutomationDefinition, AutomationTrigger};
 use rtmp_core::server::{preview::StreamState, state::AppHandle};
 use topcoat::{
     Result,
@@ -17,11 +17,16 @@ async fn save_automation(
     cx: &Cx,
     id: Option<u64>,
     name: String,
+    trigger: String,
     pattern: String,
     script: String,
     enabled: bool,
     consume: bool,
 ) -> Result<String> {
+    let trigger = match AutomationTrigger::parse(&trigger) {
+        Ok(trigger) => trigger,
+        Err(error) => return Ok(error.to_string()),
+    };
     let app: &AppHandle = context(cx);
     Ok(app
         .chat
@@ -29,6 +34,7 @@ async fn save_automation(
             id,
             AutomationDefinition {
                 name,
+                trigger,
                 pattern,
                 script,
                 enabled,
@@ -42,9 +48,22 @@ async fn save_automation(
 }
 
 #[procedure]
-async fn test_automation(cx: &Cx, pattern: String, script: String, text: String) -> Result<String> {
+async fn test_automation(
+    cx: &Cx,
+    trigger: String,
+    pattern: String,
+    script: String,
+    text: String,
+) -> Result<String> {
+    let trigger = match AutomationTrigger::parse(&trigger) {
+        Ok(trigger) => trigger,
+        Err(error) => return Ok(format!("Error: {error}")),
+    };
     let app: &AppHandle = context(cx);
-    let result = app.chat.test_automation(pattern, script, text).await;
+    let result = app
+        .chat
+        .test_automation(trigger, pattern, script, text)
+        .await;
     Ok(match result {
         Ok(Some(draft)) => {
             let result = draft.result;
@@ -59,15 +78,25 @@ async fn test_automation(cx: &Cx, pattern: String, script: String, text: String)
                 }
                 Some(Err(error)) => format!("\n\nOverlay preview error: {error}"),
             };
+            let state_summary = match trigger {
+                AutomationTrigger::Chat => format!(
+                    "Global state: {}\nViewer state: {}",
+                    serde_json::to_string_pretty(&result.state).unwrap_or_default(),
+                    serde_json::to_string_pretty(&result.viewer).unwrap_or_default(),
+                ),
+                AutomationTrigger::Webhook => format!(
+                    "Global state: {}",
+                    serde_json::to_string_pretty(&result.state).unwrap_or_default(),
+                ),
+            };
             format!(
-                "Output: {}\n\nGlobal state: {}\nViewer state: {}\n\nAlerts: {}{}",
+                "Output: {}\n\n{}\n\nAlerts: {}{}",
                 if result.output.is_empty() {
                     "(no output)"
                 } else {
                     &result.output
                 },
-                serde_json::to_string_pretty(&result.state).unwrap_or_default(),
-                serde_json::to_string_pretty(&result.viewer).unwrap_or_default(),
+                state_summary,
                 serde_json::to_string(&result.alerts).unwrap_or_default(),
                 preview_status,
             )
@@ -113,6 +142,7 @@ async fn automation_editor(
     let dialog_id = element_id(cx);
     let title_id = element_id(cx);
     let name = signal(cx, || definition.name.clone());
+    let trigger = signal(cx, || definition.trigger.as_str().to_owned());
     let pattern = signal(cx, || definition.pattern.clone());
     let script = signal(cx, || definition.script.clone());
     let enabled = signal(cx, || definition.enabled);
@@ -124,6 +154,8 @@ async fn automation_editor(
     let testing = signal(cx, || false);
     let outline = button_variants(ButtonVariant::Outline, ButtonSize::Md);
     let primary = button_variants(ButtonVariant::Primary, ButtonSize::Md);
+    let example_chat_script = rtmp_core::chat::automations::runtime::EXAMPLE_SCRIPT;
+    let example_webhook_script = rtmp_core::chat::automations::runtime::EXAMPLE_WEBHOOK_SCRIPT;
     Ok(view! {
         <div class="flex flex-col gap-3">
             <button
@@ -167,11 +199,58 @@ async fn automation_editor(
                         />
                     </label>
                     <label class="flex flex-col gap-1 text-sm">
-                        "Pattern"
+                        "Trigger"
+                        <select
+                            aria-label="Automation trigger"
+                            class="rounded-md border border-border bg-background p-2"
+                            :value=$(trigger.get())
+                            @change=$(move |event: Event| {
+                                let next = event.target.value;
+                                if !editing {
+                                    if next == "webhook" {
+                                        if script.get() == example_chat_script {
+                                            script.set(example_webhook_script.to_owned());
+                                        }
+                                    } else if next == "chat" {
+                                        if script.get() == example_webhook_script {
+                                            script.set(example_chat_script.to_owned());
+                                        }
+                                    }
+                                }
+                                trigger.set(next);
+                            })
+                        >
+                            <option
+                                value="chat"
+                                selected=(definition.trigger == AutomationTrigger::Chat)
+                            >
+                                "Chat message"
+                            </option>
+                            <option
+                                value="webhook"
+                                selected=(definition.trigger == AutomationTrigger::Webhook)
+                            >
+                                "Webhook"
+                            </option>
+                        </select>
+                    </label>
+                    <label class="flex flex-col gap-1 text-sm">
+                        <span>
+                            $(if trigger.get() == "webhook" {
+                                "Expression (JMESPath)"
+                            } else {
+                                "Pattern"
+                            })
+                        </span>
                         <input
                             aria-label="Message pattern"
                             class="rounded-md border border-border bg-background p-2 font-mono"
                             maxlength="1024"
+                            :placeholder=$(if trigger.get() == "webhook" {
+                                "event_type == 'channel.followed'"
+                            } else {
+                                "(?i)^example$"
+                            })
                             placeholder="(?i)^example$"
                             value=(definition.pattern.clone())
                             :value=$(pattern.get())
@@ -198,6 +277,11 @@ async fn automation_editor(
                         <label class="flex flex-col gap-1 text-sm">
                             <input
                                 class="rounded-md border border-border bg-background p-2"
+                                :placeholder=$(if trigger.get() == "webhook" {
+                                    "Paste a sample webhook payload (JSON or text)"
+                                } else {
+                                    "Type a sample chat message"
+                                })
                                 placeholder="Type a sample chat message"
                                 maxlength="5000"
                                 :value=$(test_text.get())
@@ -222,6 +306,7 @@ async fn automation_editor(
                                 test_result.set("Running…".to_owned());
                                 test_result.set(
                                     test_automation(
+                                        trigger.get(),
                                         pattern.get(),
                                         script.get(),
                                         test_text.get(),
@@ -230,7 +315,11 @@ async fn automation_editor(
                                 testing.set(false);
                             })
                         >
-                            "Send test message"
+                            $(if trigger.get() == "webhook" {
+                                "Send test webhook"
+                            } else {
+                                "Send test message"
+                            })
                         </button>
                         <pre
                             role="status"
@@ -255,7 +344,10 @@ async fn automation_editor(
                                 "Enabled"
                             </label>
                         }
-                        <label class="flex items-center gap-2">
+                        <label
+                            class="flex items-center gap-2"
+                            :hidden=$(trigger.get() == "webhook")
+                        >
                             <input
                                 type="checkbox"
                                 aria-label="Consume matched messages"
@@ -284,6 +376,7 @@ async fn automation_editor(
                                     save_automation(
                                         id,
                                         name.get(),
+                                        trigger.get(),
                                         pattern.get(),
                                         script.get(),
                                         next_enabled,
@@ -363,6 +456,11 @@ async fn automation_row(
                     <h3 class="min-w-0 break-words font-semibold">
                         (automation.definition.name.clone())
                     </h3>
+                    <span
+                        class="rounded border border-border bg-white/5 px-1.5 py-0.5 font-mono text-[10px] tracking-[0.12em] text-muted-foreground uppercase"
+                    >
+                        (automation.definition.trigger.as_str())
+                    </span>
                 </div>
                 <div class="flex flex-wrap gap-2">
                     automation_editor(id: Some(id), definition: automation.definition)
@@ -453,6 +551,7 @@ async fn automations_panel(cx: &Cx) -> Result<impl View> {
                                 id: None,
                                 definition: AutomationDefinition {
                                     name: String::new(),
+                                    trigger: AutomationTrigger::Chat,
                                     pattern: String::new(),
                                     script: rtmp_core::chat::automations::runtime::EXAMPLE_SCRIPT.to_owned(
 

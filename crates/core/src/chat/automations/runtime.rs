@@ -1,5 +1,5 @@
 //! Bounded synchronous script evaluation, with no filesystem, networking or database access.
-use super::{AutomationDefinition, alerts::Alert};
+use super::{AutomationDefinition, AutomationTrigger, IncomingWebhook, alerts::Alert};
 use crate::chat::IncomingChatMessage;
 use anyhow::{Result, anyhow};
 use aws_lc_rs::rand::{SecureRandom, SystemRandom};
@@ -53,6 +53,36 @@ overlay.show(#{
 
 // The final string appears in Recent executions (it is not sent to chat).
 // Return () instead to leave the output empty.
+result
+"#;
+
+pub const EXAMPLE_WEBHOOK_SCRIPT: &str = r#"// This script runs when the JMESPath expression evaluates to a truthy value.
+// Example expressions:
+//   event_type == 'channel.followed'
+//   platform == 'kick' && payload.follower.username
+//   `true`  (match every webhook)
+//
+// `matched` holds the result of the JMESPath expression.
+// `webhook` fields: platform, id, event_type, content_type, headers, body and payload.
+// `payload` is the parsed JSON value when body is valid JSON, or () otherwise.
+let platform = webhook.platform;
+let event_type = webhook.event_type;
+
+// state is shared by this automation and persists between executions.
+let total = if state.contains("total") { state.total } else { 0 };
+state.total = total + 1;
+state.last_run_ms = now_ms;
+
+let label = if event_type != "" { event_type } else { platform };
+let result = "Webhook " + label + " (#" + state.total.to_string() + ")";
+
+// Alerts appear on the OBS alert overlay.
+overlay.show(#{
+    text: result,
+    position: #{x: 0, y: 0, width: 50, height: 60},
+    duration_ms: 5000
+});
+
 result
 "#;
 
@@ -138,7 +168,15 @@ pub fn validate(definition: &AutomationDefinition) -> Result<()> {
         !definition.pattern.is_empty() && definition.pattern.len() <= 1024,
         "Pattern must be 1–1,024 bytes"
     );
-    regex::Regex::new(&definition.pattern).map_err(|e| anyhow!("Invalid pattern: {e}"))?;
+    match definition.trigger {
+        AutomationTrigger::Chat => {
+            regex::Regex::new(&definition.pattern).map_err(|e| anyhow!("Invalid pattern: {e}"))?;
+        }
+        AutomationTrigger::Webhook => {
+            jmespath::compile(&definition.pattern)
+                .map_err(|e| anyhow!("Invalid JMESPath expression: {e}"))?;
+        }
+    }
     anyhow::ensure!(
         !definition.script.trim().is_empty() && definition.script.len() <= 16_384,
         "Script must be 1–16,384 bytes"
@@ -200,6 +238,90 @@ fn read_map(scope: &Scope<'_>, name: &str) -> Result<Map<String, Value>> {
         "{name} data exceeds 64 KiB"
     );
     Ok(map)
+}
+
+pub fn webhook_value(webhook: &IncomingWebhook) -> Value {
+    let payload: Value = serde_json::from_str(&webhook.body).unwrap_or(Value::Null);
+    serde_json::json!({
+        "platform": webhook.platform,
+        "id": webhook.external_id,
+        "event_type": webhook.event_type,
+        "content_type": webhook.content_type.as_deref().unwrap_or(""),
+        "headers": webhook.headers,
+        "body": webhook.body,
+        "payload": payload,
+    })
+}
+
+pub fn match_webhook(expression: &str, webhook: &IncomingWebhook) -> Result<Option<Value>> {
+    let compiled =
+        jmespath::compile(expression).map_err(|e| anyhow!("Invalid JMESPath expression: {e}"))?;
+    let data = webhook_value(webhook);
+    let result = compiled
+        .search(&data)
+        .map_err(|e| anyhow!("JMESPath evaluation failed: {e}"))?;
+    if !result.is_truthy() {
+        return Ok(None);
+    }
+    Ok(Some(serde_json::to_value(result.as_ref())?))
+}
+
+/// Runs an editor webhook draft with fresh state and no persistent side effects.
+pub fn test_webhook(
+    definition: &AutomationDefinition,
+    webhook: &IncomingWebhook,
+) -> Result<Option<ScriptResult>> {
+    validate(definition)?;
+    anyhow::ensure!(
+        !webhook.body.is_empty() && webhook.body.len() <= 128 * 1024,
+        "Test webhook payload must be 1–131,072 bytes"
+    );
+    let Some(matched) = match_webhook(&definition.pattern, webhook)? else {
+        return Ok(None);
+    };
+    evaluate_webhook(
+        &definition.script,
+        webhook,
+        matched,
+        Map::new(),
+        crate::util::now_unix_ms(),
+    )
+    .map(Some)
+}
+
+pub fn evaluate_webhook(
+    script: &str,
+    webhook: &IncomingWebhook,
+    matched: Value,
+    state: Map<String, Value>,
+    now_ms: u64,
+) -> Result<ScriptResult> {
+    let engine = engine();
+    let mut scope = Scope::new();
+    let overlay = Overlay(Arc::new(Mutex::new(Vec::new())));
+    scope.push("overlay", overlay.clone());
+    scope.push_constant_dynamic("webhook", dynamic(webhook_value(webhook))?);
+    scope.push_constant_dynamic("matched", dynamic(matched)?);
+    scope.push_constant("now_ms", i64::try_from(now_ms)?);
+    scope.push_dynamic("state", dynamic(state)?);
+    let result: Dynamic = engine
+        .eval_with_scope(&mut scope, script)
+        .map_err(|e| anyhow!(e.to_string()))?;
+    let output = if result.is_unit() {
+        String::new()
+    } else {
+        result
+            .try_cast::<String>()
+            .ok_or_else(|| anyhow!("Script must return a string or ()"))?
+    };
+    anyhow::ensure!(output.len() <= 4096, "Script output exceeds 4 KiB");
+    let state = read_map(&scope, "state")?;
+    Ok(ScriptResult {
+        state,
+        viewer: Map::new(),
+        output,
+        alerts: overlay.0.lock().clone(),
+    })
 }
 
 pub fn evaluate(

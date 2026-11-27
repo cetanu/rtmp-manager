@@ -144,7 +144,10 @@ pub fn parse_chat_event(body: &[u8]) -> Result<IncomingChatMessage> {
     })
 }
 
-pub fn process_event(config: &ChatSettings, event: &WebhookEvent) -> Result<IncomingChatMessage> {
+pub fn process_event(
+    config: &ChatSettings,
+    event: &WebhookEvent,
+) -> Result<Option<IncomingChatMessage>> {
     if !config.kick_webhook_enabled {
         bail!("Kick webhook ingestion is disabled");
     }
@@ -162,9 +165,9 @@ pub fn process_event(config: &ChatSettings, event: &WebhookEvent) -> Result<Inco
     if event.header("kick-event-type") != Some("chat.message.sent")
         || event.header("kick-event-version") != Some("1")
     {
-        bail!("Unsupported Kick webhook event type or version");
+        return Ok(None);
     }
-    parse_chat_event(&event.body)
+    parse_chat_event(&event.body).map(Some)
 }
 
 pub async fn set_chat_subscription(

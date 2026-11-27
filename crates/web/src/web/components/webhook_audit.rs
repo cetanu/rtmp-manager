@@ -11,7 +11,11 @@ use topcoat::{
 #[component]
 pub async fn webhook_audit(cx: &Cx) -> Result<impl View> {
     Ok(view! {
-        <section class="mt-4" aria-labelledby="webhook-audit-heading">
+        <section
+            id="webhook-audit"
+            class="mt-8 pb-4"
+            aria-labelledby="webhook-audit-heading"
+        >
             <div class="mb-2 flex items-center justify-between gap-4">
                 <div>
                     <h2 id="webhook-audit-heading" class="text-base font-semibold">

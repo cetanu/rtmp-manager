@@ -29,6 +29,7 @@ rhai = { version = "1.21", features = ["sync", "serde", "no_module"] }
 parking_lot = "0.12"
 aws-lc-rs = "1.17.3"
 srt-tokio = "0.4.4"
+jmespath = "0.5.0"
 
 
 [dev-dependencies]

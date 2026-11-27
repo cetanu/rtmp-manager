@@ -2,11 +2,126 @@
 pub mod alerts;
 pub mod runtime;
 use crate::chat::IncomingChatMessage;
+use crate::chat::util::WebhookEvent;
 use crate::util::now_unix_ms;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use toasty::Executor;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutomationTrigger {
+    #[default]
+    Chat,
+    Webhook,
+}
+
+impl AutomationTrigger {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::Webhook => "webhook",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self> {
+        match value.trim() {
+            "" | "chat" => Ok(Self::Chat),
+            "webhook" => Ok(Self::Webhook),
+            other => anyhow::bail!("Unsupported automation trigger: {other}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct IncomingWebhook {
+    pub platform: String,
+    pub external_id: String,
+    pub event_type: String,
+    pub content_type: Option<String>,
+    pub headers: HashMap<String, String>,
+    pub body: String,
+}
+
+impl IncomingWebhook {
+    pub fn from_event(platform: &str, event: &WebhookEvent) -> Self {
+        let body = String::from_utf8_lossy(&event.body).into_owned();
+        let parsed = serde_json::from_str::<Value>(&body).ok();
+        let event_type = event
+            .header("kick-event-type")
+            .map(str::to_owned)
+            .or_else(|| parsed.as_ref().and_then(extract_event_type))
+            .unwrap_or_default();
+        let external_id = event
+            .header("kick-event-message-id")
+            .map(str::to_owned)
+            .or_else(|| parsed.as_ref().and_then(extract_event_id))
+            .filter(|id| !id.trim().is_empty())
+            .unwrap_or_else(|| hash_body(&event.body));
+        Self {
+            platform: platform.to_owned(),
+            external_id,
+            event_type,
+            content_type: event.header("content-type").map(str::to_owned),
+            headers: event.headers.clone(),
+            body,
+        }
+    }
+
+    pub fn from_test_payload(body: String) -> Self {
+        let parsed = serde_json::from_str::<Value>(&body).ok();
+        let event_type = parsed
+            .as_ref()
+            .and_then(extract_event_type)
+            .unwrap_or_default();
+        let content_type = parsed.is_some().then(|| "application/json".to_owned());
+        Self {
+            platform: "webhook".to_owned(),
+            external_id: "test-webhook".to_owned(),
+            event_type,
+            content_type,
+            headers: HashMap::new(),
+            body,
+        }
+    }
+}
+
+fn extract_event_type(value: &Value) -> Option<String> {
+    value
+        .get("data")
+        .and_then(|data| data.get("event_type"))
+        .and_then(Value::as_str)
+        .or_else(|| value.get("event_type").and_then(Value::as_str))
+        .or_else(|| value.get("type").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+}
+
+fn extract_event_id(value: &Value) -> Option<String> {
+    value
+        .get("data")
+        .and_then(|data| data.get("event_uuid"))
+        .and_then(Value::as_str)
+        .or_else(|| value.get("event_uuid").and_then(Value::as_str))
+        .or_else(|| value.get("id").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+}
+
+fn hash_body(body: &[u8]) -> String {
+    let digest = Sha256::digest(body);
+    let mut out = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        use std::fmt::Write;
+        let _ = write!(&mut out, "{byte:02x}");
+    }
+    out
+}
 
 /// Owns live execution and the shared alert schedule.
 #[derive(Clone)]
@@ -34,6 +149,7 @@ impl AutomationEngine {
 
     pub async fn test_draft(
         &self,
+        trigger: AutomationTrigger,
         pattern: String,
         script: String,
         text: String,
@@ -41,22 +157,31 @@ impl AutomationEngine {
         let result = tokio::task::spawn_blocking(move || {
             let definition = AutomationDefinition {
                 name: "Test".into(),
+                trigger,
                 pattern,
                 script,
                 enabled: false,
                 consume: false,
             };
-            let message = IncomingChatMessage {
-                source: crate::chat::Source::Twitch,
-                external_id: "test-message".into(),
-                author: "test_viewer".into(),
-                user_id: Some("test-viewer".into()),
-                text,
-                parts: vec![],
-                avatar_url: None,
-                sent_at: None,
-            };
-            runtime::test_message(&definition, &message)
+            match trigger {
+                AutomationTrigger::Chat => {
+                    let message = IncomingChatMessage {
+                        source: crate::chat::Source::Twitch,
+                        external_id: "test-message".into(),
+                        author: "test_viewer".into(),
+                        user_id: Some("test-viewer".into()),
+                        text,
+                        parts: vec![],
+                        avatar_url: None,
+                        sent_at: None,
+                    };
+                    runtime::test_message(&definition, &message)
+                }
+                AutomationTrigger::Webhook => {
+                    let webhook = IncomingWebhook::from_test_payload(text);
+                    runtime::test_webhook(&definition, &webhook)
+                }
+            }
         })
         .await??;
         let Some(result) = result else {
@@ -95,6 +220,27 @@ impl AutomationEngine {
         }
         Ok(Some(outcome))
     }
+
+    pub async fn process_webhook(
+        &self,
+        webhook: &IncomingWebhook,
+    ) -> Result<Option<ProcessOutcome>> {
+        if was_webhook_processed(&self.db, webhook).await? {
+            return Ok(None);
+        }
+        if self.status.borrow().state != crate::server::preview::StreamState::Live {
+            return Ok(Some(ProcessOutcome::empty()));
+        }
+        let mut outcome = process_webhook(&self.db, webhook).await?;
+        if let Err(error) = self
+            .queue
+            .enqueue(std::mem::take(&mut outcome.alerts))
+            .await
+        {
+            tracing::warn!("Could not queue committed automation alerts: {error:#}");
+        }
+        Ok(Some(outcome))
+    }
 }
 
 pub struct DraftResult {
@@ -105,6 +251,8 @@ pub struct DraftResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AutomationDefinition {
     pub name: String,
+    #[serde(default)]
+    pub trigger: AutomationTrigger,
     pub pattern: String,
     pub script: String,
     pub enabled: bool,
@@ -118,6 +266,7 @@ struct StoredAutomation {
     #[auto]
     id: u64,
     name: String,
+    trigger: String,
     pattern: String,
     script: String,
     enabled: bool,
@@ -170,6 +319,7 @@ impl From<StoredAutomation> for Automation {
             id: row.id,
             definition: AutomationDefinition {
                 name: row.name,
+                trigger: AutomationTrigger::parse(&row.trigger).unwrap_or_default(),
                 pattern: row.pattern,
                 script: row.script,
                 enabled: row.enabled,
@@ -230,9 +380,13 @@ pub async fn save(
     mut definition: AutomationDefinition,
 ) -> Result<()> {
     definition.name = definition.name.trim().to_string();
+    if definition.trigger == AutomationTrigger::Webhook {
+        definition.consume = false;
+    }
     // Validate on the blocking pool as scripts and regular expressions are compiled here.
     let validated = definition.clone();
     tokio::task::spawn_blocking(move || runtime::validate(&validated)).await??;
+    let trigger = definition.trigger.as_str().to_owned();
     let mut db = db.clone();
     if let Some(id) = id {
         let mut row = StoredAutomation::filter(StoredAutomation::fields().id().eq(id))
@@ -242,6 +396,7 @@ pub async fn save(
             .context("Automation no longer exists")?;
         row.update()
             .name(definition.name)
+            .trigger(trigger)
             .pattern(definition.pattern)
             .script(definition.script)
             .enabled(definition.enabled)
@@ -255,6 +410,7 @@ pub async fn save(
         );
         toasty::create!(StoredAutomation {
             name: definition.name,
+            trigger,
             pattern: definition.pattern,
             script: definition.script,
             enabled: definition.enabled,
@@ -360,6 +516,24 @@ pub async fn was_processed(db: &toasty::Db, message: &IncomingChatMessage) -> Re
     .is_some())
 }
 
+pub async fn was_webhook_processed(db: &toasty::Db, webhook: &IncomingWebhook) -> Result<bool> {
+    let source = webhook_run_source(&webhook.platform);
+    Ok(StoredRun::filter(
+        StoredRun::fields()
+            .source()
+            .eq(source)
+            .and(StoredRun::fields().external_id().eq(&webhook.external_id)),
+    )
+    .first()
+    .exec(&mut db.clone())
+    .await?
+    .is_some())
+}
+
+fn webhook_run_source(platform: &str) -> String {
+    format!("webhook:{platform}")
+}
+
 pub struct ProcessOutcome {
     pub executed: bool,
     pub succeeded: u64,
@@ -398,6 +572,9 @@ pub async fn process(db: &toasty::Db, message: &IncomingChatMessage) -> Result<P
         .exec(&mut tx)
         .await?;
     for rule in rules {
+        if AutomationTrigger::parse(&rule.trigger).unwrap_or_default() != AutomationTrigger::Chat {
+            continue;
+        }
         let regex = regex::Regex::new(&rule.pattern)?;
         let Some(captures) = regex.captures(&message.text) else {
             continue;
@@ -454,6 +631,79 @@ pub async fn process(db: &toasty::Db, message: &IncomingChatMessage) -> Result<P
             source: message.source.to_string(),
             external_id: message.external_id.clone(),
             author: message.author.clone(),
+            output,
+            error,
+            received_at_unix_ms: now,
+        })
+        .exec(&mut tx)
+        .await?;
+        outcome.executed = true;
+    }
+    tx.commit().await?;
+    Ok(outcome)
+}
+
+/// Runs all matching enabled webhook automations in ID order.
+/// Successful state changes and all execution records commit together.
+pub async fn process_webhook(db: &toasty::Db, webhook: &IncomingWebhook) -> Result<ProcessOutcome> {
+    let media_db = db.clone();
+    let mut db = db.clone();
+    let mut tx = db.transaction().await?;
+    let mut outcome = ProcessOutcome::empty();
+    let rules = StoredAutomation::filter(StoredAutomation::fields().enabled().eq(true))
+        .order_by(StoredAutomation::fields().id().asc())
+        .exec(&mut tx)
+        .await?;
+    let run_source = webhook_run_source(&webhook.platform);
+    let run_author = if webhook.event_type.is_empty() {
+        "webhook".to_owned()
+    } else {
+        webhook.event_type.clone()
+    };
+    for rule in rules {
+        if AutomationTrigger::parse(&rule.trigger).unwrap_or_default() != AutomationTrigger::Webhook
+        {
+            continue;
+        }
+        let Some(matched) = runtime::match_webhook(&rule.pattern, webhook)? else {
+            continue;
+        };
+        let state = load_data(&mut tx, rule.id, "global").await?;
+        let script = rule.script.clone();
+        let incoming = webhook.clone();
+        let now = now_unix_ms();
+        let result = tokio::task::spawn_blocking(move || {
+            runtime::evaluate_webhook(&script, &incoming, matched, state, now)
+        })
+        .await?;
+        let result = match result {
+            Ok(result) => alerts::validate_media(&media_db, &result.alerts)
+                .await
+                .map(|()| result),
+            Err(error) => Err(error),
+        };
+        let (output, error) = match result {
+            Ok(result) => {
+                save_data(&mut tx, rule.id, "global", result.state).await?;
+                outcome.alerts.extend(result.alerts);
+                (result.output, String::new())
+            }
+            Err(error) => (
+                String::new(),
+                error.to_string().chars().take(4096).collect(),
+            ),
+        };
+        if error.is_empty() {
+            outcome.succeeded += 1;
+        } else {
+            outcome.failed += 1;
+        }
+        toasty::create!(StoredRun {
+            automation_id: rule.id,
+            automation_name: rule.name,
+            source: run_source.clone(),
+            external_id: webhook.external_id.clone(),
+            author: run_author.clone(),
             output,
             error,
             received_at_unix_ms: now,

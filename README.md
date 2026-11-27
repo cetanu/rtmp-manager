@@ -29,15 +29,15 @@ Keep track of stream quality and throughput.
 
 ![Stream metrics](./screenshots/metrics.png)
 
-### Chat
+### Comms
 
-See chats from every platform in one place.
+See chats from every platform, manage automations, and inspect incoming webhooks in one place.
 
 Supports Twitch, YouTube natively, and X and Kick via webhooks.
 
 Provides an OBS overlay so your viewers can see chats from all sources.
 
-![Chat](./screenshots/chat.png)
+![Comms](./screenshots/chat.png)
 
 ### Pomodoro timer
 

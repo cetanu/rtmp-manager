@@ -12,7 +12,7 @@ const INACTIVE_LINK: &str = "rounded-[3px] px-2.5 py-1.5 font-mono text-[11px] f
 const NAV_ITEMS: &[(&str, &str, &(dyn HrefTarget + Sync))] = &[
     ("Preview", "preview", &crate::web::preview_page),
     ("Metrics", "metrics", &crate::web::metrics_page_route),
-    ("Chat", "chat", &crate::web::chat_page),
+    ("Comms", "comms", &crate::web::comms_page),
     ("Media", "media", &crate::web::media_page),
     ("Logs", "logs", &crate::web::logs_page),
     ("Settings", "settings", &crate::web::settings_page),

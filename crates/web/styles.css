@@ -98,14 +98,14 @@
     background-size: 22px 22px;
   }
 
-  /* The message panel fills the chat viewport; source controls follow below. */
-  body[data-page="chat"] {
+  /* The message panel fills the comms viewport; automations and webhook audit follow below. */
+  body[data-page="comms"] {
     height: 100dvh;
     display: flex;
     flex-direction: column;
   }
 
-  body[data-page="chat"] > main {
+  body[data-page="comms"] > main {
     flex: 1;
     min-height: 0;
     overflow-y: auto;

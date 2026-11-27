@@ -41,6 +41,7 @@ fn message(id: &str) -> IncomingChatMessage {
 fn definition() -> AutomationDefinition {
     AutomationDefinition {
         name: "Points".into(),
+        trigger: AutomationTrigger::Chat,
         pattern: "(?i)^!point$".into(),
         script: runtime::POINTS_SCRIPT.into(),
         enabled: true,
@@ -185,7 +186,7 @@ async fn generic_data_is_isolated_per_automation_and_platform_account_and_surviv
 #[tokio::test]
 async fn captures_and_shared_state_work_without_giveaway_specific_code() {
     let (db, _) = database().await;
-    let rule = AutomationDefinition { name: "Counter".into(), pattern: r"^!add (\d+)$".into(),
+    let rule = AutomationDefinition { name: "Counter".into(), trigger: AutomationTrigger::Chat, pattern: r"^!add (\d+)$".into(),
         script: "state.total = if state.contains(\"total\") { state.total } else { 0 }; state.total += parse_int(captures[1]); state.total.to_string()".into(),
         enabled: true, consume: false };
     save(&db, None, rule).await.unwrap();
@@ -454,8 +455,14 @@ async fn test_alerts_can_be_previewed_offline_and_missing_media_is_rejected() {
     });
     let handle = handle(&db, rx).await;
     let mut receiver = handle.subscribe_alerts();
-    let test =
-        |script: &str| handle.test_automation("^hello$".into(), script.into(), "hello".into());
+    let test = |script: &str| {
+        handle.test_automation(
+            AutomationTrigger::Chat,
+            "^hello$".into(),
+            script.into(),
+            "hello".into(),
+        )
+    };
     let draft =
         test(r#"viewer.count = 1; overlay.show(#{text: "Preview", duration_ms: 1000}); "done""#)
             .await
@@ -473,14 +480,24 @@ async fn test_alerts_can_be_previewed_offline_and_missing_media_is_rejected() {
     assert!(receiver.try_recv().is_err());
     assert!(
         handle
-            .test_automation("^other$".into(), "1".into(), "hello".into())
+            .test_automation(
+                AutomationTrigger::Chat,
+                "^other$".into(),
+                "1".into(),
+                "hello".into()
+            )
             .await
             .unwrap()
             .is_none()
     );
     assert!(
         handle
-            .test_automation("[".into(), "1".into(), "hello".into())
+            .test_automation(
+                AutomationTrigger::Chat,
+                "[".into(),
+                "1".into(),
+                "hello".into()
+            )
             .await
             .is_err()
     );
@@ -601,4 +618,130 @@ async fn media_library_preserves_bytes_and_checks_references() {
         .unwrap();
     video_alert.image = video_alert.video.clone();
     assert!(alerts::validate_media(&db, &[video_alert]).await.is_err());
+}
+
+#[tokio::test]
+async fn webhook_automations_match_payload_and_event_type_and_gate_on_live_state() {
+    let (db, _) = database().await;
+    let (status, rx) = watch::channel(StreamStatus {
+        state: StreamState::Offline,
+    });
+    let handle = handle(&db, rx).await;
+
+    // A chat rule must not fire on webhooks, and a webhook rule must not fire on chat.
+    handle.save_automation(None, definition()).await.unwrap();
+    handle
+        .save_automation(
+            None,
+            AutomationDefinition {
+                name: "Kick Follow".into(),
+                trigger: AutomationTrigger::Webhook,
+                pattern: "platform == 'kick' && event_type == 'channel.followed' && payload.follower.username".into(),
+                script: r#"
+                    let count = if state.contains("follows") { state.follows } else { 0 };
+                    state.follows = count + 1;
+                    let follower = matched;
+                    overlay.show(#{text: follower + " followed!", duration_ms: 3000});
+                    follower + " (#" + state.follows.to_string() + ")"
+                "#
+                .into(),
+                enabled: true,
+                consume: true, // ignored for webhook rules
+            },
+        )
+        .await
+        .unwrap();
+
+    let saved = handle.automations().await.unwrap().automations;
+    assert_eq!(saved[1].definition.trigger, AutomationTrigger::Webhook);
+    assert!(!saved[1].definition.consume);
+
+    let mut headers = std::collections::HashMap::new();
+    headers.insert("kick-event-type".into(), "channel.followed".into());
+    headers.insert("kick-event-message-id".into(), "evt-1".into());
+    headers.insert("content-type".into(), "application/json".into());
+    let event = crate::chat::util::WebhookEvent {
+        headers: headers.clone(),
+        body: br#"{"follower":{"username":"Alice"}}"#.to_vec(),
+    };
+    let incoming = IncomingWebhook::from_event("kick", &event);
+    assert_eq!(incoming.event_type, "channel.followed");
+    assert_eq!(incoming.external_id, "evt-1");
+
+    // Offline: does not execute.
+    assert!(handle.process_webhook(incoming.clone()).await.unwrap());
+    assert!(handle.automations().await.unwrap().recent.is_empty());
+
+    // Live: executes, persists state, emits alert, and deduplicates repeat delivery.
+    status.send_replace(StreamStatus {
+        state: StreamState::Live,
+    });
+    let mut alerts = handle.subscribe_alerts();
+    assert!(handle.process_webhook(incoming.clone()).await.unwrap());
+    assert_eq!(alerts.try_recv().unwrap().text, "Alice followed!");
+    let recent = handle.automations().await.unwrap().recent;
+    assert_eq!(recent.len(), 1);
+    assert_eq!(recent[0].automation_name, "Kick Follow");
+    assert_eq!(recent[0].source, "webhook:kick");
+    assert_eq!(recent[0].author, "channel.followed");
+    assert_eq!(recent[0].output, "Alice (#1)");
+    assert_eq!(data(&db, saved[1].id, "global").await["follows"], 1);
+
+    // Duplicate delivery is skipped.
+    assert!(!handle.process_webhook(incoming).await.unwrap());
+    assert!(alerts.try_recv().is_err());
+    assert_eq!(handle.automations().await.unwrap().recent.len(), 1);
+
+    // Chat message containing "channel.followed" must not trigger webhook rule.
+    let mut chat_msg = message("chat-follow");
+    chat_msg.text = "channel.followed".into();
+    handle.enqueue(chat_msg).await.unwrap();
+    assert_eq!(handle.automations().await.unwrap().recent.len(), 1);
+}
+
+#[tokio::test]
+async fn webhook_draft_test_works_offline_with_example_script() {
+    let (db, _) = database().await;
+    let (_status, rx) = watch::channel(StreamStatus {
+        state: StreamState::Offline,
+    });
+    let handle = handle(&db, rx).await;
+    let draft = handle
+        .test_automation(
+            AutomationTrigger::Webhook,
+            "event_type == 'channel.followed'".into(),
+            runtime::EXAMPLE_WEBHOOK_SCRIPT.into(),
+            r#"{"event_type":"channel.followed","follower":{"username":"Bob"}}"#.into(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(draft.result.output, "Webhook channel.followed (#1)");
+    assert_eq!(draft.result.state["total"], 1);
+    assert_eq!(draft.result.alerts.len(), 1);
+
+    // Non-matching JMESPath returns None, and invalid JMESPath returns Err.
+    assert!(
+        handle
+            .test_automation(
+                AutomationTrigger::Webhook,
+                "event_type == 'other'".into(),
+                runtime::EXAMPLE_WEBHOOK_SCRIPT.into(),
+                r#"{"event_type":"channel.followed"}"#.into(),
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        handle
+            .test_automation(
+                AutomationTrigger::Webhook,
+                "event_type ==".into(),
+                runtime::EXAMPLE_WEBHOOK_SCRIPT.into(),
+                r#"{"event_type":"channel.followed"}"#.into(),
+            )
+            .await
+            .is_err()
+    );
 }
